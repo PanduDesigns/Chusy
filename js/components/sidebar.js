@@ -3,10 +3,10 @@
 // ============================================================================
 import { initials, colorFromString, escapeHtml } from "../utils.js";
 import { openContextMenu } from "./context-menu.js";
-import { updateProject, deleteProjectWithTasks } from "../data/projects.js";
+import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/projects.js";
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, myTasksCount, userProfile, onSelectProject, onSelectMyTasks, onSelectTimeline, onCreateProject, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onLogout }) {
   const items = projects.map((p) => `
     <button class="sidebar__item${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}">
       <span class="sidebar__item-dot" style="background:${p.color || "#FCD000"}"></span>
@@ -16,12 +16,13 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
 
   container.innerHTML = `
     <div class="sidebar__brand">
-      <img src="assets/martech-badge.png" alt="Martech Corporation" class="sidebar__brand-logo">
+      <img src="assets/chusy-badge.png" alt="Chusy" class="sidebar__brand-logo">
     </div>
-    <div class="sidebar__brand-product">
-      <span class="sidebar__brand-dot"></span>
-      <span class="sidebar__brand-name">ASANO</span>
-    </div>
+
+    <button class="sidebar__search" id="btn-search">
+      <span>🔍</span> Buscar…
+      <span class="sidebar__search-kbd">⌘K</span>
+    </button>
 
     <button class="sidebar__item sidebar__item--pinned${isMyTasksActive ? " is-active" : ""}" id="btn-my-tasks">
       <span class="sidebar__item-icon">🗂️</span>
@@ -31,6 +32,10 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     <button class="sidebar__item sidebar__item--pinned${isTimelineActive ? " is-active" : ""}" id="btn-timeline">
       <span class="sidebar__item-icon">📅</span>
       <span class="sidebar__item-name">Línea de tiempo</span>
+    </button>
+    <button class="sidebar__item sidebar__item--pinned${isArchiveActive ? " is-active" : ""}" id="btn-archive">
+      <span class="sidebar__item-icon">🗄️</span>
+      <span class="sidebar__item-name">Archivo</span>
     </button>
 
     <span class="sidebar__section-label">Proyectos</span>
@@ -47,6 +52,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       </div>
       <button class="sidebar__logout" title="Cerrar sesión" id="btn-logout">⏻</button>
     </div>
+    <p class="sidebar__credit">Martech Corporation</p>
   `;
 
   container.querySelectorAll(".sidebar__item[data-project-id]").forEach((btn) => {
@@ -63,6 +69,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
             if (name && name.trim()) updateProject(project.id, { name: name.trim() });
           } },
           { label: "Campos personalizados", icon: "☰", onClick: () => openCustomFieldsModal({ project }) },
+          { label: "Archivar proyecto", icon: "🗄️", onClick: () => archiveProject(project.id, true) },
           { divider: true },
           { label: "Eliminar proyecto", icon: "🗑", danger: true, onClick: async () => {
             if (confirm(`¿Eliminar "${project.name}" y TODAS sus tareas? No se puede deshacer.`)) {
@@ -73,8 +80,10 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       });
     });
   });
+  container.querySelector("#btn-search").addEventListener("click", onOpenSearch);
   container.querySelector("#btn-my-tasks").addEventListener("click", onSelectMyTasks);
   container.querySelector("#btn-timeline").addEventListener("click", onSelectTimeline);
+  container.querySelector("#btn-archive").addEventListener("click", onSelectArchive);
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
 }

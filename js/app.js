@@ -3,7 +3,7 @@
 // proyecto/vista, y conecta los componentes con los datos de Firestore.
 // ============================================================================
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
-import { createProject, subscribeToAllProjects, subscribeToProject, subscribeToAllUsers } from "./data/projects.js";
+import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject } from "./data/projects.js";
 import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { renderSidebar } from "./components/sidebar.js";
@@ -13,10 +13,12 @@ import { renderBoardView } from "./views/board-view.js";
 import { renderCalendarView } from "./views/calendar-view.js";
 import { renderTimelineView } from "./views/timeline-view.js";
 import { renderMyTasksView } from "./views/my-tasks-view.js";
+import { renderArchiveView } from "./views/archive-view.js";
 import { openProjectModal } from "./components/project-modal.js";
 import { openTaskModal } from "./components/task-modal.js";
 import { renderFilterBar } from "./components/filter-bar.js";
-import { applyTaskFilters, buildFilterDefs } from "./task-filters.js";
+import { applyTaskFilters, buildFilterDefs, sortTasks } from "./task-filters.js";
+import { openSearchModal } from "./components/search-modal.js";
 import { showToast } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
@@ -30,6 +32,7 @@ const mainContentEl = document.getElementById("main-content");
 // ---- estado en memoria ----
 let currentUser = null;
 let projects = [];
+let archivedProjects = [];
 let teamMembers = [];
 let myTasks = [];
 let tagsRegistry = [];
@@ -37,14 +40,17 @@ let currentProjectId = null;
 let currentProject = null;
 let currentTasks = [];
 let currentView = "list";
-let mode = "project"; // 'project' | 'mytasks' | 'timeline'
+let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive'
 let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
+let timelineShowHolidays = false;
 let activeFilters = {}; // { [filterKey]: Set(valores) }
-let globalTasksByProject = {}; // { [projectId]: tasks[] } — para la línea de tiempo global
+let sortState = { column: null, direction: "asc" };
+let globalTasksByProject = {}; // { [projectId]: tasks[] } — línea de tiempo global y buscador
 let unsubGlobalTasks = {}; // { [projectId]: unsubscribeFn }
 
 let unsubProjects = null;
+let unsubArchivedProjects = null;
 let unsubUsers = null;
 let unsubMyTasks = null;
 let unsubTags = null;
@@ -66,13 +72,13 @@ onAuthChange((profile) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks].forEach((fn) => fn && fn());
   Object.values(unsubGlobalTasks).forEach((fn) => fn && fn());
-  unsubProjects = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = null;
+  unsubProjects = unsubArchivedProjects = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = null;
   unsubGlobalTasks = {}; globalTasksByProject = {};
-  projects = []; teamMembers = []; myTasks = []; tagsRegistry = [];
+  projects = []; archivedProjects = []; teamMembers = []; myTasks = []; tagsRegistry = [];
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
-  activeFilters = {};
+  activeFilters = {}; sortState = { column: null, direction: "asc" };
 }
 
 function bootstrap() {
@@ -84,6 +90,9 @@ function bootstrap() {
 
   if (unsubMyTasks) unsubMyTasks();
   unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; renderShell(); });
+
+  if (unsubArchivedProjects) unsubArchivedProjects();
+  unsubArchivedProjects = subscribeToArchivedProjects((list) => { archivedProjects = list; if (mode === "archive") renderShell(); });
 
   if (unsubProjects) unsubProjects();
   unsubProjects = subscribeToAllProjects((allProjects) => {
@@ -103,13 +112,13 @@ function bootstrap() {
 }
 
 /**
- * La línea de tiempo global necesita las tareas de TODOS los proyectos a
- * la vez. En vez de una consulta sin filtro (que las reglas de seguridad
- * rechazarían, porque no pueden garantizar de antemano que todo lo que
- * devuelva sea legible), mantenemos un listener por proyecto — a la
- * escala de un departamento no supone ningún problema, y así reutilizamos
- * exactamente las mismas reglas que ya funcionan para la vista de un solo
- * proyecto.
+ * La línea de tiempo global y el buscador necesitan las tareas de TODOS
+ * los proyectos a la vez. En vez de una consulta sin filtro (que las
+ * reglas de seguridad rechazarían, porque no pueden garantizar de
+ * antemano que todo lo que devuelva sea legible), mantenemos un listener
+ * por proyecto — a la escala de un departamento no supone ningún
+ * problema, y así reutilizamos exactamente las mismas reglas que ya
+ * funcionan para la vista de un solo proyecto.
  */
 function syncGlobalTimelineSubscriptions() {
   const currentIds = new Set(projects.map((p) => p.id));
@@ -135,6 +144,7 @@ function selectProject(projectId) {
   if (projectId === currentProjectId) { renderShell(); return; }
   currentProjectId = projectId;
   activeFilters = {};
+  sortState = { column: null, direction: "asc" };
   if (unsubCurrentProject) unsubCurrentProject();
   if (unsubCurrentTasks) unsubCurrentTasks();
 
@@ -146,6 +156,7 @@ function selectProject(projectId) {
 function selectMyTasks() {
   mode = "mytasks";
   activeFilters = {};
+  sortState = { column: null, direction: "asc" };
   renderShell();
 }
 
@@ -155,14 +166,33 @@ function selectTimeline() {
   renderShell();
 }
 
+function selectArchive() {
+  mode = "archive";
+  renderShell();
+}
+
 function setTimelineZoom(zoom) {
   timelineZoom = zoom;
   if (mode === "timeline") renderShell();
   else renderMain();
 }
 
+function toggleTimelineHolidays() {
+  timelineShowHolidays = !timelineShowHolidays;
+  if (mode === "timeline") renderShell();
+  else renderMain();
+}
+
 function handleFilterChange(key, newSet) {
   activeFilters = { ...activeFilters, [key]: newSet };
+  if (mode === "project") renderMain();
+  else renderShell();
+}
+
+function handleSortChange(column) {
+  sortState = column === sortState.column
+    ? { column, direction: sortState.direction === "asc" ? "desc" : "asc" }
+    : { column, direction: "asc" };
   if (mode === "project") renderMain();
   else renderShell();
 }
@@ -175,11 +205,14 @@ function renderShell() {
     currentProjectId: mode === "project" ? currentProjectId : null,
     isMyTasksActive: mode === "mytasks",
     isTimelineActive: mode === "timeline",
+    isArchiveActive: mode === "archive",
     myTasksCount: myTasks.filter((t) => !t.isComplete).length,
     userProfile: currentUser,
     onSelectProject: (id) => { selectProject(id); sidebarEl.classList.remove("is-open"); },
     onSelectMyTasks: () => { selectMyTasks(); sidebarEl.classList.remove("is-open"); },
     onSelectTimeline: () => { selectTimeline(); sidebarEl.classList.remove("is-open"); },
+    onSelectArchive: () => { selectArchive(); sidebarEl.classList.remove("is-open"); },
+    onOpenSearch: () => openSearch(),
     onCreateProject: () =>
       openProjectModal({
         onCreate: async (data) => {
@@ -191,6 +224,17 @@ function renderShell() {
     onLogout: () => logOut(),
   });
 
+  if (mode === "archive") {
+    topbarEl.innerHTML = `<span class="topbar__title">Archivo</span><span class="topbar__count">${archivedProjects.length} ${archivedProjects.length === 1 ? "proyecto" : "proyectos"}</span>`;
+    filterbarEl.innerHTML = "";
+    renderArchiveView(mainContentEl, {
+      archivedProjects,
+      onOpenProject: (id) => selectProject(id),
+      onUnarchive: (id) => archiveProject(id, false).then(() => showToast("Proyecto restaurado.")),
+    });
+    return;
+  }
+
   if (mode === "mytasks") {
     topbarEl.innerHTML = `
       <div>
@@ -200,10 +244,10 @@ function renderShell() {
       <button class="btn btn--primary btn--sm" id="btn-new-personal-task" style="margin-left:auto;">+ Tarea personal</button>`;
     topbarEl.querySelector("#btn-new-personal-task").addEventListener("click", openNewPersonalTask);
 
-    const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry });
+    const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, projects, includeProject: true, tasks: myTasks });
     renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
-    const filteredMyTasks = applyTaskFilters(myTasks, activeFilters);
-    renderMyTasksView(mainContentEl, { tasks: filteredMyTasks, teamMembers, projects, tagsRegistry, onOpenTask: openTask });
+    const filteredMyTasks = sortTasks(applyTaskFilters(myTasks, activeFilters), sortState, { teamMembers, projects });
+    renderMyTasksView(mainContentEl, { tasks: filteredMyTasks, teamMembers, projects, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask });
     return;
   }
 
@@ -221,7 +265,11 @@ function renderShell() {
       color: p.color,
       tasks: applyTaskFilters((globalTasksByProject[p.id] || []).filter((t) => !t.isComplete), activeFilters),
     }));
-    renderTimelineView(mainContentEl, { groups, zoom: timelineZoom, onZoomChange: setTimelineZoom, onOpenTask: openTask });
+    renderTimelineView(mainContentEl, {
+      groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
+      showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
+      onOpenTask: openTask,
+    });
     return;
   }
 
@@ -252,7 +300,7 @@ function renderShell() {
 function renderMain() {
   if (mode !== "project" || !currentProject) return;
 
-  const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, project: currentProject });
+  const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, project: currentProject, tasks: currentTasks });
   renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
   const filteredTasks = applyTaskFilters(currentTasks, activeFilters);
 
@@ -274,9 +322,14 @@ function renderMain() {
       color: currentProject.color,
       tasks: filteredTasks.filter((t) => t.sectionId === s.id),
     }));
-    renderTimelineView(mainContentEl, { groups, zoom: timelineZoom, onZoomChange: setTimelineZoom, onOpenTask: openTask });
+    renderTimelineView(mainContentEl, {
+      groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
+      showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
+      onOpenTask: openTask,
+    });
   } else {
-    renderListView(mainContentEl, { project: currentProject, tasks: filteredTasks, teamMembers, tagsRegistry, onOpenTask: openTask, onAddTask: openNewProjectTask });
+    const sortedTasks = sortTasks(filteredTasks, sortState, { teamMembers, projects });
+    renderListView(mainContentEl, { project: currentProject, tasks: sortedTasks, teamMembers, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, onAddTask: openNewProjectTask });
   }
 }
 
@@ -311,18 +364,18 @@ function openNewPersonalTask() {
 }
 
 function openTask(taskId) {
-  // La tarea puede venir de "Mis tareas" o de la línea de tiempo global
-  // (de un proyecto distinto al seleccionado, o ser un recordatorio
-  // personal sin proyecto), así que buscamos su contexto real entre lo
-  // que ya tenemos cargado.
-  const pool = mode === "mytasks" ? myTasks : mode === "timeline" ? Object.values(globalTasksByProject).flat() : currentTasks;
-  const task = pool.find((t) => t.id === taskId);
+  // La tarea puede venir de "Mis tareas", de la línea de tiempo global o
+  // del buscador (de un proyecto distinto al seleccionado, o ser un
+  // recordatorio personal sin proyecto), así que buscamos su contexto
+  // real entre lo que ya tenemos cargado.
+  const everything = [...Object.values(globalTasksByProject).flat(), ...myTasks, ...currentTasks];
+  const task = everything.find((t) => t.id === taskId);
   const isPersonal = task ? !task.projectId : false;
   const taskProject = !isPersonal
     ? (task && projects.find((p) => p.id === task.projectId)) || currentProject
     : null;
   const relatedTasks = taskProject
-    ? (mode === "timeline" ? (globalTasksByProject[taskProject.id] || []) : pool.filter((t) => t.projectId === taskProject.id))
+    ? (globalTasksByProject[taskProject.id] || (taskProject.id === currentProjectId ? currentTasks : []))
     : [];
 
   openTaskModal({
@@ -337,6 +390,35 @@ function openTask(taskId) {
     onClosed: () => {},
   });
 }
+
+function goToPersonFilter(uid) {
+  selectTimeline();
+  activeFilters = { assignee: new Set([uid]) };
+  renderShell();
+}
+
+function openSearch() {
+  const everyTask = [
+    ...Object.values(globalTasksByProject).flat(),
+    ...myTasks.filter((t) => !t.projectId),
+  ];
+  openSearchModal({
+    tasks: everyTask,
+    projects,
+    teamMembers,
+    currentUser,
+    onOpenTask: openTask,
+    onOpenProject: (id) => selectProject(id),
+    onFilterByPerson: goToPersonFilter,
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    if (currentUser) openSearch();
+  }
+});
 
 // ============================================================================
 // Pantalla de autenticación

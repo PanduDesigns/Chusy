@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // ============================================================================
-// Reglas de seguridad de Firestore para Asano.
+// Reglas de seguridad de Firestore para Chusy.
 //
 // Modelo: equipo pequeño y de confianza (6-15 personas) donde TODO el
 // departamento debe ver todos los proyectos y tareas — no hay privacidad

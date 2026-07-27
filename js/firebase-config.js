@@ -1,7 +1,7 @@
 // ============================================================================
 // CONFIGURACIÓN DE FIREBASE
 // ----------------------------------------------------------------------------
-// Configuración real del proyecto de Firebase de Asano (proyecto:
+// Configuración real del proyecto de Firebase de Chusy (proyecto:
 // asano-martech). No es información sensible: está pensada para ir en
 // código público. La seguridad real la dan las reglas de Firestore/Storage
 // (firestore.rules y storage.rules), no el hecho de ocultar esta config.

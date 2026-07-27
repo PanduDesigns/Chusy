@@ -191,10 +191,14 @@ export function openTaskModal({
           ${!isPersonal && (project?.customFieldDefs || []).length ? (project.customFieldDefs.map((f) => `
           <label class="field">
             <span class="field__label">${escapeHtml(f.name)}</span>
-            <select class="field__select" data-custom-field="${f.id}">
-              <option value="">— Sin definir —</option>
-              ${f.options.map((opt) => `<option value="${escapeHtml(opt)}" ${draft.customFields[f.id] === opt ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("")}
-            </select>
+            ${f.type === "numero"
+              ? `<input class="field__input" type="number" data-custom-field="${f.id}" value="${draft.customFields[f.id] ?? ""}" placeholder="0">`
+              : f.type === "texto"
+              ? `<input class="field__input" type="text" data-custom-field="${f.id}" value="${escapeHtml(draft.customFields[f.id] ?? "")}" placeholder="Escribe…">`
+              : `<select class="field__select" data-custom-field="${f.id}">
+                  <option value="">— Sin definir —</option>
+                  ${f.options.map((opt) => `<option value="${escapeHtml(opt)}" ${draft.customFields[f.id] === opt ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("")}
+                </select>`}
           </label>`).join("")) : ""}
 
           <label class="field">

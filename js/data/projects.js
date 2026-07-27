@@ -105,6 +105,17 @@ export function subscribeToAllProjects(callback) {
   }, (err) => console.error("subscribeToAllProjects:", err));
 }
 
+/** Proyectos archivados (el "Archivo") — se guardan, no se ven en la lista principal. */
+export function subscribeToArchivedProjects(callback) {
+  const q = query(collection(db, "projects"), where("archived", "==", true));
+  return onSnapshot(q, (snap) => {
+    const projects = [];
+    snap.forEach((d) => projects.push({ id: d.id, ...d.data() }));
+    projects.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    callback(projects);
+  }, (err) => console.error("subscribeToArchivedProjects:", err));
+}
+
 export function subscribeToProject(projectId, callback) {
   return onSnapshot(doc(db, "projects", projectId), (snap) => {
     callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);

@@ -31,7 +31,19 @@ const ZOOM_CONFIG = {
   month: { width: 96, label: "Meses" },
 };
 
-export function renderTimelineView(container, { groups, zoom, onZoomChange, onOpenTask }) {
+/** Agosto completo, o del 22 de diciembre al 6 de enero (cierre de Navidad). */
+function isHolidayColumn(col) {
+  for (let d = new Date(col.start); d <= col.end; d = addDays(d, 1)) {
+    const m = d.getMonth();
+    const day = d.getDate();
+    if (m === 7) return true; // agosto
+    if (m === 11 && day >= 22) return true; // 22-31 dic
+    if (m === 0 && day <= 6) return true; // 1-6 ene
+  }
+  return false;
+}
+
+export function renderTimelineView(container, { groups, zoom, onZoomChange, showHolidays, onToggleHolidays, onOpenTask }) {
   const unit = zoom || "day";
   const allTasks = groups.flatMap((g) => g.tasks);
   const withDates = allTasks.filter((t) => t.startDate || t.dueDate);
@@ -57,12 +69,14 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, onOp
   const zoomButtons = Object.keys(ZOOM_CONFIG)
     .map((key) => `<button type="button" class="topbar__view-btn${key === unit ? " is-active" : ""}" data-zoom="${key}">${ZOOM_CONFIG[key].label}</button>`)
     .join("");
+  const holidayBtnHtml = `<button type="button" class="btn btn--ghost btn--sm${showHolidays ? " is-toggled" : ""}" id="tl-holidays-btn">🏖️ Vacaciones inhábiles</button>`;
 
   if (!rows.length) {
     container.innerHTML = `
       <div class="timeline">
         <div class="timeline__toolbar">
           <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
+          ${holidayBtnHtml}
         </div>
         <div class="empty-state">
           <span class="empty-state__eyebrow">— LÍNEA DE TIEMPO —</span>
@@ -71,6 +85,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, onOp
         </div>
       </div>`;
     container.querySelectorAll("[data-zoom]").forEach((btn) => btn.addEventListener("click", () => onZoomChange(btn.dataset.zoom)));
+    container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
     return;
   }
 
@@ -109,6 +124,14 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, onOp
     }
   });
 
+  if (showHolidays) {
+    columns.forEach((c, i) => {
+      if (isHolidayColumn(c)) {
+        cells += `<div class="tl-holiday-col" style="grid-column:${i + 2};grid-row:1 / ${totalRows + 1};"></div>`;
+      }
+    });
+  }
+
   if (todayIdx >= 0) {
     cells += `<div class="tl-today-line" style="grid-column:${todayIdx + 2};grid-row:1 / ${totalRows + 1};"></div>`;
   }
@@ -118,6 +141,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, onOp
       <div class="timeline__toolbar">
         <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
         <button class="btn btn--ghost btn--sm" id="tl-today-btn">Hoy</button>
+        ${holidayBtnHtml}
         ${withoutDates > 0 ? `<span class="timeline__hint">${withoutDates} ${withoutDates === 1 ? "tarea sin fecha no se muestra" : "tareas sin fecha no se muestran"} aquí</span>` : ""}
       </div>
       <div class="timeline__scroll" id="tl-scroll">
@@ -136,6 +160,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, onOp
     scrollBox.scrollTo({ left: x, behavior: "smooth" });
   };
   container.querySelector("#tl-today-btn").addEventListener("click", scrollToToday);
+  container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
   if (todayIdx >= 0) requestAnimationFrame(scrollToToday);
 
   container.querySelectorAll("[data-open]").forEach((elx) => {

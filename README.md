@@ -1,4 +1,4 @@
-# Asano — Gestor de tareas del equipo
+# Chusy — Gestor de tareas del equipo
 
 Gestor de tareas multiusuario con Kanban, lista, calendario con hitos,
 vista personal "Mis tareas" (con recordatorios privados), etiquetas de
@@ -6,13 +6,15 @@ color, subtareas, dependencias, comentarios y enlaces adjuntos. Sitio
 100% estático (HTML/CSS/JS, sin paso de compilación) pensado para vivir
 en GitHub Pages, con Firebase como base de datos compartida en tiempo real.
 
-Puedes cambiar el nombre "Asano" por el que prefieras: aparece en
+Puedes cambiar el nombre "Chusy" por el que prefieras: aparece en
 `index.html` (título de la pestaña y pantalla de login) y en
 `js/components/sidebar.js`.
 
-**Identidad visual:** los colores (gris pizarra #78848C, antracita #3C3C3C
-y el dorado #FCD000 como acento) y el logotipo salen directamente de los
-archivos de marca de Martech Corporation, en `assets/`.
+**Identidad visual:** el logotipo principal es el propio de Chusy
+(`assets/chusy-badge.png`), con los colores de Martech Corporation como
+base (gris pizarra #78848C, antracita #3C3C3C, dorado #FCD000 como
+acento) — Martech aparece como crédito discreto en la pantalla de login y
+al pie de la barra lateral, ya que Chusy es la marca del propio gestor.
 
 **Modelo de acceso:** todo el equipo ve todos los proyectos y tareas de
 proyecto — no hay privacidad entre compañeros ahí. La única excepción son
@@ -93,6 +95,24 @@ Barra de filtros encima de Lista/Tablero/Calendario/Línea de tiempo/Mis tareas:
 ### Sin parpadeo al abrir la app con sesión iniciada
 Antes se veía un instante la pantalla de login incluso con la sesión ya iniciada, mientras Firebase comprobaba si había cuenta. Ahora se muestra una pantalla de carga mínima hasta saber con certeza si hay sesión o no, y solo entonces aparece la pantalla que corresponda.
 
+### Columnas ordenables en Lista y Mis tareas
+Nombre, Fecha límite, Responsables, Prioridad y (en Lista, por proyecto) cada campo personalizado se pueden pulsar para ordenar — alfabético, por fecha o por valor — con flecha indicando la dirección; un segundo clic invierte el orden. Las tareas completadas siempre van al final. El botón "+" al final de la cabecera en Lista abre la definición de campos personalizados.
+
+### Tres tipos de campo personalizado
+Lista de opciones (como antes), número y texto libre — se elige al crear el campo (clic derecho sobre un proyecto → "Campos personalizados"). Los tres se pueden usar como columna y como filtro.
+
+### Buscador global (⌘K / Ctrl+K)
+Botón "Buscar…" arriba de la barra lateral, o el atajo de teclado desde cualquier pantalla. Busca en tareas, proyectos y personas (categorías activables/desactivables), y trae unas "búsquedas guardadas" rápidas: tareas que has creado, que has asignado a otros, y completadas recientemente.
+
+### Archivo
+Clic derecho sobre un proyecto → "Archivar proyecto": desaparece de la lista principal pero no se borra. Se consulta desde "Archivo" en la barra lateral, con opción de "Desarchivar" para que vuelva a la lista activa.
+
+### Vacaciones inhábiles en la línea de tiempo
+Botón "🏖️ Vacaciones inhábiles" en la línea de tiempo (por proyecto y global): sombrea en rojo agosto completo y del 22 de diciembre al 6 de enero, en cualquier nivel de zoom. Son fechas por defecto — si el cierre real de la empresa es distinto, dímelo y las ajusto.
+
+### Corrección: las barras ya no tapan el nombre de la tarea
+En la línea de tiempo, la columna de nombres (fija a la izquierda al desplazar) tenía la misma prioridad de apilado que las barras, así que una barra larga podía pintarse encima del texto. Ahora el nombre siempre queda por delante.
+
 ---
 
 ## 4. Estructura del proyecto
@@ -100,32 +120,34 @@ Antes se veía un instante la pantalla de login incluso con la sesión ya inicia
 ```
 index.html                 Pantalla de login/registro + estructura de la app
 css/styles.css              Todo el diseño
-assets/                     Logo e íconos de Martech Corporation
+assets/                     Logo de Chusy (principal) y de Martech Corporation (crédito)
 js/
   firebase-config.js        ← AQUÍ pegas tu configuración de Firebase
   firebase-init.js           Inicializa Firebase (auth, db)
   auth.js                    Registro / inicio de sesión / roles
   utils.js                   Fechas, avatares, contraste de color, helpers
   data/
-    projects.js               CRUD de proyectos (incluye borrado en cascada)
+    projects.js               CRUD de proyectos (incluye borrado en cascada y archivado)
     tasks.js                   CRUD de tareas (proyecto y personales)
     tags.js                     Registro compartido de etiquetas (nombre + color)
     comments.js                  Comentarios de una tarea
   components/
-    sidebar.js                  Proyectos + Mis tareas + usuario (clic derecho)
+    sidebar.js                  Proyectos + Mis tareas + Línea de tiempo + Archivo + buscador
     topbar.js                    Selector de vista + nueva tarea
     project-modal.js             Crear proyecto
-    custom-fields-modal.js        Definir campos personalizados de un proyecto
+    custom-fields-modal.js        Definir campos personalizados (lista/número/texto)
     task-modal.js                  Formulario único de tarea (crear/editar)
     context-menu.js                Menú contextual reutilizable (clic derecho)
     filter-bar.js                   Barra de filtros reutilizable
-  task-filters.js             Lógica de filtrado de tareas (compartida por todas las vistas)
+    search-modal.js                  Buscador global (⌘K / Ctrl+K)
+  task-filters.js             Filtrado y ordenación de tareas (compartido por todas las vistas)
   views/
-    list-view.js                  Vista de Lista (+ menú contextual de tarea)
+    list-view.js                  Vista de Lista: tabla ordenable (+ menú contextual)
     board-view.js                  Vista de Tablero (Kanban con drag & drop)
     calendar-view.js                Vista de Calendario (barras de duración + hitos)
-    timeline-view.js                 Línea de tiempo/Gantt (por proyecto o global, zoom día/semana/mes)
-    my-tasks-view.js                  "Mis tareas" (de proyecto + personales)
+    timeline-view.js                 Línea de tiempo/Gantt (por proyecto o global, zoom, vacaciones)
+    my-tasks-view.js                  "Mis tareas": tabla ordenable (proyecto + personales)
+    archive-view.js                   Proyectos archivados
   app.js                     Conecta todo: sesión, estado, enrutado simple
 firestore.rules             Reglas de seguridad de Firestore
 ```
@@ -133,14 +155,14 @@ firestore.rules             Reglas de seguridad de Firestore
 ## 5. Modelo de datos (Firestore)
 
 - **`users/{uid}`** — `name`, `email`, `role` (`admin` | `miembro`)
-- **`projects/{id}`** — `name`, `description`, `color`, `sections[]`, `memberIds[]` (informativo), `customFieldDefs[]` (`{id,name,options[]}`), `createdBy`
+- **`projects/{id}`** — `name`, `description`, `color`, `sections[]`, `memberIds[]` (informativo), `customFieldDefs[]` (`{id,name,type:'lista'|'numero'|'texto',options[]}`), `archived`, `createdBy`
 - **`tasks/{id}`** — `projectId` (null si es personal), `ownerId` (solo tareas personales), `sectionId`, `title`, `description`, `assigneeIds[]`, `startDate`, `dueDate`, `priority`, `tags[]` (nombres; el color vive en `tags/`), `dependsOn[]`, `subtasks[]`, `attachments[]` (`{id,name,url}`), `customFields` (`{[fieldId]: valor}`), `isComplete`, `isMilestone`, `order`
 - **`tasks/{id}/comments/{id}`** — `authorId`, `authorName`, `text`
 - **`tags/{slug}`** — `name`, `color`
 
 ## 6. Qué falta (próxima iteración)
 
-- Vistas guardadas (guardar una combinación de filtros con un nombre) y búsqueda global de texto
+- Vistas guardadas de verdad (nombrar y guardar una combinación de filtros para reutilizarla — ahora mismo el buscador trae unas cuantas ya hechas, pero no se pueden crear personalizadas)
 - Notificaciones dentro de la app
 - Panel con métricas (completadas, vencidas, carga por persona)
 - Automatizaciones, formularios de solicitud, revisión de archivos, metas/OKRs, integraciones
