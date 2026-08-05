@@ -113,6 +113,12 @@ Botón "🏖️ Vacaciones inhábiles" en la línea de tiempo (por proyecto y gl
 ### Corrección: las barras ya no tapan el nombre de la tarea
 En la línea de tiempo, la columna de nombres (fija a la izquierda al desplazar) tenía la misma prioridad de apilado que las barras, así que una barra larga podía pintarse encima del texto. Ahora el nombre siempre queda por delante.
 
+### Mi cuenta y administración de equipo
+Clic en tu nombre (pie de la barra lateral) abre un menú con **"Mi cuenta"**: ver tu correo, tu rol y desde cuándo eres miembro, cambiar tu nombre visible y cambiar tu contraseña (pide la contraseña actual). Si tu cuenta es admin, ese mismo menú añade **"Administrar equipo"**: lista de todas las cuentas registradas con un desplegable para cambiar el rol de cada una (no te puedes quitar el admin a ti mismo si eres la única persona administradora), y la configuración de qué dominios de correo pueden registrarse — lo que antes solo se podía tocar desde la consola de Firebase.
+
+### He olvidado mi contraseña
+Enlace bajo el campo de contraseña en la pantalla de entrada: pide el correo y envía un enlace de Firebase para elegir una contraseña nueva. Por privacidad, el mensaje de confirmación es el mismo exista o no una cuenta con ese correo.
+
 ---
 
 ## 4. Estructura del proyecto
@@ -131,8 +137,9 @@ js/
     tasks.js                   CRUD de tareas (proyecto y personales)
     tags.js                     Registro compartido de etiquetas (nombre + color)
     comments.js                  Comentarios de una tarea
+    users.js                      Perfil de usuario (Firestore) y configuración del equipo
   components/
-    sidebar.js                  Proyectos + Mis tareas + Línea de tiempo + Archivo + buscador
+    sidebar.js                  Proyectos + Mis tareas + Línea de tiempo + Archivo + buscador + menú de cuenta
     topbar.js                    Selector de vista + nueva tarea
     project-modal.js             Crear proyecto
     custom-fields-modal.js        Definir campos personalizados (lista/número/texto)
@@ -140,6 +147,9 @@ js/
     context-menu.js                Menú contextual reutilizable (clic derecho)
     filter-bar.js                   Barra de filtros reutilizable
     search-modal.js                  Buscador global (⌘K / Ctrl+K)
+    account-modal.js                  "Mi cuenta": nombre, rol y cambio de contraseña
+    team-admin-modal.js                Panel de admin: roles del equipo y dominios permitidos
+    reset-password-modal.js             "He olvidado mi contraseña" (pantalla de login)
   task-filters.js             Filtrado y ordenación de tareas (compartido por todas las vistas)
   views/
     list-view.js                  Vista de Lista: tabla ordenable (+ menú contextual)
@@ -166,8 +176,8 @@ firestore.rules             Reglas de seguridad de Firestore
 - Notificaciones dentro de la app
 - Panel con métricas (completadas, vencidas, carga por persona)
 - Automatizaciones, formularios de solicitud, revisión de archivos, metas/OKRs, integraciones
-- Pantalla de administración de equipo
 - Flechas de dependencia dibujadas en la línea de tiempo (los datos de "bloqueada por" ya existen, falta representarlos visualmente ahí)
+- Eliminar una cuenta por completo: un admin puede quitarle acceso a todo cambiándole el rol, pero borrar de verdad la cuenta de Firebase Authentication de otra persona no se puede hacer desde el navegador (hace falta el SDK de administración de Firebase, con un backend) — de momento no está implementado
 
 ## 7. Limitaciones conocidas
 

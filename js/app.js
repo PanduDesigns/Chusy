@@ -19,6 +19,9 @@ import { openTaskModal } from "./components/task-modal.js";
 import { renderFilterBar } from "./components/filter-bar.js";
 import { applyTaskFilters, buildFilterDefs, sortTasks } from "./task-filters.js";
 import { openSearchModal } from "./components/search-modal.js";
+import { openAccountModal } from "./components/account-modal.js";
+import { openTeamAdminModal } from "./components/team-admin-modal.js";
+import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { showToast } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
@@ -213,6 +216,8 @@ function renderShell() {
     onSelectTimeline: () => { selectTimeline(); sidebarEl.classList.remove("is-open"); },
     onSelectArchive: () => { selectArchive(); sidebarEl.classList.remove("is-open"); },
     onOpenSearch: () => openSearch(),
+    onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
+    onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
     onCreateProject: () =>
       openProjectModal({
         onCreate: async (data) => {
@@ -432,6 +437,11 @@ document.querySelectorAll(".auth-tab").forEach((tab) => {
     loginForm.classList.toggle("hidden", tab.dataset.tab !== "login");
     signupForm.classList.toggle("hidden", tab.dataset.tab !== "signup");
   });
+});
+
+document.getElementById("btn-forgot-password").addEventListener("click", () => {
+  const email = loginForm.querySelector('[name="email"]').value.trim();
+  openResetPasswordModal({ prefillEmail: email });
 });
 
 loginForm.addEventListener("submit", async (e) => {

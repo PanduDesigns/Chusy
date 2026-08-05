@@ -15,6 +15,10 @@ import {
   signOut,
   onAuthStateChanged,
   updateProfile,
+  sendPasswordResetEmail,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updatePassword,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
 import {
   doc,
@@ -92,6 +96,48 @@ export function logOut() {
   return signOut(auth);
 }
 
+/**
+ * Envía un correo con un enlace para elegir una contraseña nueva. Por
+ * seguridad (no revelar qué correos tienen cuenta), si el correo no
+ * corresponde a ninguna cuenta se trata igualmente como un envío
+ * correcto de cara a quien lo pide.
+ */
+export async function sendPasswordReset(email) {
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (e) {
+    if (e && e.code === "auth/user-not-found") return;
+    throw new Error(translateAuthError(e));
+  }
+}
+
+/** Cambia el nombre visible del perfil de Firebase Auth de quien tiene sesión iniciada. */
+export async function updateDisplayName(name) {
+  if (!auth.currentUser) throw new Error("No hay sesión iniciada.");
+  try {
+    await updateProfile(auth.currentUser, { displayName: name });
+  } catch (e) {
+    throw new Error(translateAuthError(e));
+  }
+}
+
+/**
+ * Cambia la contraseña de la cuenta con sesión iniciada. Firebase exige
+ * haber iniciado sesión "recientemente" para esta operación, así que
+ * primero se reautentica con la contraseña actual.
+ */
+export async function changePassword({ currentPassword, newPassword }) {
+  const user = auth.currentUser;
+  if (!user || !user.email) throw new Error("No hay sesión iniciada.");
+  try {
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
+  } catch (e) {
+    throw new Error(translateAuthError(e));
+  }
+}
+
 async function checkAllowedDomain(email) {
   let allowed = [];
   try {
@@ -147,6 +193,7 @@ function translateAuthError(e) {
     "auth/wrong-password": "La contraseña no es correcta.",
     "auth/invalid-credential": "Correo o contraseña incorrectos.",
     "auth/too-many-requests": "Demasiados intentos. Espera un momento y vuelve a intentarlo.",
+    "auth/requires-recent-login": "Por seguridad, cierra sesión y vuelve a entrar antes de cambiar la contraseña.",
     "permission-denied": "La base de datos rechazó la operación por permisos. Comprueba que el contenido de firestore.rules esté publicado en Firebase Console → Firestore Database → Reglas.",
   };
   return map[code] || (e && e.message) || "Ha ocurrido un error inesperado.";

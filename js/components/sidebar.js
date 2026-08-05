@@ -6,7 +6,7 @@ import { openContextMenu } from "./context-menu.js";
 import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/projects.js";
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onLogout }) {
   const items = projects.map((p) => `
     <button class="sidebar__item${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}">
       <span class="sidebar__item-dot" style="background:${p.color || "#FCD000"}"></span>
@@ -45,11 +45,13 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     <button class="sidebar__new-project" id="btn-new-project">+ Nuevo proyecto</button>
 
     <div class="sidebar__footer">
-      <span class="avatar" style="background:${colorFromString(userProfile.uid)}">${initials(userProfile.name)}</span>
-      <div style="min-width:0;">
-        <div class="sidebar__user-name">${escapeHtml(userProfile.name || userProfile.email)}</div>
-        <div class="sidebar__user-role">${userProfile.role === "admin" ? "Admin" : "Miembro"}</div>
-      </div>
+      <button class="sidebar__user" id="btn-user-menu" type="button">
+        <span class="avatar" style="background:${colorFromString(userProfile.uid)}">${initials(userProfile.name)}</span>
+        <div style="min-width:0;">
+          <div class="sidebar__user-name">${escapeHtml(userProfile.name || userProfile.email)}</div>
+          <div class="sidebar__user-role">${userProfile.role === "admin" ? "Admin" : "Miembro"}</div>
+        </div>
+      </button>
       <button class="sidebar__logout" title="Cerrar sesión" id="btn-logout">⏻</button>
     </div>
     <p class="sidebar__credit">Martech Corporation</p>
@@ -86,4 +88,15 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   container.querySelector("#btn-archive").addEventListener("click", onSelectArchive);
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
+
+  container.querySelector("#btn-user-menu").addEventListener("click", (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const items = [{ label: "Mi cuenta", icon: "👤", onClick: onOpenAccount }];
+    if (userProfile.role === "admin") {
+      items.push({ label: "Administrar equipo", icon: "🛠️", onClick: onOpenTeamAdmin });
+    }
+    items.push({ divider: true });
+    items.push({ label: "Cerrar sesión", icon: "⏻", danger: true, onClick: onLogout });
+    openContextMenu({ x: rect.left, y: rect.top, items });
+  });
 }
