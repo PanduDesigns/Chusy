@@ -124,6 +124,9 @@ Clic en tu nombre (pie de la barra lateral) abre un menú con **"Mi cuenta"**: v
 ### He olvidado mi contraseña
 Enlace bajo el campo de contraseña en la pantalla de entrada: pide el correo y envía un enlace de Firebase para elegir una contraseña nueva. Por privacidad, el mensaje de confirmación es el mismo exista o no una cuenta con ese correo.
 
+### Barra lateral minimizable
+Botón redondo en el borde derecho de la barra lateral (junto al logo): la reduce a una franja estrecha con solo el icono, la lista de proyectos como puntos de color y los iconos de Mis tareas / Línea de tiempo / Archivo — pasa el ratón por encima de cualquier icono para ver su nombre. Se anima con una transición suave. Es una preferencia de este navegador (se guarda con `localStorage`, no en tu cuenta), así que no afecta a otras sesiones ni dispositivos. En pantallas de móvil, donde la barra lateral ya se abre y cierra como un panel superpuesto con el botón de menú, este control no aparece — ahí no hace falta.
+
 ---
 
 ## 4. Estructura del proyecto

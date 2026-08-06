@@ -1,60 +1,73 @@
 // ============================================================================
 // Sidebar: lista de proyectos, botón de crear proyecto, pie con el usuario.
+// Se puede minimizar a una barra de iconos con el botón de la esquina
+// (redondo, en el borde derecho) — queda como preferencia de este
+// navegador, no afecta a nadie más ni a otras sesiones.
 // ============================================================================
 import { initials, colorFromString, escapeHtml } from "../utils.js";
 import { openContextMenu } from "./context-menu.js";
 import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/projects.js";
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onLogout }) {
+  container.classList.toggle("is-collapsed", !!isCollapsed);
+
   const items = projects.map((p) => `
-    <button class="sidebar__item${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}">
+    <button class="sidebar__item${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}" title="${escapeHtml(p.name)}">
       <span class="sidebar__item-dot" style="background:${p.color || "#FCD000"}"></span>
-      <span class="sidebar__item-name">${escapeHtml(p.name)}</span>
+      <span class="sidebar__item-name sidebar__label">${escapeHtml(p.name)}</span>
     </button>
   `).join("");
 
   container.innerHTML = `
     <div class="sidebar__brand">
-      <img src="assets/chusy-badge.png" alt="Chusy" class="sidebar__brand-logo">
+      <img src="assets/chusy-badge.png" alt="Chusy" class="sidebar__brand-logo sidebar__brand-logo--full">
+      <img src="assets/favicon-32.png" alt="Chusy" class="sidebar__brand-logo sidebar__brand-logo--icon">
     </div>
 
-    <button class="sidebar__search" id="btn-search">
-      <span>🔍</span> Buscar…
-      <span class="sidebar__search-kbd">⌘K</span>
+    <button class="sidebar__collapse-toggle" id="btn-toggle-collapse" type="button" title="${isCollapsed ? "Expandir barra lateral" : "Minimizar barra lateral"}">
+      <span class="sidebar__collapse-icon">${isCollapsed ? "›" : "‹"}</span>
     </button>
 
-    <button class="sidebar__item sidebar__item--pinned${isMyTasksActive ? " is-active" : ""}" id="btn-my-tasks">
+    <button class="sidebar__search" id="btn-search" title="Buscar (⌘K)">
+      <span>🔍</span>
+      <span class="sidebar__label">Buscar…</span>
+      <span class="sidebar__label sidebar__search-kbd">⌘K</span>
+    </button>
+
+    <button class="sidebar__item sidebar__item--pinned${isMyTasksActive ? " is-active" : ""}" id="btn-my-tasks" title="Mis tareas">
       <span class="sidebar__item-icon">🗂️</span>
-      <span class="sidebar__item-name">Mis tareas</span>
-      ${myTasksCount ? `<span class="sidebar__item-count">${myTasksCount}</span>` : ""}
+      <span class="sidebar__item-name sidebar__label">Mis tareas</span>
+      ${myTasksCount ? `<span class="sidebar__item-count sidebar__label">${myTasksCount}</span>` : ""}
     </button>
-    <button class="sidebar__item sidebar__item--pinned${isTimelineActive ? " is-active" : ""}" id="btn-timeline">
+    <button class="sidebar__item sidebar__item--pinned${isTimelineActive ? " is-active" : ""}" id="btn-timeline" title="Línea de tiempo">
       <span class="sidebar__item-icon">📅</span>
-      <span class="sidebar__item-name">Línea de tiempo</span>
+      <span class="sidebar__item-name sidebar__label">Línea de tiempo</span>
     </button>
-    <button class="sidebar__item sidebar__item--pinned${isArchiveActive ? " is-active" : ""}" id="btn-archive">
+    <button class="sidebar__item sidebar__item--pinned${isArchiveActive ? " is-active" : ""}" id="btn-archive" title="Archivo">
       <span class="sidebar__item-icon">🗄️</span>
-      <span class="sidebar__item-name">Archivo</span>
+      <span class="sidebar__item-name sidebar__label">Archivo</span>
     </button>
 
-    <span class="sidebar__section-label">Proyectos</span>
+    <span class="sidebar__section-label sidebar__label">Proyectos</span>
     <div class="sidebar__list">
-      ${items || `<p style="color:var(--color-text-faint);font-size:12.5px;padding:8px;">Todavía no hay proyectos.</p>`}
+      ${items || `<p class="sidebar__label" style="color:var(--color-text-faint);font-size:12.5px;padding:8px;">Todavía no hay proyectos.</p>`}
     </div>
-    <button class="sidebar__new-project" id="btn-new-project">+ Nuevo proyecto</button>
+    <button class="sidebar__new-project" id="btn-new-project" title="Nuevo proyecto">
+      <span class="sidebar__new-project-icon">+</span><span class="sidebar__label">Nuevo proyecto</span>
+    </button>
 
     <div class="sidebar__footer">
-      <button class="sidebar__user" id="btn-user-menu" type="button">
+      <button class="sidebar__user" id="btn-user-menu" type="button" title="${escapeHtml(userProfile.name || userProfile.email)}">
         <span class="avatar" style="background:${colorFromString(userProfile.uid)}">${initials(userProfile.name)}</span>
-        <div style="min-width:0;">
+        <div class="sidebar__label" style="min-width:0;">
           <div class="sidebar__user-name">${escapeHtml(userProfile.name || userProfile.email)}</div>
           <div class="sidebar__user-role">${userProfile.role === "admin" ? "Admin" : "Miembro"}</div>
         </div>
       </button>
       <button class="sidebar__logout" title="Cerrar sesión" id="btn-logout">⏻</button>
     </div>
-    <p class="sidebar__credit">Martech Corporation</p>
+    <p class="sidebar__credit sidebar__label">Martech Corporation</p>
   `;
 
   container.querySelectorAll(".sidebar__item[data-project-id]").forEach((btn) => {
@@ -98,6 +111,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   container.querySelector("#btn-archive").addEventListener("click", onSelectArchive);
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
+  container.querySelector("#btn-toggle-collapse").addEventListener("click", onToggleCollapse);
 
   container.querySelector("#btn-user-menu").addEventListener("click", (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -107,6 +121,6 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     }
     items.push({ divider: true });
     items.push({ label: "Cerrar sesión", icon: "⏻", danger: true, onClick: onLogout });
-    openContextMenu({ x: rect.left, y: rect.top, items });
+    openContextMenu({ x: rect.right + 6, y: rect.top, items });
   });
 }

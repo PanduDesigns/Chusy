@@ -52,6 +52,16 @@ let sortState = { column: null, direction: "asc" };
 let globalTasksByProject = {}; // { [projectId]: tasks[] } — línea de tiempo global y buscador
 let unsubGlobalTasks = {}; // { [projectId]: unsubscribeFn }
 
+// Minimizar la barra lateral es una preferencia de este navegador (no de la
+// cuenta): cada dispositivo puede tenerla como prefiera.
+let sidebarCollapsed = false;
+try { sidebarCollapsed = localStorage.getItem("chusy:sidebarCollapsed") === "1"; } catch (e) { /* localStorage no disponible */ }
+function toggleSidebarCollapse() {
+  sidebarCollapsed = !sidebarCollapsed;
+  try { localStorage.setItem("chusy:sidebarCollapsed", sidebarCollapsed ? "1" : "0"); } catch (e) { /* localStorage no disponible */ }
+  renderShell();
+}
+
 let unsubProjects = null;
 let unsubArchivedProjects = null;
 let unsubUsers = null;
@@ -211,6 +221,8 @@ function renderShell() {
     isArchiveActive: mode === "archive",
     myTasksCount: myTasks.filter((t) => !t.isComplete).length,
     userProfile: currentUser,
+    isCollapsed: sidebarCollapsed,
+    onToggleCollapse: toggleSidebarCollapse,
     onSelectProject: (id) => { selectProject(id); sidebarEl.classList.remove("is-open"); },
     onSelectMyTasks: () => { selectMyTasks(); sidebarEl.classList.remove("is-open"); },
     onSelectTimeline: () => { selectTimeline(); sidebarEl.classList.remove("is-open"); },
