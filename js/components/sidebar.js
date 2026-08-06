@@ -26,7 +26,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     </div>
 
     <button class="sidebar__collapse-toggle" id="btn-toggle-collapse" type="button" title="${isCollapsed ? "Expandir barra lateral" : "Minimizar barra lateral"}">
-      <span class="sidebar__collapse-icon">‹</span>
+      <span class="sidebar__collapse-icon">${isCollapsed ? "›" : "‹"}</span>
     </button>
 
     <button class="sidebar__search" id="btn-search" title="Buscar (⌘K)">
