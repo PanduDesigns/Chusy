@@ -23,7 +23,7 @@ export function openSearchModal({ tasks, projects, teamMembers, currentUser, onO
         <div class="search-modal__input-row">
           <span class="search-modal__icon">🔍</span>
           <input type="text" id="search-input" placeholder="Buscar tareas, proyectos o personas…" autocomplete="off">
-          <span class="search-modal__kbd">Esc</span>
+          <button type="button" class="modal__close" id="search-close" title="Cerrar">✕</button>
         </div>
         <div class="search-modal__cats" id="search-cats">
           ${CATEGORIES.map((c) => `<button type="button" class="chip is-selected" data-cat="${c.key}">${c.label}</button>`).join("")}
@@ -47,6 +47,7 @@ export function openSearchModal({ tasks, projects, teamMembers, currentUser, onO
   }
   document.addEventListener("keydown", onKeydown);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector("#search-close").addEventListener("click", close);
 
   overlay.querySelectorAll("[data-cat]").forEach((btn) => {
     btn.addEventListener("click", () => {
