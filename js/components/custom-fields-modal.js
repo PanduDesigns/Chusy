@@ -1,17 +1,16 @@
 // ============================================================================
-// Modal: definir los campos personalizados de un proyecto. Tres tipos:
-// lista (opciones predefinidas), número y texto libre. Se editan en
-// cualquier momento desde el menú contextual del proyecto — no hace falta
-// decidirlos al crearlo.
+// Modal: definir campos personalizados (lista, número o texto libre).
+// Reutilizable: sirve tanto para los campos de un proyecto como para los
+// campos personales de "Mis tareas" — quien lo abre decide el título, el
+// texto de ayuda, los campos de partida y cómo se guardan.
 // ============================================================================
 import { el, uid, escapeHtml } from "../utils.js";
-import { updateProject } from "../data/projects.js";
 
 const TYPE_LABELS = { lista: "Lista de opciones", numero: "Número", texto: "Texto libre" };
 
-export function openCustomFieldsModal({ project }) {
+export function openCustomFieldsModal({ title = "Campos personalizados", hint, fields: initialFields, onSave }) {
   const root = document.getElementById("modal-root");
-  let fields = (project.customFieldDefs || []).map((f) => ({
+  let fields = (initialFields || []).map((f) => ({
     ...f,
     type: f.type || "lista",
     optionsText: (f.options || []).join(", "),
@@ -21,11 +20,11 @@ export function openCustomFieldsModal({ project }) {
     <div class="modal-overlay">
       <div class="modal modal--sm">
         <div class="modal__header">
-          <h3 style="font-size:16px;">Campos personalizados</h3>
+          <h3 style="font-size:16px;">${escapeHtml(title)}</h3>
           <button class="modal__close" id="close">✕</button>
         </div>
         <div class="modal__body">
-          <p class="field__hint">Se podrán rellenar en cada tarea de este proyecto y usarse como columna y como filtro.</p>
+          ${hint ? `<p class="field__hint">${escapeHtml(hint)}</p>` : ""}
           <div id="cf-list" style="display:flex;flex-direction:column;gap:14px;"></div>
           <button class="btn btn--ghost btn--sm" id="cf-add" type="button" style="width:fit-content;">+ Añadir campo</button>
         </div>
@@ -125,7 +124,7 @@ export function openCustomFieldsModal({ project }) {
     saveBtn.disabled = true;
     saveBtn.textContent = "Guardando…";
     try {
-      await updateProject(project.id, { customFieldDefs: cleaned });
+      await onSave(cleaned);
       close();
     } catch (e) {
       saveBtn.disabled = false;

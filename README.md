@@ -95,11 +95,16 @@ Barra de filtros encima de Lista/Tablero/Calendario/Línea de tiempo/Mis tareas:
 ### Sin parpadeo al abrir la app con sesión iniciada
 Antes se veía un instante la pantalla de login incluso con la sesión ya iniciada, mientras Firebase comprobaba si había cuenta. Ahora se muestra una pantalla de carga mínima hasta saber con certeza si hay sesión o no, y solo entonces aparece la pantalla que corresponda.
 
-### Columnas ordenables en Lista y Mis tareas
-Nombre, Fecha límite, Responsables, Prioridad y (en Lista, por proyecto) cada campo personalizado se pueden pulsar para ordenar — alfabético, por fecha o por valor — con flecha indicando la dirección; un segundo clic invierte el orden. Las tareas completadas siempre van al final. El botón "+" al final de la cabecera en Lista abre la definición de campos personalizados.
+### Columnas ordenables, redimensionables y ocultables en Lista y Mis tareas
+Nombre, Fecha límite, Responsables, Prioridad y cada campo personalizado se pueden pulsar para ordenar — alfabético, por fecha o por valor — con flecha indicando la dirección; un segundo clic invierte el orden. Las tareas completadas siempre van al final.
+
+Cada columna se puede además **redimensionar** (arrastrando su borde derecho) y **ocultar/mostrar** desde el botón "☰ Columnas" de la barra de herramientas, encima de la tabla — la de Nombre no se puede ocultar. Esto es una preferencia de cada persona: se guarda en tu perfil y no cambia lo que ve nadie más del equipo. Si entre anchos y columnas la tabla no cabe en la pantalla, aparece scroll horizontal en vez de aplastar el contenido.
+
+### Campos personalizados también en Mis tareas
+Además de los de un proyecto (clic derecho sobre el proyecto → "Campos personalizados", o el botón "+ Campo personalizado" en la barra de herramientas de Lista), ahora "Mis tareas" tiene su propio botón "+ Campo personalizado": son campos tuyos, para clasificar como quieras cualquier tarea que veas ahí (sea de un proyecto o un recordatorio personal), sin que le aparezcan a nadie más. Al abrir una tarea que tiene campos personales rellenables, se marcan con "· personal" para distinguirlos de los del proyecto.
 
 ### Tres tipos de campo personalizado
-Lista de opciones (como antes), número y texto libre — se elige al crear el campo (clic derecho sobre un proyecto → "Campos personalizados"). Los tres se pueden usar como columna y como filtro.
+Lista de opciones (como antes), número y texto libre — se elige al crear el campo. Los tres se pueden usar como columna y como filtro.
 
 ### Buscador global (⌘K / Ctrl+K)
 Botón "Buscar…" arriba de la barra lateral, o el atajo de teclado desde cualquier pantalla. Busca en tareas, proyectos y personas (categorías activables/desactivables), y trae unas "búsquedas guardadas" rápidas: tareas que has creado, que has asignado a otros, y completadas recientemente.
@@ -150,6 +155,7 @@ js/
     account-modal.js                  "Mi cuenta": nombre, rol y cambio de contraseña
     team-admin-modal.js                Panel de admin: roles del equipo y dominios permitidos
     reset-password-modal.js             "He olvidado mi contraseña" (pantalla de login)
+    table-columns.js                     Ancho/orden/visibilidad de columnas de tabla (Lista y Mis tareas), por persona
   task-filters.js             Filtrado y ordenación de tareas (compartido por todas las vistas)
   views/
     list-view.js                  Vista de Lista: tabla ordenable (+ menú contextual)
@@ -164,7 +170,7 @@ firestore.rules             Reglas de seguridad de Firestore
 
 ## 5. Modelo de datos (Firestore)
 
-- **`users/{uid}`** — `name`, `email`, `role` (`admin` | `miembro`)
+- **`users/{uid}`** — `name`, `email`, `role` (`admin` | `miembro`), `personalCustomFieldDefs[]` (mismo formato que los de proyecto, pero solo tuyos — se usan en "Mis tareas"), `columnPrefs` (`{[scopeKey]: {widths:{[colKey]:px}, hidden:[colKey,...]}}`, `scopeKey` = `project:<id>` o `mytasks` — anchos y columnas ocultas de las tablas, por persona)
 - **`projects/{id}`** — `name`, `description`, `color`, `sections[]`, `memberIds[]` (informativo), `customFieldDefs[]` (`{id,name,type:'lista'|'numero'|'texto',options[]}`), `archived`, `createdBy`
 - **`tasks/{id}`** — `projectId` (null si es personal), `ownerId` (solo tareas personales), `sectionId`, `title`, `description`, `assigneeIds[]`, `startDate`, `dueDate`, `priority`, `tags[]` (nombres; el color vive en `tags/`), `dependsOn[]`, `subtasks[]`, `attachments[]` (`{id,name,url}`), `customFields` (`{[fieldId]: valor}`), `isComplete`, `isMilestone`, `order`
 - **`tasks/{id}/comments/{id}`** — `authorId`, `authorName`, `text`
@@ -185,3 +191,4 @@ firestore.rules             Reglas de seguridad de Firestore
 - El orden de tareas al arrastrar en el tablero usa valores numéricos intermedios; a gran escala convendría "renormalizar" los números de vez en cuando (no es un problema al tamaño de un departamento).
 - Al abrir una tarea desde "Mis tareas" que pertenece a un proyecto distinto al que tienes seleccionado, el selector de "bloqueada por" solo lista las tareas de ese proyecto que también tienes asignadas a ti, no todas.
 - Renombrar un proyecto usa el cuadro de diálogo nativo del navegador (`prompt`), no un formulario propio — funcional pero sencillo; se puede pulir más adelante.
+- Los anchos de columna "de serie" son valores fijos pensados para el contenido habitual (fecha corta, una etiqueta de prioridad, unos pocos avatares), no una medición real del contenido de cada tarea — para eso están el arrastre y el ocultar/mostrar, que si ajustas una vez quedan guardados para ti.

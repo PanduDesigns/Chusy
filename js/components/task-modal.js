@@ -188,9 +188,13 @@ export function openTaskModal({
             </div>
           </div>` : ""}
 
-          ${!isPersonal && (project?.customFieldDefs || []).length ? (project.customFieldDefs.map((f) => `
+          ${(() => {
+            const projectFieldDefs = (!isPersonal && project?.customFieldDefs) || [];
+            const personalFieldDefs = (currentUserProfile?.personalCustomFieldDefs || []).map((f) => ({ ...f, isPersonalField: true }));
+            const allFieldDefs = [...projectFieldDefs, ...personalFieldDefs];
+            return allFieldDefs.map((f) => `
           <label class="field">
-            <span class="field__label">${escapeHtml(f.name)}</span>
+            <span class="field__label">${escapeHtml(f.name)}${f.isPersonalField ? ` <span style="color:var(--color-text-faint);font-weight:400;">· personal</span>` : ""}</span>
             ${f.type === "numero"
               ? `<input class="field__input" type="number" data-custom-field="${f.id}" value="${draft.customFields[f.id] ?? ""}" placeholder="0">`
               : f.type === "texto"
@@ -199,7 +203,8 @@ export function openTaskModal({
                   <option value="">— Sin definir —</option>
                   ${f.options.map((opt) => `<option value="${escapeHtml(opt)}" ${draft.customFields[f.id] === opt ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("")}
                 </select>`}
-          </label>`).join("")) : ""}
+          </label>`).join("");
+          })()}
 
           <label class="field">
             <span class="field__label">Descripción</span>

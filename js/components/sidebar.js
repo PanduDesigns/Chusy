@@ -70,7 +70,17 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
             const name = prompt("Nuevo nombre del proyecto:", project.name);
             if (name && name.trim()) updateProject(project.id, { name: name.trim() });
           } },
-          { label: "Campos personalizados", icon: "☰", onClick: () => openCustomFieldsModal({ project }) },
+          {
+            label: "Campos personalizados",
+            icon: "☰",
+            onClick: () =>
+              openCustomFieldsModal({
+                title: "Campos personalizados",
+                hint: "Se podrán rellenar en cada tarea de este proyecto y usarse como columna y como filtro.",
+                fields: project.customFieldDefs,
+                onSave: (defs) => updateProject(project.id, { customFieldDefs: defs }),
+              }),
+          },
           { label: "Archivar proyecto", icon: "🗄️", onClick: () => archiveProject(project.id, true) },
           { divider: true },
           { label: "Eliminar proyecto", icon: "🗑", danger: true, onClick: async () => {

@@ -2,13 +2,16 @@
 // Vista de Lista: tabla con columnas (Nombre, Fecha límite, Responsables,
 // Prioridad y los campos personalizados del proyecto), agrupada por
 // sección. Cada columna se puede pulsar para ordenar (alfabético / fecha /
-// prioridad / valor del campo), con flecha indicando la dirección. El "+"
-// al final de la cabecera abre la definición de campos personalizados.
+// prioridad / valor del campo), con flecha indicando la dirección.
+// Las columnas se pueden redimensionar arrastrando su borde derecho y
+// ocultar/mostrar desde "Columnas" — son preferencias de cada persona.
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast } from "../utils.js";
 import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
+import { updateProject } from "../data/projects.js";
 import { openContextMenu } from "../components/context-menu.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
+import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, openColumnsMenu } from "../components/table-columns.js";
 
 function tagPill(name, tagsRegistry) {
   const found = (tagsRegistry || []).find((t) => t.name.toLowerCase() === name.toLowerCase());
@@ -17,16 +20,18 @@ function tagPill(name, tagsRegistry) {
 }
 
 const BASE_COLUMNS = [
-  { key: "title", label: "Nombre" },
-  { key: "dueDate", label: "Fecha límite" },
-  { key: "assignee", label: "Responsables" },
-  { key: "priority", label: "Prioridad" },
+  { key: "title", label: "Nombre", defaultWidth: 260, minWidth: 160, locked: true },
+  { key: "dueDate", label: "Fecha límite", defaultWidth: 88, minWidth: 70 },
+  { key: "assignee", label: "Responsables", defaultWidth: 96, minWidth: 60 },
+  { key: "priority", label: "Prioridad", defaultWidth: 80, minWidth: 64 },
 ];
 
-export function renderListView(container, { project, tasks, teamMembers, tagsRegistry, sortState, onSortChange, onOpenTask, onAddTask }) {
-  const customCols = (project.customFieldDefs || []).map((f) => ({ key: `cf:${f.id}`, label: f.name, fieldId: f.id }));
-  const columns = [...BASE_COLUMNS, ...customCols];
-  const gridTemplate = `1fr 96px 132px 84px ${customCols.map(() => "120px").join(" ")} 34px`;
+export function renderListView(container, { project, tasks, teamMembers, tagsRegistry, sortState, onSortChange, onOpenTask, onAddTask, currentUser }) {
+  const customCols = (project.customFieldDefs || []).map((f) => ({ key: `cf:${f.id}`, label: f.name, fieldId: f.id, defaultWidth: 120, minWidth: 70 }));
+  const allColumns = [...BASE_COLUMNS, ...customCols];
+  const scopeKey = `project:${project.id}`;
+  const prefs = (currentUser.columnPrefs || {})[scopeKey];
+  const { visible, gridTemplate, widthOf } = resolveColumns(allColumns, prefs);
 
   const bySection = new Map(project.sections.map((s) => [s.id, []]));
   tasks.forEach((t) => {
@@ -37,14 +42,8 @@ export function renderListView(container, { project, tasks, teamMembers, tagsReg
 
   const headerHtml = `
     <div class="list-table__header" style="grid-template-columns:${gridTemplate};">
-      ${columns
-        .map((col) => {
-          const isActive = sortState && sortState.column === col.key;
-          const arrow = isActive ? (sortState.direction === "desc" ? "↓" : "↑") : "";
-          return `<button type="button" class="list-table__col${isActive ? " is-sorted" : ""}" data-sort="${col.key}">${escapeHtml(col.label)} <span class="list-table__arrow">${arrow}</span></button>`;
-        })
-        .join("")}
-      <button type="button" class="list-table__col-add" id="list-add-field" title="Añadir campo personalizado">+</button>
+      ${columnHeaderCellsHtml(visible, widthOf, sortState)}
+      <span></span>
     </div>`;
 
   const sectionsHtml = sectionsSorted
@@ -54,21 +53,32 @@ export function renderListView(container, { project, tasks, teamMembers, tagsReg
         .map((task) => {
           const overdue = isOverdue(task.dueDate, task.isComplete);
           const assignees = task.assigneeIds.map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean);
-          const customCells = customCols
-            .map((c) => `<span class="list-table__cell-text">${escapeHtml(task.customFields?.[c.fieldId] ?? "—")}</span>`)
+          const cellsHtml = visible
+            .map((col) => {
+              if (col.key === "title") {
+                return `
+                <span class="list-row__title-cell">
+                  <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
+                  <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
+                  <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
+                  ${task.tags.slice(0, 2).map((t) => tagPill(t, tagsRegistry)).join("")}
+                </span>`;
+              }
+              if (col.key === "dueDate") {
+                return `<span class="list-table__cell-text${overdue ? " is-overdue" : ""}">${task.dueDate ? formatDate(task.dueDate) : "—"}</span>`;
+              }
+              if (col.key === "assignee") {
+                return `<span class="avatar-stack">${assignees.map((m) => `<span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}" title="${escapeHtml(m.name)}">${initials(m.name)}</span>`).join("") || `<span class="list-table__cell-text">—</span>`}</span>`;
+              }
+              if (col.key === "priority") {
+                return `<span class="tag-pill" style="background:${priorityColor(task.priority)};color:${textColorFor(priorityColor(task.priority))};">${priorityLabel(task.priority)}</span>`;
+              }
+              return `<span class="list-table__cell-text">${escapeHtml(task.customFields?.[col.fieldId] ?? "—")}</span>`;
+            })
             .join("");
           return `
         <div class="list-row${task.isComplete ? " is-complete" : ""}" data-task-id="${task.id}" style="grid-template-columns:${gridTemplate};">
-          <span class="list-row__title-cell">
-            <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
-            <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
-            <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
-            ${task.tags.slice(0, 2).map((t) => tagPill(t, tagsRegistry)).join("")}
-          </span>
-          <span class="list-table__cell-text${overdue ? " is-overdue" : ""}">${task.dueDate ? formatDate(task.dueDate) : "—"}</span>
-          <span class="avatar-stack">${assignees.map((m) => `<span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}" title="${escapeHtml(m.name)}">${initials(m.name)}</span>`).join("") || `<span class="list-table__cell-text">—</span>`}</span>
-          <span class="tag-pill" style="background:${priorityColor(task.priority)};color:${textColorFor(priorityColor(task.priority))};">${priorityLabel(task.priority)}</span>
-          ${customCells}
+          ${cellsHtml}
           <span></span>
         </div>`;
         })
@@ -86,12 +96,29 @@ export function renderListView(container, { project, tasks, teamMembers, tagsReg
     })
     .join("");
 
-  container.innerHTML = `<div class="list-table">${headerHtml}${sectionsHtml}</div>`;
+  container.innerHTML = `
+    <div class="table-toolbar">
+      <button type="button" class="btn btn--ghost btn--sm" id="btn-columns">☰ Columnas</button>
+      <button type="button" class="btn btn--ghost btn--sm" id="list-add-field">+ Campo personalizado</button>
+    </div>
+    <div class="list-table-scroll"><div class="list-table">${headerHtml}${sectionsHtml}</div></div>`;
 
   container.querySelectorAll("[data-sort]").forEach((btn) => {
     btn.addEventListener("click", () => onSortChange(btn.dataset.sort));
   });
-  container.querySelector("#list-add-field").addEventListener("click", () => openCustomFieldsModal({ project }));
+  container.querySelector("#list-add-field").addEventListener("click", () =>
+    openCustomFieldsModal({
+      title: "Campos personalizados",
+      hint: "Se podrán rellenar en cada tarea de este proyecto y usarse como columna y como filtro.",
+      fields: project.customFieldDefs,
+      onSave: (defs) => updateProject(project.id, { customFieldDefs: defs }),
+    })
+  );
+  container.querySelector("#btn-columns").addEventListener("click", (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    openColumnsMenu({ x: rect.left, y: rect.bottom + 4, allColumns, hidden: prefs?.hidden, scopeKey, currentUserUid: currentUser.uid });
+  });
+  wireColumnResize(container, { visible, widthOf, scopeKey, currentUserUid: currentUser.uid });
 
   container.querySelectorAll("[data-check]").forEach((btn) => {
     btn.addEventListener("click", (e) => {

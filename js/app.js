@@ -249,10 +249,10 @@ function renderShell() {
       <button class="btn btn--primary btn--sm" id="btn-new-personal-task" style="margin-left:auto;">+ Tarea personal</button>`;
     topbarEl.querySelector("#btn-new-personal-task").addEventListener("click", openNewPersonalTask);
 
-    const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, projects, includeProject: true, tasks: myTasks });
+    const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, projects, includeProject: true, customFieldDefs: currentUser.personalCustomFieldDefs, tasks: myTasks });
     renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
     const filteredMyTasks = sortTasks(applyTaskFilters(myTasks, activeFilters), sortState, { teamMembers, projects });
-    renderMyTasksView(mainContentEl, { tasks: filteredMyTasks, teamMembers, projects, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask });
+    renderMyTasksView(mainContentEl, { tasks: filteredMyTasks, teamMembers, projects, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, currentUser });
     return;
   }
 
@@ -305,7 +305,7 @@ function renderShell() {
 function renderMain() {
   if (mode !== "project" || !currentProject) return;
 
-  const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, project: currentProject, tasks: currentTasks });
+  const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, customFieldDefs: currentProject.customFieldDefs, tasks: currentTasks });
   renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
   const filteredTasks = applyTaskFilters(currentTasks, activeFilters);
 
@@ -334,7 +334,7 @@ function renderMain() {
     });
   } else {
     const sortedTasks = sortTasks(filteredTasks, sortState, { teamMembers, projects });
-    renderListView(mainContentEl, { project: currentProject, tasks: sortedTasks, teamMembers, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, onAddTask: openNewProjectTask });
+    renderListView(mainContentEl, { project: currentProject, tasks: sortedTasks, teamMembers, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, onAddTask: openNewProjectTask, currentUser });
   }
 }
 

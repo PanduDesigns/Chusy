@@ -35,7 +35,7 @@ export function applyTaskFilters(tasks, activeFilters) {
 }
 
 /** Construye las columnas de filtro disponibles para el contexto actual. */
-export function buildFilterDefs({ teamMembers, tagsRegistry, projects, project, tasks = [], includeStatus = true, includeProject = false }) {
+export function buildFilterDefs({ teamMembers, tagsRegistry, projects, project, customFieldDefs, tasks = [], includeStatus = true, includeProject = false }) {
   const defs = [
     {
       key: "assignee",
@@ -78,15 +78,14 @@ export function buildFilterDefs({ teamMembers, tagsRegistry, projects, project, 
       options: projects.map((p) => ({ value: p.id, label: p.name, color: p.color })),
     });
   }
-  if (project && project.customFieldDefs) {
-    project.customFieldDefs.forEach((f) => {
-      const options =
-        f.type === "lista"
-          ? f.options.map((opt) => ({ value: opt, label: opt }))
-          : distinctValues(tasks, f.id).map((v) => ({ value: v, label: v }));
-      defs.push({ key: `cf:${f.id}`, label: f.name, options });
-    });
-  }
+  const cfDefs = customFieldDefs || (project && project.customFieldDefs) || [];
+  cfDefs.forEach((f) => {
+    const options =
+      f.type === "lista"
+        ? f.options.map((opt) => ({ value: opt, label: opt }))
+        : distinctValues(tasks, f.id).map((v) => ({ value: v, label: v }));
+    defs.push({ key: `cf:${f.id}`, label: f.name, options });
+  });
   return defs;
 }
 
