@@ -21,6 +21,7 @@ import { applyTaskFilters, buildFilterDefs, sortTasks } from "./task-filters.js"
 import { openSearchModal } from "./components/search-modal.js";
 import { openAccountModal } from "./components/account-modal.js";
 import { openTeamAdminModal } from "./components/team-admin-modal.js";
+import { openAsanaImportModal } from "./components/asana-import-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { showToast } from "./utils.js";
 
@@ -230,6 +231,7 @@ function renderShell() {
     onOpenSearch: () => openSearch(),
     onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
+    onOpenAsanaImport: () => openAsanaImportModal({ teamMembers, currentUser }),
     onCreateProject: () =>
       openProjectModal({
         onCreate: async (data) => {

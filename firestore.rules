@@ -58,13 +58,36 @@ service cloud.firestore {
     // ---- Usuarios ----
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == userId &&
-        (request.resource.data.role == 'miembro' ||
-         (request.resource.data.role == 'admin' &&
-          !exists(/databases/$(database)/documents/meta/bootstrap)));
+      // Alta normal: cada quien crea SU PROPIO documento al registrarse. La
+      // segunda rama deja que un admin cree perfiles "ficticios" para
+      // personas importadas de Asana que todavía no tienen cuenta real en
+      // Chusy (id propio, no un UID de Auth) — exige el flag isImported y
+      // que nunca entren como admin, para que esta puerta no sirva para
+      // otra cosa.
+      allow create: if isSignedIn() &&
+        ((request.auth.uid == userId &&
+          (request.resource.data.role == 'miembro' ||
+           (request.resource.data.role == 'admin' &&
+            !exists(/databases/$(database)/documents/meta/bootstrap)))) ||
+         (isAdmin() &&
+          request.resource.data.role == 'miembro' &&
+          request.resource.data.isImported == true));
       allow update: if isSignedIn() &&
         (isAdmin() || (request.auth.uid == userId && request.resource.data.role == resource.data.role));
       allow delete: if isAdmin();
+    }
+
+    // ---- Importador de Asana: mapa de equivalencias e índice de lo ya
+    // importado (para que una segunda importación no duplique nada). Solo
+    // lo toca el panel de administración; lectura abierta al equipo por si
+    // alguna vista quiere mostrar "importado de Asana" en algo.
+    match /meta/asanaUserMap {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /meta/asanaImportIndex {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     // ---- Proyectos (visibles para todo el equipo) ----
@@ -92,7 +115,11 @@ service cloud.firestore {
 
       match /comments/{commentId} {
         allow read: if isSignedIn();
-        allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+        // Un admin puede crear un comentario a nombre de otra persona SOLO
+        // para reimportar comentarios históricos de Asana con su autor
+        // real; en el uso normal de la app siempre se crea con el propio
+        // uid (así lo hace addComment()).
+        allow create: if isSignedIn() && (request.resource.data.authorId == request.auth.uid || isAdmin());
         allow update, delete: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin());
       }
     }

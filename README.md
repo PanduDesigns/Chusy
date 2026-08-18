@@ -124,6 +124,13 @@ En la línea de tiempo, la columna de nombres (fija a la izquierda al desplazar)
 ### Mi cuenta y administración de equipo
 Clic en tu nombre (pie de la barra lateral) abre un menú con **"Mi cuenta"**: ver tu correo, tu rol y desde cuándo eres miembro, cambiar tu nombre visible y cambiar tu contraseña (pide la contraseña actual). Si tu cuenta es admin, ese mismo menú añade **"Administrar equipo"**: lista de todas las cuentas registradas con un desplegable para cambiar el rol de cada una (no te puedes quitar el admin a ti mismo si eres la única persona administradora), y la configuración de qué dominios de correo pueden registrarse — lo que antes solo se podía tocar desde la consola de Firebase.
 
+### Importador de Asana (solo administradores)
+Desde el menú de tu nombre (pie de la barra lateral), si eres admin verás también **"Importar desde Asana"** — no aparece para el resto del equipo, así que no hace falta ocultarlo de ningún otro sitio. Carga ahí el archivo `.json` de export (formato `asana-api-export`) y verás un resumen de qué trae y cuánto es nuevo frente a lo ya importado antes; se puede cargar el mismo archivo varias veces sin miedo a duplicar nada.
+
+Como las personas de Asana y las cuentas de Chusy no son las mismas, cada persona de Asana que aparece en el archivo se lista con un desplegable para decir "esto es en realidad Fulanito" (solo se pueden elegir cuentas ya registradas en Chusy — no hay forma de crear cuentas reales desde aquí). Mientras no se le asigne una cuenta real, queda como **usuario ficticio**: sus tareas y comentarios se ven con normalidad, pero no puede entrar en Chusy ni se ofrece como opción al asignar tareas nuevas. En cuanto se aplica una equivalencia, se reescriben automáticamente todas sus tareas y comentarios ya importados con la cuenta real — se puede hacer en el momento de importar o más adelante, según se vaya registrando cada persona; esta tabla de equivalencias está siempre disponible en el mismo panel, no solo durante una importación.
+
+Las subtareas de Asana entran como tareas normales del proyecto (con su responsable, fechas y comentarios propios si los tenían), no como el checklist ligero de "subtareas" de Chusy — se nota porque su descripción empieza con una referencia de vuelta a la tarea de la que venían. Los adjuntos **no se importan**: el export no trae los archivos, y reconstruir enlaces a partir del historial de actividad de Asana solo serviría mientras se mantenga acceso a Asana, lo cual no tiene sentido para una migración que busca dejar de depender de ella. Hay también una "zona de riesgo" en el propio panel para borrar de un tirón todo lo importado (por si una prueba sale mal) sin tocar nada creado a mano.
+
 ### He olvidado mi contraseña
 Enlace bajo el campo de contraseña en la pantalla de entrada: pide el correo y envía un enlace de Firebase para elegir una contraseña nueva. Por privacidad, el mensaje de confirmación es el mismo exista o no una cuenta con ese correo.
 
@@ -149,6 +156,7 @@ js/
     tags.js                     Registro compartido de etiquetas (nombre + color)
     comments.js                  Comentarios de una tarea
     users.js                      Perfil de usuario (Firestore) y configuración del equipo
+    asana-import.js                Importador de Asana: lee el export, resuelve equivalencias y escribe/reescribe en Firestore
   components/
     sidebar.js                  Proyectos + Mis tareas + Línea de tiempo + Archivo + buscador + menú de cuenta
     topbar.js                    Selector de vista + nueva tarea
@@ -162,7 +170,8 @@ js/
     search-modal.js                  Buscador global (⌘K / Ctrl+K)
     account-modal.js                  "Mi cuenta": nombre, rol y cambio de contraseña
     team-admin-modal.js                Panel de admin: roles del equipo y dominios permitidos
-    reset-password-modal.js             "He olvidado mi contraseña" (pantalla de login)
+    asana-import-modal.js               Panel de admin: importar desde Asana y mapear personas
+    reset-password-modal.js              "He olvidado mi contraseña" (pantalla de login)
     table-columns.js                     Ancho/orden/visibilidad de columnas de tabla (Lista y Mis tareas), por persona
   task-filters.js             Filtrado y ordenación de tareas (compartido por todas las vistas)
   views/
@@ -178,11 +187,13 @@ firestore.rules             Reglas de seguridad de Firestore
 
 ## 5. Modelo de datos (Firestore)
 
-- **`users/{uid}`** — `name`, `email`, `role` (`admin` | `miembro`), `personalCustomFieldDefs[]` (mismo formato que los de proyecto, pero solo tuyos — se usan en "Mis tareas"), `columnPrefs` (`{[scopeKey]: {widths:{[colKey]:px}, hidden:[colKey,...]}}`, `scopeKey` = `project:<id>` o `mytasks` — anchos y columnas ocultas de las tablas, por persona)
-- **`projects/{id}`** — `name`, `description`, `color`, `icon` (emoji; `📁` si no se ha elegido uno), `sections[]`, `memberIds[]` (informativo), `customFieldDefs[]` (`{id,name,type:'lista'|'numero'|'texto',options[]}`), `archived`, `createdBy`
-- **`tasks/{id}`** — `projectId` (null si es personal), `ownerId` (solo tareas personales), `sectionId`, `title`, `description`, `assigneeIds[]`, `startDate`, `dueDate`, `priority`, `tags[]` (nombres; el color vive en `tags/`), `dependsOn[]`, `subtasks[]`, `attachments[]` (`{id,name,url}`), `customFields` (`{[fieldId]: valor}`), `isComplete`, `isMilestone`, `order`
-- **`tasks/{id}/comments/{id}`** — `authorId`, `authorName`, `text`
+- **`users/{uid}`** — `name`, `email`, `role` (`admin` | `miembro`), `personalCustomFieldDefs[]` (mismo formato que los de proyecto, pero solo tuyos — se usan en "Mis tareas"), `columnPrefs` (`{[scopeKey]: {widths:{[colKey]:px}, hidden:[colKey,...]}}`, `scopeKey` = `project:<id>` o `mytasks` — anchos y columnas ocultas de las tablas, por persona). Un perfil "ficticio" creado por el importador de Asana añade además `isImported: true`, `asanaGid` (id de esa persona en Asana) y `mergedInto` (uid real una vez se le aplica una equivalencia; `null` mientras sigue ficticio) — su `{uid}` no es un UID de Firebase Auth real, sino `asana:<gid>`
+- **`projects/{id}`** — `name`, `description`, `color`, `icon` (emoji; `📁` si no se ha elegido uno), `sections[]`, `memberIds[]` (informativo), `customFieldDefs[]` (`{id,name,type:'lista'|'numero'|'texto',options[]}`), `archived`, `createdBy`. Si viene de una importación, además `asanaGid`
+- **`tasks/{id}`** — `projectId` (null si es personal), `ownerId` (solo tareas personales), `sectionId`, `title`, `description`, `assigneeIds[]`, `startDate`, `dueDate`, `priority`, `tags[]` (nombres; el color vive en `tags/`), `dependsOn[]`, `subtasks[]`, `attachments[]` (`{id,name,url}`), `customFields` (`{[fieldId]: valor}`), `isComplete`, `isMilestone`, `order`. Si viene de una importación, además `asanaGid`
+- **`tasks/{id}/comments/{id}`** — `authorId`, `authorName`, `text`. Si viene de una importación, además `asanaGid`
 - **`tags/{slug}`** — `name`, `color`
+- **`meta/asanaUserMap`** — `{[gidDeAsana]: uidReal}`: la tabla de equivalencias del importador de Asana. Quien no aparezca aquí sigue siendo un usuario ficticio
+- **`meta/asanaImportIndex`** — `{projects:{[gid]:id}, tasks:{[gid]:id}, comments:{[gid]:{taskId,commentId}}}`: de qué se ha importado ya, para que repetir una importación no duplique nada y se pueda deshacer una prueba de un tirón
 
 ## 6. Qué falta (próxima iteración)
 
@@ -199,3 +210,5 @@ firestore.rules             Reglas de seguridad de Firestore
 - El orden de tareas al arrastrar en el tablero usa valores numéricos intermedios; a gran escala convendría "renormalizar" los números de vez en cuando (no es un problema al tamaño de un departamento).
 - Al abrir una tarea desde "Mis tareas" que pertenece a un proyecto distinto al que tienes seleccionado, el selector de "bloqueada por" solo lista las tareas de ese proyecto que también tienes asignadas a ti, no todas.
 - Los anchos de columna "de serie" son valores fijos pensados para el contenido habitual (fecha corta, una etiqueta de prioridad, unos pocos avatares), no una medición real del contenido de cada tarea — para eso están el arrastre y el ocultar/mostrar, que si ajustas una vez quedan guardados para ti.
+- El importador de Asana no trae adjuntos, campos personalizados ni dependencias como dato estructurado, aunque el historial de actividad demuestre que los dos últimos sí se usaron en su momento. Para no perderlos en la importación definitiva, hay que pedirle esos campos a la API al generar el export; los adjuntos, mejor añadirlos aparte en su forma normal (un archivo que subir a donde vaya a vivir), no como enlace a Asana.
+- Una vez aplicada una equivalencia (persona de Asana → cuenta real), cambiarla por otra cuenta distinta no está pensado para hacerse desde el panel — solo el primer paso de "ficticio → cuenta real" reescribe tareas y comentarios automáticamente.

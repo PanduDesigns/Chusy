@@ -10,7 +10,7 @@ import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/p
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 import { openEditProjectModal } from "./edit-project-modal.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenAsanaImport, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const items = projects.map((p) => `
@@ -118,6 +118,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     const items = [{ label: "Mi cuenta", icon: "👤", onClick: onOpenAccount }];
     if (userProfile.role === "admin") {
       items.push({ label: "Administrar equipo", icon: "🛠️", onClick: onOpenTeamAdmin });
+      items.push({ label: "Importar desde Asana", icon: "📥", onClick: onOpenAsanaImport });
     }
     items.push({ divider: true });
     items.push({ label: "Cerrar sesión", icon: "⏻", danger: true, onClick: onLogout });

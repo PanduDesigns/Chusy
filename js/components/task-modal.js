@@ -163,10 +163,10 @@ export function openTaskModal({
           <div class="field">
             <span class="field__label">Responsables</span>
             <div class="chip-select" id="t-assignees">
-              ${(teamMembers || []).map((m) => `
+              ${[...(teamMembers || [])].sort((a, b) => (a.isImported ? 1 : 0) - (b.isImported ? 1 : 0)).map((m) => `
                 <button type="button" class="chip${draft.assigneeIds.includes(m.uid) ? " is-selected" : ""}" data-uid="${m.uid}">
                   <span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}">${initials(m.name)}</span>
-                  ${escapeHtml(m.name)}
+                  ${escapeHtml(m.name)}${m.isImported ? ` <span style="color:var(--color-text-faint);">· Asana</span>` : ""}
                 </button>`).join("")}
             </div>
           </div>` : ""}
