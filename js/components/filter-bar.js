@@ -4,10 +4,10 @@
 // proyecto). Cada botón abre un desplegable con casillas; se aplica al
 // momento, sin botón de confirmar.
 // ============================================================================
-import { escapeHtml } from "../utils.js";
+import { escapeHtml, badgeHtml } from "../utils.js";
 
 /**
- * filterDefs: [{ key, label, options: [{ value, label, color? }] }]
+ * filterDefs: [{ key, label, options: [{ value, label, color?, icon? }] }]
  * activeFilters: { [key]: Set(valores) }
  */
 export function renderFilterBar(container, { filterDefs, activeFilters, onChange }) {
@@ -57,7 +57,7 @@ function openFilterPopover(anchorBtn, def, currentSet, onApply) {
           (opt) => `
       <label class="filter-popover__item">
         <input type="checkbox" ${currentSet.has(opt.value) ? "checked" : ""} data-value="${escapeHtml(opt.value)}">
-        ${opt.color ? `<span class="filter-popover__dot" style="background:${opt.color}"></span>` : ""}
+        ${opt.icon ? badgeHtml(opt.icon, opt.color, "project-badge--sm") : opt.color ? `<span class="filter-popover__dot" style="background:${opt.color}"></span>` : ""}
         <span>${escapeHtml(opt.label)}</span>
       </label>`
         )

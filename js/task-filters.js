@@ -75,7 +75,7 @@ export function buildFilterDefs({ teamMembers, tagsRegistry, projects, project, 
     defs.push({
       key: "project",
       label: "Proyecto",
-      options: projects.map((p) => ({ value: p.id, label: p.name, color: p.color })),
+      options: projects.map((p) => ({ value: p.id, label: p.name, color: p.color, icon: p.icon })),
     });
   }
   const cfDefs = customFieldDefs || (project && project.customFieldDefs) || [];

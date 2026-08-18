@@ -2,8 +2,7 @@
 // Modal: crear proyecto nuevo.
 // ============================================================================
 import { el, uid, escapeHtml } from "../utils.js";
-
-const COLORS = ["#FCD000", "#78848C", "#4E9E9E", "#C4703E", "#6B9E78", "#8B85C4"];
+import { mountAppearancePicker } from "./project-appearance-picker.js";
 
 export function openProjectModal({ onCreate }) {
   const root = document.getElementById("modal-root");
@@ -13,7 +12,7 @@ export function openProjectModal({ onCreate }) {
     { id: "en-progreso", name: "En progreso", order: 1 },
     { id: "hecho", name: "Hecho", order: 2 },
   ];
-  let selectedColor = COLORS[0];
+  let appearance = {};
 
   const overlay = el(`
     <div class="modal-overlay">
@@ -32,10 +31,8 @@ export function openProjectModal({ onCreate }) {
             <textarea class="field__textarea" id="p-desc" placeholder="De qué trata este proyecto"></textarea>
           </label>
           <div class="field">
-            <span class="field__label">Color</span>
-            <div class="chip-select" id="p-colors">
-              ${COLORS.map((c) => `<button type="button" class="chip color-swatch${c === selectedColor ? " is-selected" : ""}" data-color="${c}" style="border-color:${c}"><span class="chip__dot" style="background:${c}"></span></button>`).join("")}
-            </div>
+            <span class="field__label">Icono y color</span>
+            <div id="p-appearance"></div>
           </div>
           <div class="field">
             <span class="field__label">Secciones del tablero</span>
@@ -54,6 +51,10 @@ export function openProjectModal({ onCreate }) {
     </div>
   `);
   root.appendChild(overlay);
+
+  mountAppearancePicker(overlay.querySelector("#p-appearance"), {
+    onChange: (a) => { appearance = a; },
+  });
 
   function renderSections() {
     const list = overlay.querySelector("#p-sections");
@@ -91,13 +92,6 @@ export function openProjectModal({ onCreate }) {
     renderSections();
   });
 
-  overlay.querySelectorAll(".color-swatch").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      selectedColor = btn.dataset.color;
-      overlay.querySelectorAll(".color-swatch").forEach((b) => b.classList.toggle("is-selected", b === btn));
-    });
-  });
-
   function close() {
     document.removeEventListener("keydown", onKeydown);
     overlay.remove();
@@ -117,7 +111,7 @@ export function openProjectModal({ onCreate }) {
     createBtn.disabled = true;
     createBtn.textContent = "Creando…";
     try {
-      await onCreate({ name, description, color: selectedColor, sections: sections.map((s, i) => ({ ...s, order: i })) });
+      await onCreate({ name, description, color: appearance.color, icon: appearance.icon, sections: sections.map((s, i) => ({ ...s, order: i })) });
       close();
     } catch (e) {
       createBtn.disabled = false;

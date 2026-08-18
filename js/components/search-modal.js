@@ -4,7 +4,7 @@
 // Firestore por cada tecleo. Incluye unas cuantas "búsquedas guardadas"
 // (atajos habituales) cuando el campo está vacío.
 // ============================================================================
-import { el, escapeHtml, initials, colorFromString, formatDate, toDate } from "../utils.js";
+import { el, escapeHtml, initials, colorFromString, formatDate, toDate, projectBadgeHtml } from "../utils.js";
 
 const CATEGORIES = [
   { key: "tasks", label: "Tareas" },
@@ -80,7 +80,7 @@ export function openSearchModal({ tasks, projects, teamMembers, currentUser, onO
   function projectRowHtml(p) {
     return `
       <button type="button" class="search-result" data-open-project="${p.id}">
-        <span class="search-result__project-dot" style="background:${p.color || "#8B959C"}"></span>
+        ${projectBadgeHtml(p)}
         <div class="search-result__body"><div class="search-result__title">${escapeHtml(p.name)}</div></div>
       </button>`;
   }

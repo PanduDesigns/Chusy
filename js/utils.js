@@ -114,6 +114,33 @@ export function textColorFor(bgHex) {
   return luminance > 0.42 ? "#0B0D0E" : "#F5F6F6";
 }
 
+/** Icono de un proyecto: si todavía no tiene uno elegido, uno neutro por defecto. */
+export function projectIcon(project) {
+  return (project && project.icon) || "📁";
+}
+
+/** "rgba(...)" a partir de un color hex, para sombrear el fondo de un icono según su color. */
+export function hexToRgba(hex, alpha) {
+  const h = (hex || "").replace("#", "");
+  if (h.length !== 6) return `rgba(139,149,156,${alpha})`;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/** Insignia icono+color (fondo sombreado del color, icono encima). sizeClass: "", "project-badge--sm" o "project-badge--lg". */
+export function badgeHtml(icon, color, sizeClass = "") {
+  const bg = hexToRgba(color || "#8B959C", 0.2);
+  const ring = hexToRgba(color || "#8B959C", 0.6);
+  return `<span class="project-badge${sizeClass ? " " + sizeClass : ""}" style="background:${bg};box-shadow:inset 0 0 0 1px ${ring};">${escapeHtml(icon || "📁")}</span>`;
+}
+
+/** Insignia icono+color de un proyecto (sustituye al punto de color plano). */
+export function projectBadgeHtml(project, sizeClass = "") {
+  return badgeHtml(projectIcon(project), project && project.color, sizeClass);
+}
+
 export function escapeHtml(str) {
   if (str == null) return "";
   return String(str)

@@ -3,7 +3,7 @@
 // pero no se han borrado). Se pueden abrir para consultarlos o
 // desarchivar para que vuelvan a la lista de proyectos activos.
 // ============================================================================
-import { escapeHtml } from "../utils.js";
+import { escapeHtml, projectBadgeHtml } from "../utils.js";
 
 export function renderArchiveView(container, { archivedProjects, onOpenProject, onUnarchive }) {
   if (!archivedProjects.length) {
@@ -22,7 +22,7 @@ export function renderArchiveView(container, { archivedProjects, onOpenProject, 
         .map(
           (p) => `
         <div class="archive-row">
-          <span class="sidebar__item-dot" style="background:${p.color || "#8B959C"}"></span>
+          ${projectBadgeHtml(p)}
           <span class="archive-row__name" data-open="${p.id}">${escapeHtml(p.name)}</span>
           <button class="btn btn--ghost btn--sm" data-unarchive="${p.id}">Desarchivar</button>
         </div>`

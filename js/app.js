@@ -280,6 +280,7 @@ function renderShell() {
       id: p.id,
       label: p.name,
       color: p.color,
+      icon: p.icon,
       tasks: applyTaskFilters((globalTasksByProject[p.id] || []).filter((t) => !t.isComplete), activeFilters),
     }));
     renderTimelineView(mainContentEl, {

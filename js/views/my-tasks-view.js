@@ -7,7 +7,7 @@
 // solo suyos y se aplican a cualquier tarea que vea aquí. Las columnas
 // se pueden redimensionar y ocultar/mostrar, también de forma personal.
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon } from "../utils.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
 import { updateUserProfile } from "../data/users.js";
@@ -134,7 +134,7 @@ export function renderMyTasksView(container, { tasks, teamMembers, projects, tag
           return !task.projectId
             ? `<span class="tag-pill" style="background:var(--color-signal-soft);color:var(--color-signal);">🔒 Personal</span>`
             : project
-            ? `<span class="tag-pill" style="background:${project.color};color:${textColorFor(project.color)};">${escapeHtml(project.name)}</span>`
+            ? `<span class="tag-pill" style="background:${project.color};color:${textColorFor(project.color)};">${escapeHtml(projectIcon(project))} ${escapeHtml(project.name)}</span>`
             : `<span class="list-table__cell-text">—</span>`;
         }
         return `<span class="list-table__cell-text">${escapeHtml(task.customFields?.[col.fieldId] ?? "—")}</span>`;

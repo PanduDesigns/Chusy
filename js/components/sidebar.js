@@ -4,17 +4,18 @@
 // (redondo, en el borde derecho) — queda como preferencia de este
 // navegador, no afecta a nadie más ni a otras sesiones.
 // ============================================================================
-import { initials, colorFromString, escapeHtml } from "../utils.js";
+import { initials, colorFromString, escapeHtml, projectBadgeHtml } from "../utils.js";
 import { openContextMenu } from "./context-menu.js";
 import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/projects.js";
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
+import { openEditProjectModal } from "./edit-project-modal.js";
 
 export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const items = projects.map((p) => `
     <button class="sidebar__item${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}" title="${escapeHtml(p.name)}">
-      <span class="sidebar__item-dot" style="background:${p.color || "#FCD000"}"></span>
+      ${projectBadgeHtml(p)}
       <span class="sidebar__item-name sidebar__label">${escapeHtml(p.name)}</span>
     </button>
   `).join("");
@@ -79,9 +80,8 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       openContextMenu({
         x: e.clientX, y: e.clientY,
         items: [
-          { label: "Renombrar proyecto", icon: "✎", onClick: () => {
-            const name = prompt("Nuevo nombre del proyecto:", project.name);
-            if (name && name.trim()) updateProject(project.id, { name: name.trim() });
+          { label: "Editar proyecto", icon: "✎", onClick: () => {
+            openEditProjectModal({ project, onSave: (data) => updateProject(project.id, data) });
           } },
           {
             label: "Campos personalizados",

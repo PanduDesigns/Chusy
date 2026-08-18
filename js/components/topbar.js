@@ -1,7 +1,7 @@
 // ============================================================================
 // Topbar: título del proyecto, contador de tareas, cambio de vista, nueva tarea.
 // ============================================================================
-import { escapeHtml } from "../utils.js";
+import { escapeHtml, projectIcon } from "../utils.js";
 
 const VIEWS = [
   { id: "list", label: "Lista" },
@@ -18,7 +18,7 @@ export function renderTopbar(container, { project, taskCount, currentView, onVie
   container.innerHTML = `
     <button class="btn btn--ghost btn--sm sidebar-toggle" id="btn-toggle-sidebar" style="display:none;">☰</button>
     <div>
-      <span class="topbar__title">${escapeHtml(project.name)}</span>
+      <span class="topbar__title">${escapeHtml(projectIcon(project))} ${escapeHtml(project.name)}</span>
       <span class="topbar__count">${taskCount} ${taskCount === 1 ? "tarea" : "tareas"}</span>
     </div>
     <div class="topbar__views">${viewButtons}</div>

@@ -13,7 +13,7 @@
 // una columna en esa fecha. Los hitos siempre se dibujan como un rombo,
 // nunca como barra.
 // ============================================================================
-import { escapeHtml, toDate, addDays, daysBetween, isoWeekNumber, mondayOf } from "../utils.js";
+import { escapeHtml, toDate, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml } from "../utils.js";
 import { openTaskContextMenu } from "./list-view.js";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -62,7 +62,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
   const rows = [];
   groups.forEach((g) => {
     if (!g.tasks.length) return;
-    rows.push({ type: "group", label: g.label, color: g.color });
+    rows.push({ type: "group", label: g.label, color: g.color, icon: g.icon });
     g.tasks.forEach((t) => rows.push({ type: "task", task: t }));
   });
 
@@ -106,7 +106,8 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
   rows.forEach((row, ri) => {
     const gridRow = ri + 2;
     if (row.type === "group") {
-      cells += `<div class="tl-group-label" style="grid-column:1;grid-row:${gridRow};"><span class="tl-group-dot" style="background:${row.color}"></span>${escapeHtml(row.label)}</div>`;
+      const marker = row.icon ? badgeHtml(row.icon, row.color, "project-badge--sm") : `<span class="tl-group-dot" style="background:${row.color}"></span>`;
+      cells += `<div class="tl-group-label" style="grid-column:1;grid-row:${gridRow};">${marker}${escapeHtml(row.label)}</div>`;
       cells += `<div class="tl-group-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
       return;
     }

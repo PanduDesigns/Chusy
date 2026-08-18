@@ -70,7 +70,10 @@ Para restringir quién puede registrarse a los correos de tu empresa: Firestore 
 Se ve todo el formulario de golpe (fechas, prioridad, responsables, etiquetas, subtareas, adjuntos…) tanto al crear como al editar, y **nada se guarda hasta pulsar "Aceptar"**. Si cierras sin aceptar habiendo cambiado algo, pregunta si quieres descartarlo. Los comentarios son la única excepción: se envían al momento en cuanto pulsas "Enviar", y solo están disponibles editando una tarea ya guardada (una tarea nueva todavía no tiene dónde colgarlos).
 
 ### Clic derecho para más acciones
-Clic derecho sobre una tarea (en Lista, Tablero o Mis tareas): marcar completada, duplicar, convertir en hito, abrir detalles o eliminar. Clic derecho sobre un proyecto en la barra lateral: renombrar o eliminar (esto último borra también todas sus tareas y comentarios).
+Clic derecho sobre una tarea (en Lista, Tablero o Mis tareas): marcar completada, duplicar, convertir en hito, abrir detalles o eliminar. Clic derecho sobre un proyecto en la barra lateral: editar (nombre, icono y color), archivar o eliminar (esto último borra también todas sus tareas y comentarios).
+
+### Icono y color de proyecto
+Cada proyecto se identifica con un emoji "sombreado" del color que elijas, en vez del simple punto de color de antes. Al crear o editar un proyecto hay una rejilla de emojis pensados para procesos industriales (fábrica, engranaje, tornillería, grúa, tronco de madera, coche, tren, avión, barco, componentes eléctricos…), un desplegable "Más iconos" con otra tanda más variada, y un campo para pegar o escribir cualquier otro emoji, así que las combinaciones posibles son prácticamente ilimitadas. Ese icono aparece en la barra lateral, el archivo, el buscador, los filtros, Mis tareas, la cabecera del proyecto y la línea de tiempo global, para diferenciar los proyectos de un vistazo.
 
 ### Etiquetas de color
 Al escribir una etiqueta en una tarea, se sugieren las que ya existen (con su color) para reutilizarlas; si escribes una nueva, puedes elegirle color desde una paleta, y se queda seleccionado ese mismo color por defecto para la siguiente etiqueta nueva que crees. El color de una etiqueta es compartido: cambiarlo afecta a todas las tareas que la llevan.
@@ -150,6 +153,8 @@ js/
     sidebar.js                  Proyectos + Mis tareas + Línea de tiempo + Archivo + buscador + menú de cuenta
     topbar.js                    Selector de vista + nueva tarea
     project-modal.js             Crear proyecto
+    edit-project-modal.js         Editar nombre/icono/color de un proyecto existente
+    project-appearance-picker.js  Selector de icono+color compartido (crear y editar)
     custom-fields-modal.js        Definir campos personalizados (lista/número/texto)
     task-modal.js                  Formulario único de tarea (crear/editar)
     context-menu.js                Menú contextual reutilizable (clic derecho)
@@ -174,7 +179,7 @@ firestore.rules             Reglas de seguridad de Firestore
 ## 5. Modelo de datos (Firestore)
 
 - **`users/{uid}`** — `name`, `email`, `role` (`admin` | `miembro`), `personalCustomFieldDefs[]` (mismo formato que los de proyecto, pero solo tuyos — se usan en "Mis tareas"), `columnPrefs` (`{[scopeKey]: {widths:{[colKey]:px}, hidden:[colKey,...]}}`, `scopeKey` = `project:<id>` o `mytasks` — anchos y columnas ocultas de las tablas, por persona)
-- **`projects/{id}`** — `name`, `description`, `color`, `sections[]`, `memberIds[]` (informativo), `customFieldDefs[]` (`{id,name,type:'lista'|'numero'|'texto',options[]}`), `archived`, `createdBy`
+- **`projects/{id}`** — `name`, `description`, `color`, `icon` (emoji; `📁` si no se ha elegido uno), `sections[]`, `memberIds[]` (informativo), `customFieldDefs[]` (`{id,name,type:'lista'|'numero'|'texto',options[]}`), `archived`, `createdBy`
 - **`tasks/{id}`** — `projectId` (null si es personal), `ownerId` (solo tareas personales), `sectionId`, `title`, `description`, `assigneeIds[]`, `startDate`, `dueDate`, `priority`, `tags[]` (nombres; el color vive en `tags/`), `dependsOn[]`, `subtasks[]`, `attachments[]` (`{id,name,url}`), `customFields` (`{[fieldId]: valor}`), `isComplete`, `isMilestone`, `order`
 - **`tasks/{id}/comments/{id}`** — `authorId`, `authorName`, `text`
 - **`tags/{slug}`** — `name`, `color`
@@ -193,5 +198,4 @@ firestore.rules             Reglas de seguridad de Firestore
 - La primera vez que Firestore ejecute algunas consultas puede mostrarte en la consola un enlace para crear un índice compuesto — es normal, solo hay que pulsarlo una vez.
 - El orden de tareas al arrastrar en el tablero usa valores numéricos intermedios; a gran escala convendría "renormalizar" los números de vez en cuando (no es un problema al tamaño de un departamento).
 - Al abrir una tarea desde "Mis tareas" que pertenece a un proyecto distinto al que tienes seleccionado, el selector de "bloqueada por" solo lista las tareas de ese proyecto que también tienes asignadas a ti, no todas.
-- Renombrar un proyecto usa el cuadro de diálogo nativo del navegador (`prompt`), no un formulario propio — funcional pero sencillo; se puede pulir más adelante.
 - Los anchos de columna "de serie" son valores fijos pensados para el contenido habitual (fecha corta, una etiqueta de prioridad, unos pocos avatares), no una medición real del contenido de cada tarea — para eso están el arrastre y el ocultar/mostrar, que si ajustas una vez quedan guardados para ti.

@@ -26,11 +26,12 @@ const DEFAULT_SECTIONS = [
 ];
 
 /** Crea un proyecto nuevo. El creador queda como miembro automáticamente. */
-export async function createProject({ name, description, color, creatorUid, sections }) {
+export async function createProject({ name, description, color, icon, creatorUid, sections }) {
   const ref = await addDoc(collection(db, "projects"), {
     name,
     description: description || "",
     color: color || "#FCD000",
+    icon: icon || "📁",
     sections: sections && sections.length ? sections : DEFAULT_SECTIONS,
     memberIds: [creatorUid],
     createdBy: creatorUid,
