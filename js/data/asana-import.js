@@ -20,23 +20,28 @@
 //    hay forma de crear cuentas de verdad desde aquí) y `isImported: true`.
 //  - meta/asanaUserMap: { [gidDeAsana]: uidRealDeChusy }. Si una persona no
 //    aparece ahí, sigue siendo ficticia.
-//  - meta/asanaImportIndex: { projects, tasks, comments } — de gid de
-//    Asana a id de documento en Chusy. Sirve para que importar el mismo
-//    archivo dos veces no duplique nada, y para poder borrar de un tirón
-//    los datos de una importación de prueba.
+//  - meta/asanaImportIndex: { projects, tasks, comments, byFicticiousUser }
+//    — de gid de Asana a id de documento en Chusy, más un índice inverso
+//    (qué tareas/comentarios quedan bajo cada persona ficticia). Sirve para
+//    que importar el mismo archivo dos veces no duplique nada, para poder
+//    borrar de un tirón los datos de una prueba, y para que "Aplicar
+//    equivalencia" pueda encontrar y reescribir sus tareas y comentarios
+//    por id directo — sin depender de consultas amplias sobre `tasks` (los
+//    permisos de Firestore para listados con condición "o eres tú o eres
+//    admin" no son fiables cuando el documento no es tuyo, aunque sí lo son
+//    para leer/escribir un documento concreto por id, que es lo que se usa
+//    aquí).
 // ============================================================================
 import { db } from "../firebase-init.js";
 import {
   collection,
-  collectionGroup,
   doc,
   getDoc,
-  getDocs,
   setDoc,
   updateDoc,
   writeBatch,
-  query,
-  where,
+  arrayRemove,
+  arrayUnion,
   serverTimestamp,
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
@@ -265,7 +270,7 @@ export async function getUserMap() {
 
 export async function getImportIndex() {
   const snap = await getDoc(doc(db, "meta", "asanaImportIndex"));
-  return snap.exists() ? snap.data() : { projects: {}, tasks: {}, comments: {} };
+  return snap.exists() ? snap.data() : { projects: {}, tasks: {}, comments: {}, byFicticiousUser: {} };
 }
 
 /** Comparación de solo lectura, para el resumen previo a confirmar: cuánto de
@@ -448,6 +453,56 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
   }
   await flush();
 
+  // ---- índice inverso: qué tareas/comentarios quedan bajo cada persona
+  // ficticia. Se recorren TODAS las tareas del archivo (no solo las nuevas)
+  // para que, si esto se ejecuta sobre un archivo ya importado antes de que
+  // este índice existiera, una simple re-importación lo deje al día sin
+  // duplicar nada. Se parte de lo que ya hubiera en el índice por si esta
+  // carga no cubre tareas de una importación anterior con otro archivo.
+  report("Indexando personas ficticias…");
+  const byFicticiousUser = {};
+  for (const [gid, bucket] of Object.entries(index.byFicticiousUser || {})) {
+    byFicticiousUser[gid] = {
+      assigneeTaskIds: [...(bucket.assigneeTaskIds || [])],
+      creatorTaskIds: [...(bucket.creatorTaskIds || [])],
+      ownerTaskIds: [...(bucket.ownerTaskIds || [])],
+      comments: [...(bucket.comments || [])],
+    };
+  }
+  const bucketFor = (gid) => {
+    if (!byFicticiousUser[gid]) byFicticiousUser[gid] = { assigneeTaskIds: [], creatorTaskIds: [], ownerTaskIds: [], comments: [] };
+    return byFicticiousUser[gid];
+  };
+  for (const t of parsed.tasks) {
+    const taskId = taskIdByAsanaGid.get(t.asanaGid);
+    if (!taskId) continue;
+    if (t.assigneeAsanaGid && !userMap[t.assigneeAsanaGid]) {
+      const b = bucketFor(t.assigneeAsanaGid);
+      if (!b.assigneeTaskIds.includes(taskId)) b.assigneeTaskIds.push(taskId);
+    }
+    if (t.createdByAsanaGid && !userMap[t.createdByAsanaGid]) {
+      const b = bucketFor(t.createdByAsanaGid);
+      if (!b.creatorTaskIds.includes(taskId)) b.creatorTaskIds.push(taskId);
+    }
+    if (!t.project) {
+      // tarea personal: el dueño es el mismo resuelto que se usó al
+      // crearla (responsable y, si no había, quien la creó)
+      const ownerGid = t.assigneeAsanaGid || t.createdByAsanaGid;
+      if (ownerGid && !userMap[ownerGid]) {
+        const b = bucketFor(ownerGid);
+        if (!b.ownerTaskIds.includes(taskId)) b.ownerTaskIds.push(taskId);
+      }
+    }
+    for (const c of t.comments) {
+      const ref = commentIndex[c.asanaGid];
+      if (!ref || !c.authorAsanaGid || userMap[c.authorAsanaGid]) continue;
+      const b = bucketFor(c.authorAsanaGid);
+      if (!b.comments.some((x) => x.taskId === ref.taskId && x.commentId === ref.commentId)) {
+        b.comments.push({ taskId: ref.taskId, commentId: ref.commentId });
+      }
+    }
+  }
+
   report("Guardando el índice de importación…");
   await setDoc(
     doc(db, "meta", "asanaImportIndex"),
@@ -455,6 +510,7 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
       projects: Object.fromEntries(projectIdByAsanaGid),
       tasks: Object.fromEntries(taskIdByAsanaGid),
       comments: commentIndex,
+      byFicticiousUser,
       lastImportAt: serverTimestamp(),
     },
     { merge: true }
@@ -473,7 +529,13 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
 /**
  * Aplica la equivalencia "esta persona de Asana es en realidad Fulanito":
  * reescribe todas las tareas y comentarios que hasta ahora llevaban el id
- * ficticio, y marca el perfil ficticio como fusionado (no se borra, por si
+ * ficticio (localizados por id directo a través del índice construido
+ * durante la importación, no mediante una consulta amplia sobre `tasks` —
+ * eso es lo que fallaba con "privilegios insuficientes": la regla de
+ * lectura de `tasks` que dice "o es tuya o eres admin" no la puede
+ * verificar Firestore para una CONSULTA sobre documentos ajenos, aunque sí
+ * para leer o escribir un documento concreto por id, que es lo que se hace
+ * aquí) y marca el perfil ficticio como fusionado (no se borra, por si
  * queda algo suelto que se nos haya escapado).
  */
 export async function applyUserMapping({ asanaGid, targetUid, teamMembers }) {
@@ -481,44 +543,54 @@ export async function applyUserMapping({ asanaGid, targetUid, teamMembers }) {
   const target = teamMembers.find((m) => m.uid === targetUid);
   if (!target) throw new Error("No se encontró esa cuenta.");
 
-  const [byAssignee, byCreator, byComments] = await Promise.all([
-    getDocs(query(collection(db, "tasks"), where("assigneeIds", "array-contains", ficticioId))),
-    getDocs(query(collection(db, "tasks"), where("createdBy", "==", ficticioId))),
-    getDocs(query(collectionGroup(db, "comments"), where("authorId", "==", ficticioId))),
-  ]);
-
-  const taskUpdates = new Map();
-  byAssignee.forEach((d) => {
-    const ids = new Set((d.data().assigneeIds || []).filter((id) => id !== ficticioId));
-    ids.add(targetUid);
-    taskUpdates.set(d.id, { ...(taskUpdates.get(d.id) || {}), assigneeIds: [...ids] });
-  });
-  byCreator.forEach((d) => {
-    taskUpdates.set(d.id, { ...(taskUpdates.get(d.id) || {}), createdBy: targetUid });
-  });
+  const index = await getImportIndex();
+  const bucket = (index.byFicticiousUser || {})[asanaGid] || { assigneeTaskIds: [], creatorTaskIds: [], ownerTaskIds: [], comments: [] };
 
   let batch = writeBatch(db);
   let ops = 0;
   const flush = async () => { if (ops) { await batch.commit(); batch = writeBatch(db); ops = 0; } };
-
-  for (const [taskId, data] of taskUpdates) {
-    batch.update(doc(db, "tasks", taskId), data);
+  const stage = async (ref, data) => {
+    batch.update(ref, data);
     ops++;
     if (ops >= BATCH_LIMIT) await flush();
+  };
+
+  // assigneeIds es un array: quitar el id ficticio y añadir el real son dos
+  // pasadas independientes (arrayRemove/arrayUnion), porque un mismo campo
+  // no admite dos transformaciones distintas en una sola escritura.
+  for (const taskId of bucket.assigneeTaskIds) {
+    await stage(doc(db, "tasks", taskId), { assigneeIds: arrayRemove(ficticioId) });
   }
   await flush();
-
-  for (const d of byComments.docs) {
-    batch.update(d.ref, { authorId: targetUid, authorName: target.name || target.email });
-    ops++;
-    if (ops >= BATCH_LIMIT) await flush();
+  for (const taskId of bucket.assigneeTaskIds) {
+    await stage(doc(db, "tasks", taskId), { assigneeIds: arrayUnion(targetUid) });
+  }
+  await flush();
+  for (const taskId of bucket.creatorTaskIds) {
+    await stage(doc(db, "tasks", taskId), { createdBy: targetUid });
+  }
+  await flush();
+  // tareas personales (sin proyecto): el dueño también hay que reescribirlo,
+  // o la persona real nunca podría ver su propia tarea al registrarse.
+  for (const taskId of bucket.ownerTaskIds || []) {
+    await stage(doc(db, "tasks", taskId), { ownerId: targetUid });
+  }
+  await flush();
+  for (const { taskId, commentId } of bucket.comments) {
+    await stage(doc(db, "tasks", taskId, "comments", commentId), {
+      authorId: targetUid,
+      authorName: target.name || target.email,
+    });
   }
   await flush();
 
   await updateDoc(doc(db, "users", ficticioId), { mergedInto: targetUid });
   await setDoc(doc(db, "meta", "asanaUserMap"), { [asanaGid]: targetUid }, { merge: true });
 
-  return { tasksUpdated: taskUpdates.size, commentsUpdated: byComments.size };
+  return {
+    tasksUpdated: new Set([...bucket.assigneeTaskIds, ...bucket.creatorTaskIds, ...(bucket.ownerTaskIds || [])]).size,
+    commentsUpdated: bucket.comments.length,
+  };
 }
 
 /**
@@ -555,7 +627,7 @@ export async function wipeImportedData({ ficticiousUserIds }) {
   }
   await flush();
 
-  await setDoc(doc(db, "meta", "asanaImportIndex"), { projects: {}, tasks: {}, comments: {} });
+  await setDoc(doc(db, "meta", "asanaImportIndex"), { projects: {}, tasks: {}, comments: {}, byFicticiousUser: {} });
   await setDoc(doc(db, "meta", "asanaUserMap"), {});
 
   return {
