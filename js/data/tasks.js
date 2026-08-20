@@ -122,17 +122,54 @@ export function subscribeToTask(taskId, callback) {
 /**
  * Tareas asignadas a `uid` en cualquier proyecto, MÁS sus tareas
  * personales (que también llevan su propio uid en assigneeIds) — por eso
- * un solo listener sirve para toda la vista "Mis tareas".
+ * de cara a quien la usa es un solo listener para toda la vista "Mis
+ * tareas". Por dentro son DOS consultas separadas, a propósito: la regla
+ * de lectura de `tasks` es "o es una tarea de proyecto, o es tuya, o eres
+ * admin", y esa condición depende de `projectId`/`ownerId` — campos que un
+ * único `where("assigneeIds","array-contains",uid)` no acota para nada.
+ * Firestore no puede demostrar que la consulta es segura sin esa acotación
+ * y la rechaza entera para cualquiera que no sea admin (por eso solo tú,
+ * como admin, veías tus tareas). Acotando cada consulta al campo exacto
+ * que la regla necesita, las dos quedan verificables para cualquier
+ * persona con sesión iniciada, sea admin o no.
  */
 export function subscribeToMyTasks(uid, callback) {
-  const q = query(collection(db, "tasks"), where("assigneeIds", "array-contains", uid));
-  return onSnapshot(
-    q,
-    (snap) => {
-      const tasks = [];
-      snap.forEach((d) => tasks.push({ id: d.id, ...d.data() }));
-      callback(tasks);
-    },
-    (err) => console.error("subscribeToMyTasks:", err)
+  let projectTasks = [];
+  let personalTasks = [];
+  let projectLoaded = false;
+  let personalLoaded = false;
+  const emit = () => {
+    if (!projectLoaded || !personalLoaded) return; // esperar a tener las dos partes antes del primer aviso
+    callback([...projectTasks, ...personalTasks]);
+  };
+
+  const qProject = query(
+    collection(db, "tasks"),
+    where("assigneeIds", "array-contains", uid),
+    where("projectId", "!=", null)
   );
+  const unsubProject = onSnapshot(
+    qProject,
+    (snap) => {
+      projectTasks = [];
+      snap.forEach((d) => projectTasks.push({ id: d.id, ...d.data() }));
+      projectLoaded = true;
+      emit();
+    },
+    (err) => console.error("subscribeToMyTasks (proyecto):", err)
+  );
+
+  const qPersonal = query(collection(db, "tasks"), where("ownerId", "==", uid));
+  const unsubPersonal = onSnapshot(
+    qPersonal,
+    (snap) => {
+      personalTasks = [];
+      snap.forEach((d) => personalTasks.push({ id: d.id, ...d.data() }));
+      personalLoaded = true;
+      emit();
+    },
+    (err) => console.error("subscribeToMyTasks (personal):", err)
+  );
+
+  return () => { unsubProject(); unsubPersonal(); };
 }
