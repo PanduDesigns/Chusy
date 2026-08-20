@@ -127,11 +127,15 @@ export function openAsanaImportModal({ teamMembers, currentUser }) {
       </div>`
       : "";
 
+    const repairNote =
+      state.lastResult && (state.lastResult.projectsSectionsSynced || state.lastResult.tasksRepaired)
+        ? ` También se han revisado ${state.lastResult.projectsSectionsSynced} proyecto(s) con secciones nuevas y reparado ${state.lastResult.tasksRepaired} tarea(s) que se habían quedado sin sección válida.`
+        : "";
     const resultBlock = state.lastResult
       ? `
       <div style="background:var(--color-success-soft);border:1px solid var(--color-success);border-radius:var(--radius-sm);padding:10px 14px;font-size:12.5px;color:var(--color-text-hi);">
         Importado: ${state.lastResult.projectsCreated} proyectos, ${state.lastResult.tasksCreated} tareas y ${state.lastResult.commentsCreated} comentarios nuevos.
-        ${state.lastResult.projectsSkipped + state.lastResult.tasksSkipped > 0 ? ` (el resto ya estaba importado de antes, no se ha duplicado)` : ""}
+        ${state.lastResult.projectsSkipped + state.lastResult.tasksSkipped > 0 ? ` (el resto ya estaba importado de antes, no se ha duplicado)` : ""}${repairNote}
       </div>`
       : "";
 
@@ -203,11 +207,16 @@ export function openAsanaImportModal({ teamMembers, currentUser }) {
 
   function renderFooter() {
     const newCount = state.diff ? state.diff.newProjects + state.diff.newTasks + state.diff.newComments : 0;
-    const canConfirm = state.parsed && !state.busy && newCount > 0;
+    // Aunque no haya nada "nuevo" que crear, confirmar sigue siendo útil:
+    // revisa los proyectos ya importados en busca de secciones que falten
+    // y repara las tareas que se hubieran quedado apuntando a una sección
+    // que ya no existe (ver runImport). Por eso el botón no se bloquea
+    // solo por newCount === 0 — solo si no hay archivo cargado.
+    const canConfirm = state.parsed && !state.busy;
     return `
       <button type="button" class="btn btn--ghost" id="cancel" ${state.busy ? "disabled" : ""}>Cerrar</button>
       <button type="button" class="btn btn--primary" id="ai-confirm" style="margin-left:auto;" ${canConfirm ? "" : "disabled"}>
-        ${state.busy ? "Importando…" : state.parsed ? `Confirmar importación${newCount ? ` (${newCount} nuevos)` : " (nada nuevo)"}` : "Confirmar importación"}
+        ${state.busy ? "Importando…" : state.parsed ? `Confirmar importación${newCount ? ` (${newCount} nuevos)` : " (repasar y reparar)"}` : "Confirmar importación"}
       </button>`;
   }
 

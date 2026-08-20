@@ -467,6 +467,7 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
   // fallo que se acaba de arreglar más arriba producía justo esto), se
   // corrige aquí solo ese campo — si la moviste tú a mano a otra sección
   // que sigue siendo válida, eso no se toca.
+  let tasksRepaired = 0;
   if (projectsWithNewSections.size) {
     report("Reparando tareas ya importadas con sección huérfana…");
     const validSectionIdsByProjectGid = new Map(
@@ -487,6 +488,7 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
         const storedSectionId = snap.data().sectionId;
         if (validIds && !validIds.has(storedSectionId)) {
           await stageUpdate(doc(db, "tasks", taskIdByAsanaGid.get(t.asanaGid)), { sectionId: t.sectionId });
+          tasksRepaired++;
         }
       }
     }
@@ -590,8 +592,10 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
   return {
     projectsCreated: newProjects.length,
     projectsSkipped: parsed.projects.length - newProjects.length,
+    projectsSectionsSynced: projectsWithNewSections.size,
     tasksCreated: newTasks.length,
     tasksSkipped: parsed.tasks.length - newTasks.length,
+    tasksRepaired,
     commentsCreated: newCommentsCount,
     commentsSkipped: parsed.summary.comments - newCommentsCount,
   };
