@@ -45,7 +45,6 @@ import {
   serverTimestamp,
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
-import { uid } from "../utils.js";
 import { slugifyTag, upsertTag } from "./tags.js";
 import { PROJECT_COLORS, CURATED_ICONS } from "../components/project-appearance-picker.js";
 
@@ -156,12 +155,20 @@ export function parseAsanaExport(jsonText) {
     usedNames.set(key, seen + 1);
     if (seen > 0) name = `${name} (${seen + 1})`;
 
+    // El id de sección tiene que ser el MISMO cada vez que se vuelva a
+    // parsear este archivo (o uno posterior): se deriva del gid de Asana en
+    // vez de generarse al azar. Si no fuera así, un proyecto que ya
+    // existiera de una importación anterior se quedaría con tareas nuevas
+    // apuntando a un id de sección que nunca se guardó en su documento (el
+    // proyecto en sí no se vuelve a crear, así que su `sections[]` no
+    // cambiaría) y esas tareas dejarían de verse en cualquier vista
+    // agrupada por sección, aunque sigan contando en el total.
     let sections = (p.sections || []).map((s) => ({
       asanaGid: s.gid,
-      id: uid(),
+      id: `asana-sec:${s.gid}`,
       name: normalizeSectionName(s.name),
     }));
-    if (!sections.length) sections = [{ asanaGid: null, id: uid(), name: "General" }];
+    if (!sections.length) sections = [{ asanaGid: null, id: `asana-sec:${proj.gid}:default`, name: "General" }];
 
     return {
       asanaGid: proj.gid,
@@ -346,6 +353,7 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
   }
 
   const index = await getImportIndex();
+  const projectGidsAlreadyImported = new Set(Object.keys(index.projects || {}));
   const projectIdByAsanaGid = new Map(Object.entries(index.projects || {}));
   const taskIdByAsanaGid = new Map(Object.entries(index.tasks || {}));
   const commentIndex = { ...(index.comments || {}) };
@@ -357,6 +365,11 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
   };
   const stage = (ref, data) => {
     batch.set(ref, data);
+    ops++;
+    return ops >= BATCH_LIMIT ? flush() : null;
+  };
+  const stageUpdate = (ref, data) => {
+    batch.update(ref, data);
     ops++;
     return ops >= BATCH_LIMIT ? flush() : null;
   };
@@ -381,6 +394,33 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
     });
   }
   await flush();
+
+  // ---- proyectos que YA existían: sincronizar secciones nuevas ----
+  // El proyecto no se vuelve a crear entero, pero si este archivo trae una
+  // sección que su documento todavía no tiene (por id, ya determinista —
+  // ver parseAsanaExport), se añade. Si no se hiciera esto, cualquier tarea
+  // nueva de esa sección se quedaría sin dónde agruparse visualmente,
+  // aunque sí contaría en el total de tareas del proyecto.
+  report("Comprobando secciones de proyectos existentes…");
+  const projectsWithNewSections = new Set();
+  for (const p of parsed.projects) {
+    if (!projectGidsAlreadyImported.has(p.asanaGid)) continue; // es nuevo, ya se ha creado arriba al día
+    const projectId = projectIdByAsanaGid.get(p.asanaGid);
+    if (!projectId) continue;
+    const snap = await getDoc(doc(db, "projects", projectId));
+    if (!snap.exists()) continue;
+    const currentSections = snap.data().sections || [];
+    const currentIds = new Set(currentSections.map((s) => s.id));
+    const missing = p.sections.filter((s) => !currentIds.has(s.id));
+    if (missing.length) {
+      const merged = [
+        ...currentSections,
+        ...missing.map((s, i) => ({ id: s.id, name: s.name, order: currentSections.length + i })),
+      ];
+      await updateDoc(doc(db, "projects", projectId), { sections: merged });
+      projectsWithNewSections.add(p.asanaGid);
+    }
+  }
 
   // ---- tareas (de proyecto o personales) ----
   report("Importando tareas…");
@@ -421,6 +461,37 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
     });
   }
   await flush();
+
+  // ---- tareas ya importadas en proyectos que acaban de recibir secciones
+  // nuevas: si alguna se quedó con un id de sección que ya no existe (el
+  // fallo que se acaba de arreglar más arriba producía justo esto), se
+  // corrige aquí solo ese campo — si la moviste tú a mano a otra sección
+  // que sigue siendo válida, eso no se toca.
+  if (projectsWithNewSections.size) {
+    report("Reparando tareas ya importadas con sección huérfana…");
+    const validSectionIdsByProjectGid = new Map(
+      parsed.projects.map((p) => [p.asanaGid, new Set(p.sections.map((s) => s.id))])
+    );
+    const toRecheck = parsed.tasks.filter(
+      (t) => t.project && projectsWithNewSections.has(t.projectAsanaGid) && !newTasks.includes(t)
+    );
+    const CONCURRENCY = 25;
+    for (let i = 0; i < toRecheck.length; i += CONCURRENCY) {
+      const slice = toRecheck.slice(i, i + CONCURRENCY);
+      const snaps = await Promise.all(slice.map((t) => getDoc(doc(db, "tasks", taskIdByAsanaGid.get(t.asanaGid)))));
+      for (let j = 0; j < slice.length; j++) {
+        const t = slice[j];
+        const snap = snaps[j];
+        if (!snap.exists()) continue;
+        const validIds = validSectionIdsByProjectGid.get(t.projectAsanaGid);
+        const storedSectionId = snap.data().sectionId;
+        if (validIds && !validIds.has(storedSectionId)) {
+          await stageUpdate(doc(db, "tasks", taskIdByAsanaGid.get(t.asanaGid)), { sectionId: t.sectionId });
+        }
+      }
+    }
+    await flush();
+  }
 
   // ---- etiquetas: upsertTag es idempotente por diseño (mismo nombre =
   // mismo slug = mismo documento), así que no hace falta comprobar el
@@ -543,6 +614,13 @@ export async function applyUserMapping({ asanaGid, targetUid, teamMembers }) {
   const target = teamMembers.find((m) => m.uid === targetUid);
   if (!target) throw new Error("No se encontró esa cuenta.");
 
+  const ficticioSnap = await getDoc(doc(db, "users", ficticioId));
+  if (!ficticioSnap.exists()) {
+    throw new Error(
+      "Esta persona ya no existe como usuario ficticio (puede que se haya borrado con \"Borrar todo lo importado\"). Vuelve a cargar el archivo de importación para regenerarla."
+    );
+  }
+
   const index = await getImportIndex();
   const bucket = (index.byFicticiousUser || {})[asanaGid] || { assigneeTaskIds: [], creatorTaskIds: [], ownerTaskIds: [], comments: [] };
 
@@ -555,34 +633,41 @@ export async function applyUserMapping({ asanaGid, targetUid, teamMembers }) {
     if (ops >= BATCH_LIMIT) await flush();
   };
 
-  // assigneeIds es un array: quitar el id ficticio y añadir el real son dos
-  // pasadas independientes (arrayRemove/arrayUnion), porque un mismo campo
-  // no admite dos transformaciones distintas en una sola escritura.
-  for (const taskId of bucket.assigneeTaskIds) {
-    await stage(doc(db, "tasks", taskId), { assigneeIds: arrayRemove(ficticioId) });
+  try {
+    // assigneeIds es un array: quitar el id ficticio y añadir el real son
+    // dos pasadas independientes (arrayRemove/arrayUnion), porque un mismo
+    // campo no admite dos transformaciones distintas en una sola escritura.
+    for (const taskId of bucket.assigneeTaskIds) {
+      await stage(doc(db, "tasks", taskId), { assigneeIds: arrayRemove(ficticioId) });
+    }
+    await flush();
+    for (const taskId of bucket.assigneeTaskIds) {
+      await stage(doc(db, "tasks", taskId), { assigneeIds: arrayUnion(targetUid) });
+    }
+    await flush();
+    for (const taskId of bucket.creatorTaskIds) {
+      await stage(doc(db, "tasks", taskId), { createdBy: targetUid });
+    }
+    await flush();
+    // tareas personales (sin proyecto): el dueño también hay que
+    // reescribirlo, o la persona real nunca podría ver su propia tarea al
+    // registrarse.
+    for (const taskId of bucket.ownerTaskIds || []) {
+      await stage(doc(db, "tasks", taskId), { ownerId: targetUid });
+    }
+    await flush();
+    for (const { taskId, commentId } of bucket.comments) {
+      await stage(doc(db, "tasks", taskId, "comments", commentId), {
+        authorId: targetUid,
+        authorName: target.name || target.email,
+      });
+    }
+    await flush();
+  } catch (err) {
+    throw new Error(
+      `Alguna tarea o comentario del índice ya no existe en Firestore (¿se borró a mano después de importar?). Vuelve a cargar el archivo de importación para regenerar el índice antes de reintentar. Detalle: ${err.message}`
+    );
   }
-  await flush();
-  for (const taskId of bucket.assigneeTaskIds) {
-    await stage(doc(db, "tasks", taskId), { assigneeIds: arrayUnion(targetUid) });
-  }
-  await flush();
-  for (const taskId of bucket.creatorTaskIds) {
-    await stage(doc(db, "tasks", taskId), { createdBy: targetUid });
-  }
-  await flush();
-  // tareas personales (sin proyecto): el dueño también hay que reescribirlo,
-  // o la persona real nunca podría ver su propia tarea al registrarse.
-  for (const taskId of bucket.ownerTaskIds || []) {
-    await stage(doc(db, "tasks", taskId), { ownerId: targetUid });
-  }
-  await flush();
-  for (const { taskId, commentId } of bucket.comments) {
-    await stage(doc(db, "tasks", taskId, "comments", commentId), {
-      authorId: targetUid,
-      authorName: target.name || target.email,
-    });
-  }
-  await flush();
 
   await updateDoc(doc(db, "users", ficticioId), { mergedInto: targetUid });
   await setDoc(doc(db, "meta", "asanaUserMap"), { [asanaGid]: targetUid }, { merge: true });

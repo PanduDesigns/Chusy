@@ -299,9 +299,22 @@ export function openAsanaImportModal({ teamMembers, currentUser }) {
       try {
         const ficticiousUserIds = teamMembers.filter((m) => m.isImported && !m.mergedInto).map((m) => m.uid);
         const result = await wipeImportedData({ ficticiousUserIds });
+        // teamMembers se capturó al abrir el panel y no se actualiza solo
+        // mientras sigue abierto (la suscripción en vivo vive en app.js) —
+        // sin esto, aunque se limpie state.parsed, la tabla podría seguir
+        // mostrando a estas personas hasta cerrar y reabrir el panel.
+        teamMembers = teamMembers.filter((m) => !ficticiousUserIds.includes(m.uid));
         state.index = { projects: {}, tasks: {}, comments: {} };
         state.userMap = {};
-        if (state.parsed) state.diff = diffAgainstIndex(state.parsed, state.index);
+        // El archivo que estuviera cargado ya no vale: sus personas de
+        // Asana quedarían mostrándose en la tabla de equivalencias aunque
+        // sus perfiles ficticios ya no existan en Firestore (justo lo que
+        // causaba "No document to update" si se le daba a Aplicar sin
+        // recargar). Se limpia todo para forzar a cargar un archivo de nuevo.
+        state.parsed = null;
+        state.diff = null;
+        state.fileName = "";
+        state.fileError = "";
         state.lastResult = null;
         showToast(`Borrado: ${result.projectsDeleted} proyectos, ${result.tasksDeleted} tareas, ${result.commentsDeleted} comentarios.`);
       } catch (err) {
