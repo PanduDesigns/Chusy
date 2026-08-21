@@ -23,6 +23,7 @@ import { openAccountModal } from "./components/account-modal.js";
 import { openTeamAdminModal } from "./components/team-admin-modal.js";
 import { openAsanaImportModal } from "./components/asana-import-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
+import { removeBulkToolbar } from "./components/bulk-toolbar.js";
 import { showToast } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
@@ -93,6 +94,7 @@ function cleanup() {
   projects = []; archivedProjects = []; teamMembers = []; myTasks = []; tagsRegistry = [];
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
   activeFilters = {}; sortState = { column: null, direction: "asc" };
+  removeBulkToolbar();
 }
 
 function bootstrap() {
@@ -214,6 +216,11 @@ function handleSortChange(column) {
 function renderShell() {
   if (!currentUser) return;
 
+  // Solo la vista de Lista vuelve a poblarla (al final de renderMain()); si
+  // el destino es otra vista/modo, queda limpia. Es barato: si sí toca
+  // mostrarla, se reconstruye igualmente unas líneas más abajo.
+  removeBulkToolbar();
+
   renderSidebar(sidebarEl, {
     projects,
     currentProjectId: mode === "project" ? currentProjectId : null,
@@ -319,6 +326,7 @@ function renderShell() {
 
 function renderMain() {
   if (mode !== "project" || !currentProject) return;
+  removeBulkToolbar(); // igual que en renderShell(): solo la vista de Lista la vuelve a mostrar
 
   const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, customFieldDefs: currentProject.customFieldDefs, tasks: currentTasks });
   renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
@@ -349,7 +357,7 @@ function renderMain() {
     });
   } else {
     const sortedTasks = sortTasks(filteredTasks, sortState, { teamMembers, projects });
-    renderListView(mainContentEl, { project: currentProject, tasks: sortedTasks, teamMembers, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, onAddTask: openNewProjectTask, currentUser });
+    renderListView(mainContentEl, { project: currentProject, tasks: sortedTasks, teamMembers, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, onAddTask: openNewProjectTask, currentUser, projects });
   }
 }
 

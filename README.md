@@ -127,6 +127,8 @@ Clic en tu nombre (pie de la barra lateral) abre un menú con **"Mi cuenta"**: v
 ### Importador de Asana (solo administradores)
 Desde el menú de tu nombre (pie de la barra lateral), si eres admin verás también **"Importar desde Asana"** — no aparece para el resto del equipo, así que no hace falta ocultarlo de ningún otro sitio. Carga ahí el archivo `.json` de export (formato `asana-api-export`) y verás un resumen de qué trae y cuánto es nuevo frente a lo ya importado antes; se puede cargar el mismo archivo varias veces sin miedo a duplicar nada.
 
+Reimportar el mismo archivo (o una versión más reciente de un proyecto que ya existía) es seguro y autorreparador: si trae una sección que el proyecto en Chusy todavía no tiene, se añade sola, y las tareas que se hubieran quedado apuntando a una sección que ya no existía se corrigen — esto podía pasar al reimportar un proyecto existente, y hacía que esas tareas «desaparecieran» de Lista o Tablero aunque siguieran contando en el total. Por eso el botón de confirmar sigue activo aunque el resumen diga «nada nuevo»: repasar y reparar sigue siendo útil aun sin crear nada. "Borrar todo lo importado" también limpia el archivo que tuvieras cargado en el panel y su tabla de equivalencias, para no dejar en pantalla a nadie cuyo perfil ficticio se acaba de borrar.
+
 Como las personas de Asana y las cuentas de Chusy no son las mismas, cada persona de Asana que aparece en el archivo se lista con un desplegable para decir "esto es en realidad Fulanito" (solo se pueden elegir cuentas ya registradas en Chusy — no hay forma de crear cuentas reales desde aquí). Mientras no se le asigne una cuenta real, queda como **usuario ficticio**: sus tareas y comentarios se ven con normalidad, pero no puede entrar en Chusy ni se ofrece como opción al asignar tareas nuevas. En cuanto se aplica una equivalencia, se reescriben automáticamente todas sus tareas y comentarios ya importados con la cuenta real — se puede hacer en el momento de importar o más adelante, según se vaya registrando cada persona; esta tabla de equivalencias está siempre disponible en el mismo panel, no solo durante una importación.
 
 Las subtareas de Asana entran como tareas normales del proyecto (con su responsable, fechas y comentarios propios si los tenían), no como el checklist ligero de "subtareas" de Chusy — se nota porque su descripción empieza con una referencia de vuelta a la tarea de la que venían. Los adjuntos **no se importan**: el export no trae los archivos, y reconstruir enlaces a partir del historial de actividad de Asana solo serviría mientras se mantenga acceso a Asana, lo cual no tiene sentido para una migración que busca dejar de depender de ella. Hay también una "zona de riesgo" en el propio panel para borrar de un tirón todo lo importado (por si una prueba sale mal) sin tocar nada creado a mano.
@@ -136,6 +138,12 @@ Enlace bajo el campo de contraseña en la pantalla de entrada: pide el correo y 
 
 ### Barra lateral minimizable
 Botón redondo en el borde derecho de la barra lateral (junto al logo): la reduce a una franja estrecha con solo el icono, la lista de proyectos como puntos de color y los iconos de Mis tareas / Línea de tiempo / Archivo — pasa el ratón por encima de cualquier icono para ver su nombre. Se anima con una transición suave. Es una preferencia de este navegador (se guarda con `localStorage`, no en tu cuenta), así que no afecta a otras sesiones ni dispositivos. En pantallas de móvil, donde la barra lateral ya se abre y cierra como un panel superpuesto con el botón de menú, este control no aparece — ahí no hace falta.
+
+### Selección múltiple y edición masiva (vista de Lista)
+Ctrl/Cmd+clic sobre una tarea la añade o la quita de la selección sin abrir su detalle; Shift+clic selecciona todo el tramo desde la última tocada (puede cruzar secciones). Un clic normal sigue abriendo la tarea como siempre. Con algo seleccionado aparece una barra flotante abajo: mover a otra sección, cambiar de proyecto (ajusta la sección al primero del proyecto destino), asignar a una persona, establecer fecha de inicio y/o límite (cada una con su propia casilla — dejarla en blanco la borra), eliminar, y un menú "···" con marcar como completadas / sin finalizar, agregar colaboradores (sin quitar a los que ya tuviera cada tarea), combinar tareas duplicadas en una sola (une responsables, etiquetas, subtareas, adjuntos y comentarios en la que elijas conservar, y borra las demás) y convertir en hitos. De momento solo está en la vista de Lista de un proyecto.
+
+### Corrección: "Mis tareas" ya muestra las tareas de todo el equipo, no solo las de un admin
+Solo quien tenía rol de admin veía algo en "Mis tareas" — al resto del equipo le aparecía siempre vacía, por más tareas que tuviera asignadas. La causa estaba en la consulta a Firestore: pedía las tareas con un único `where("assigneeIds","array-contains", uid)`, sin acotar por `projectId` ni `ownerId`. La regla de lectura de tareas es un OR de esos dos campos (más "eres admin"), y Firestore necesita poder demostrar que una consulta cumple la regla a partir de sus propios filtros; como esta no acotaba ninguno de los dos, la rechazaba entera para cualquiera que no fuera admin — la rama "eres admin" era la única que se salvaba siempre, y por eso solo un admin veía resultados. Ahora son dos consultas separadas por debajo (una acotada a `projectId != null`, otra a `ownerId == uid`), cada una calcada a una rama del OR, así que las dos quedan verificables para cualquiera con sesión iniciada — de cara a quien usa la app sigue siendo una sola vista, sin ningún cambio visible más que, ahora sí, ver lo que le corresponde. La consulta de proyecto es nueva para Firestore, así que es fácil que la primera vez que se ejecute pida crear su índice compuesto (el aviso con enlace de siempre, ver el apartado 7).
 
 ---
 
@@ -152,7 +160,7 @@ js/
   utils.js                   Fechas, avatares, contraste de color, helpers
   data/
     projects.js               CRUD de proyectos (incluye borrado en cascada y archivado)
-    tasks.js                   CRUD de tareas (proyecto y personales)
+    tasks.js                   CRUD de tareas (proyecto y personales) + operaciones en lote para la selección múltiple de Lista (mover, asignar, fechas, completar, combinar duplicadas, borrar)
     tags.js                     Registro compartido de etiquetas (nombre + color)
     comments.js                  Comentarios de una tarea
     users.js                      Perfil de usuario (Firestore) y configuración del equipo
@@ -173,9 +181,11 @@ js/
     asana-import-modal.js               Panel de admin: importar desde Asana y mapear personas
     reset-password-modal.js              "He olvidado mi contraseña" (pantalla de login)
     table-columns.js                     Ancho/orden/visibilidad de columnas de tabla (Lista y Mis tareas), por persona
+    bulk-selection.js                     Controlador de selección múltiple de tareas (Ctrl/Cmd+clic, Shift+clic) — reutilizable, de momento solo lo usa Lista
+    bulk-toolbar.js                        Barra flotante de acciones masivas sobre la selección (mover, cambiar de proyecto, asignar, fechas, completar, combinar duplicadas, convertir en hitos...)
   task-filters.js             Filtrado y ordenación de tareas (compartido por todas las vistas)
   views/
-    list-view.js                  Vista de Lista: tabla ordenable (+ menú contextual)
+    list-view.js                  Vista de Lista: tabla ordenable (+ menú contextual, selección múltiple y su barra de acciones masivas)
     board-view.js                  Vista de Tablero (Kanban con drag & drop)
     calendar-view.js                Vista de Calendario (barras de duración + hitos)
     timeline-view.js                 Línea de tiempo/Gantt (por proyecto o global, zoom, vacaciones)
@@ -190,7 +200,7 @@ firestore.rules             Reglas de seguridad de Firestore
 - **`users/{uid}`** — `name`, `email`, `role` (`admin` | `miembro`), `personalCustomFieldDefs[]` (mismo formato que los de proyecto, pero solo tuyos — se usan en "Mis tareas"), `columnPrefs` (`{[scopeKey]: {widths:{[colKey]:px}, hidden:[colKey,...]}}`, `scopeKey` = `project:<id>` o `mytasks` — anchos y columnas ocultas de las tablas, por persona). Un perfil "ficticio" creado por el importador de Asana añade además `isImported: true`, `asanaGid` (id de esa persona en Asana) y `mergedInto` (uid real una vez se le aplica una equivalencia; `null` mientras sigue ficticio) — su `{uid}` no es un UID de Firebase Auth real, sino `asana:<gid>`
 - **`projects/{id}`** — `name`, `description`, `color`, `icon` (emoji; `📁` si no se ha elegido uno), `sections[]`, `memberIds[]` (informativo), `customFieldDefs[]` (`{id,name,type:'lista'|'numero'|'texto',options[]}`), `archived`, `createdBy`. Si viene de una importación, además `asanaGid`
 - **`tasks/{id}`** — `projectId` (null si es personal), `ownerId` (solo tareas personales), `sectionId`, `title`, `description`, `assigneeIds[]`, `startDate`, `dueDate`, `priority`, `tags[]` (nombres; el color vive en `tags/`), `dependsOn[]`, `subtasks[]`, `attachments[]` (`{id,name,url}`), `customFields` (`{[fieldId]: valor}`), `isComplete`, `isMilestone`, `order`. Si viene de una importación, además `asanaGid`
-- **`tasks/{id}/comments/{id}`** — `authorId`, `authorName`, `text`. Si viene de una importación, además `asanaGid`
+- **`tasks/{id}/comments/{id}`** — `authorId`, `authorName`, `text`. Si viene de una importación, además `asanaGid`; si llegó por combinar tareas duplicadas, además `mergedFrom` (título de la tarea original de la que venía)
 - **`tags/{slug}`** — `name`, `color`
 - **`meta/asanaUserMap`** — `{[gidDeAsana]: uidReal}`: la tabla de equivalencias del importador de Asana. Quien no aparezca aquí sigue siendo un usuario ficticio
 - **`meta/asanaImportIndex`** — `{projects:{[gid]:id}, tasks:{[gid]:id}, comments:{[gid]:{taskId,commentId}}}`: de qué se ha importado ya, para que repetir una importación no duplique nada y se pueda deshacer una prueba de un tirón
@@ -203,6 +213,7 @@ firestore.rules             Reglas de seguridad de Firestore
 - Automatizaciones, formularios de solicitud, revisión de archivos, metas/OKRs, integraciones
 - Flechas de dependencia dibujadas en la línea de tiempo (los datos de "bloqueada por" ya existen, falta representarlos visualmente ahí)
 - Eliminar una cuenta por completo: un admin puede quitarle acceso a todo cambiándole el rol, pero borrar de verdad la cuenta de Firebase Authentication de otra persona no se puede hacer desde el navegador (hace falta el SDK de administración de Firebase, con un backend) — de momento no está implementado
+- Selección múltiple y barra de acciones masivas: de momento solo en la vista de Lista de un proyecto — llevarla también a Tablero y a Mis tareas
 
 ## 7. Limitaciones conocidas
 
@@ -212,3 +223,5 @@ firestore.rules             Reglas de seguridad de Firestore
 - Los anchos de columna "de serie" son valores fijos pensados para el contenido habitual (fecha corta, una etiqueta de prioridad, unos pocos avatares), no una medición real del contenido de cada tarea — para eso están el arrastre y el ocultar/mostrar, que si ajustas una vez quedan guardados para ti.
 - El importador de Asana no trae adjuntos, campos personalizados ni dependencias como dato estructurado, aunque el historial de actividad demuestre que los dos últimos sí se usaron en su momento. Para no perderlos en la importación definitiva, hay que pedirle esos campos a la API al generar el export; los adjuntos, mejor añadirlos aparte en su forma normal (un archivo que subir a donde vaya a vivir), no como enlace a Asana.
 - Una vez aplicada una equivalencia (persona de Asana → cuenta real), cambiarla por otra cuenta distinta no está pensado para hacerse desde el panel — solo el primer paso de "ficticio → cuenta real" reescribe tareas y comentarios automáticamente.
+- Combinar tareas duplicadas traslada los comentarios a la tarea que sobrevive, pero mover un comentario ajeno (que no escribiste tú) exige ser admin — la misma regla que usa el importador de Asana para reasignar autoría histórica. Si no eres admin y alguna de las tareas fusionadas tenía comentarios de otras personas, esos concretos no se trasladan: se quedan colgando en la tarea que se borra (igual que ya pasa hoy al borrar una tarea suelta desde el menú contextual, que tampoco limpia sus comentarios).
+- El borrado masivo desde la barra de selección no es una única operación atómica: borra tarea por tarea, así que si seleccionas alguna de la que no eres ni su dueña ni admin, esa en concreto no se borra y se avisa de cuántas sí se pudieron eliminar.

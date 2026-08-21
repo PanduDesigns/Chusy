@@ -224,7 +224,7 @@ a { color: var(--color-signal); }
    App shell
    ========================================================================== */
 .app-shell { display: flex; min-height: 100vh; }
-.main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; } /* ancla la barra flotante de selección múltiple */
 
 .sidebar {
   width: var(--sidebar-w);
@@ -508,6 +508,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .list-table__header > *, .list-row > * { min-width: 0; }
 .list-row:hover { border-color: var(--color-line-bright); }
 .list-row.is-complete .task-row__title { color: var(--color-text-faint); text-decoration: line-through; }
+.list-row.is-selected { background: var(--color-signal-soft); border-color: var(--color-signal-dim); }
 .list-row__title-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .avatar-stack { overflow: hidden; }
 .list-table__cell-text { font-size: 12.5px; color: var(--color-text-lo); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
@@ -914,7 +915,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
    Context menu
    ========================================================================== */
 .context-menu {
-  position: fixed; z-index: 300; min-width: 200px;
+  position: fixed; z-index: 300; min-width: 200px; max-height: 70vh; overflow-y: auto;
   background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
   border-radius: var(--radius-md); box-shadow: var(--shadow-raised);
   padding: 6px; display: flex; flex-direction: column; gap: 1px;
@@ -947,6 +948,52 @@ body.is-col-resizing * { cursor: col-resize !important; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
 
 /* ==========================================================================
+   Selección múltiple (vista de Lista): barra flotante de acciones masivas
+   y sus desplegables. La barra vive anclada a .main-col (ver ese
+   position:relative más arriba) para quedar centrada en el ÁREA DE
+   CONTENIDO — no en toda la ventana — sin tener que calcular en JS el
+   ancho del sidebar (colapsado, o superpuesto en móvil).
+   ========================================================================== */
+.bulk-toolbar-anchor {
+  position: absolute; left: 0; right: 0; bottom: 24px;
+  display: flex; justify-content: center;
+  padding: 0 16px; pointer-events: none; z-index: 90;
+}
+.bulk-toolbar {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 2px;
+  max-width: 100%; overflow-x: auto;
+  background: var(--color-void); border: 1px solid var(--color-line-bright);
+  border-radius: 999px; padding: 8px 10px 8px 16px;
+  box-shadow: var(--shadow-raised);
+  animation: bulk-toolbar-in var(--transition-med);
+}
+@keyframes bulk-toolbar-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.bulk-toolbar__count { font-size: 13px; font-weight: 500; color: var(--color-text-hi); white-space: nowrap; padding-right: 6px; }
+.bulk-toolbar__divider { width: 1px; align-self: stretch; background: var(--color-line-bright); margin: 4px 4px; flex-shrink: 0; }
+.bulk-toolbar__btn {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 50%;
+  color: var(--color-text-lo); font-size: 15px; line-height: 1;
+  transition: var(--transition-fast);
+}
+.bulk-toolbar__btn:hover { background: var(--color-panel-raised); color: var(--color-text-hi); }
+.bulk-toolbar__btn--danger:hover { background: var(--color-danger-soft); color: var(--color-danger); }
+
+.bulk-date-popover {
+  position: fixed; z-index: 300; width: 236px;
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-raised); padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.bulk-date-popover__row { display: flex; align-items: center; gap: 8px; }
+.bulk-date-popover__row input[type="checkbox"] { accent-color: var(--color-signal); flex-shrink: 0; }
+.bulk-date-popover__label { font-size: 12.5px; color: var(--color-text-lo); flex: 1; }
+.bulk-date-popover__row input[type="date"] { flex: none; width: 130px; padding: 6px 8px; font-size: 12.5px; }
+.bulk-date-popover__row input[type="date"]:disabled { opacity: 0.4; }
+
+/* ==========================================================================
    Responsive
    ========================================================================== */
 @media (max-width: 860px) {
@@ -967,4 +1014,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
   .main-content { padding: 20px 16px; }
   .modal { max-width: 92vw; }
   .modal-row { flex-direction: column; gap: 14px; }
+  .bulk-toolbar-anchor { bottom: 14px; padding: 0 10px; }
+  .bulk-toolbar { padding: 6px 8px 6px 14px; gap: 0; }
+  .bulk-toolbar__btn { width: 30px; height: 30px; font-size: 14px; }
 }

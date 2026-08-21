@@ -12,6 +12,8 @@ import { updateProject } from "../data/projects.js";
 import { openContextMenu } from "../components/context-menu.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
 import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, openColumnsMenu } from "../components/table-columns.js";
+import { createSelectionController } from "../components/bulk-selection.js";
+import { renderBulkToolbar, removeBulkToolbar } from "../components/bulk-toolbar.js";
 
 function tagPill(name, tagsRegistry) {
   const found = (tagsRegistry || []).find((t) => t.name.toLowerCase() === name.toLowerCase());
@@ -26,7 +28,26 @@ const BASE_COLUMNS = [
   { key: "priority", label: "Prioridad", defaultWidth: 80, minWidth: 64 },
 ];
 
-export function renderListView(container, { project, tasks, teamMembers, tagsRegistry, sortState, onSortChange, onOpenTask, onAddTask, currentUser }) {
+// Selección múltiple: vive fuera de renderListView() para sobrevivir a que
+// esta función se vuelva a llamar (cada cambio de filtro/orden, cada
+// actualización en tiempo real de Firestore...) — ver bulk-selection.js.
+const selection = createSelectionController();
+let lastProjectId = null;
+
+export function renderListView(container, opts) {
+  const { project, tasks, teamMembers, tagsRegistry, sortState, onSortChange, onOpenTask, onAddTask, currentUser, projects } = opts;
+
+  // Cambiar de proyecto invalida cualquier selección anterior (era de
+  // tareas de OTRO proyecto, ya no tiene sentido arrastrarla).
+  if (lastProjectId !== null && lastProjectId !== project.id) selection.clear();
+  lastProjectId = project.id;
+  selection.prune(tasks.map((t) => t.id));
+
+  /** Vuelve a pintar esta misma vista con los mismos datos — para cuando
+   * solo cambia la selección (Ctrl/Shift+clic, "✕"), sin esperar a que
+   * llegue un dato nuevo de Firestore. */
+  function rerenderSelf() { renderListView(container, opts); }
+
   const customCols = (project.customFieldDefs || []).map((f) => ({ key: `cf:${f.id}`, label: f.name, fieldId: f.id, defaultWidth: 120, minWidth: 70 }));
   const allColumns = [...BASE_COLUMNS, ...customCols];
   const scopeKey = `project:${project.id}`;
@@ -39,6 +60,7 @@ export function renderListView(container, { project, tasks, teamMembers, tagsReg
     bySection.get(t.sectionId).push(t);
   });
   const sectionsSorted = [...project.sections].sort((a, b) => a.order - b.order);
+  const orderedTaskIds = []; // orden real en pantalla, para Shift+clic (puede cruzar secciones)
 
   const headerHtml = `
     <div class="list-table__header" style="grid-template-columns:${gridTemplate};">
@@ -51,6 +73,7 @@ export function renderListView(container, { project, tasks, teamMembers, tagsReg
       const sectionTasks = bySection.get(section.id) || [];
       const rows = sectionTasks
         .map((task) => {
+          orderedTaskIds.push(task.id);
           const overdue = isOverdue(task.dueDate, task.isComplete);
           const assignees = task.assigneeIds.map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean);
           const cellsHtml = visible
@@ -77,7 +100,7 @@ export function renderListView(container, { project, tasks, teamMembers, tagsReg
             })
             .join("");
           return `
-        <div class="list-row${task.isComplete ? " is-complete" : ""}" data-task-id="${task.id}" style="grid-template-columns:${gridTemplate};">
+        <div class="list-row${task.isComplete ? " is-complete" : ""}${selection.has(task.id) ? " is-selected" : ""}" data-task-id="${task.id}" style="grid-template-columns:${gridTemplate};">
           ${cellsHtml}
           <span></span>
         </div>`;
@@ -128,7 +151,12 @@ export function renderListView(container, { project, tasks, teamMembers, tagsReg
     });
   });
   container.querySelectorAll("[data-open]").forEach((elx) => {
-    elx.addEventListener("click", () => onOpenTask(elx.dataset.open));
+    elx.addEventListener("click", (e) => {
+      // Con Ctrl/Cmd o Shift pulsados, el clic es para seleccionar (más
+      // abajo, a nivel de fila) — no para abrir el detalle de la tarea.
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+      onOpenTask(elx.dataset.open);
+    });
   });
   container.querySelectorAll("[data-add-section]").forEach((btn) => {
     btn.addEventListener("click", () => onAddTask(btn.dataset.addSection));
@@ -139,7 +167,34 @@ export function renderListView(container, { project, tasks, teamMembers, tagsReg
       const task = tasks.find((t) => t.id === row.dataset.taskId);
       if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask);
     });
+    // Selección múltiple al estilo Asana: Ctrl/Cmd+clic añade o quita esa
+    // tarea sola; Shift+clic selecciona todo el tramo desde la última
+    // tocada. Un clic normal no toca la selección (solo abre la tarea, ver
+    // el listener de [data-open] de arriba).
+    row.addEventListener("click", (e) => {
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return;
+      if (e.target.closest("[data-check]")) return;
+      e.preventDefault();
+      const taskId = row.dataset.taskId;
+      if (e.shiftKey) selection.selectRange(orderedTaskIds, taskId);
+      else selection.toggle(taskId);
+      rerenderSelf();
+    });
   });
+
+  syncBulkToolbar();
+
+  function syncBulkToolbar() {
+    const selectedTasks = tasks.filter((t) => selection.has(t.id));
+    if (!selectedTasks.length) { removeBulkToolbar(); return; }
+    renderBulkToolbar({
+      selectedTasks,
+      teamMembers,
+      project,
+      projects: projects || [],
+      onClearSelection: () => { selection.clear(); rerenderSelf(); },
+    });
+  }
 }
 
 const PRIORITY_COLORS = { urgente: "var(--color-danger)", alta: "var(--color-signal)", media: "#78848C", baja: "var(--color-text-faint)" };
