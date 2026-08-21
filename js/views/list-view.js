@@ -8,9 +8,10 @@
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast } from "../utils.js";
 import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
-import { updateProject } from "../data/projects.js";
+import { updateProject, saveProjectSections } from "../data/projects.js";
 import { openContextMenu } from "../components/context-menu.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
+import { openSectionsModal } from "../components/sections-modal.js";
 import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, openColumnsMenu } from "../components/table-columns.js";
 import { createSelectionController } from "../components/bulk-selection.js";
 import { renderBulkToolbar, removeBulkToolbar } from "../components/bulk-toolbar.js";
@@ -55,9 +56,10 @@ export function renderListView(container, opts) {
   const { visible, gridTemplate, widthOf } = resolveColumns(allColumns, prefs);
 
   const bySection = new Map(project.sections.map((s) => [s.id, []]));
+  const noSectionTasks = [];
   tasks.forEach((t) => {
-    if (!bySection.has(t.sectionId)) bySection.set(t.sectionId, []);
-    bySection.get(t.sectionId).push(t);
+    if (bySection.has(t.sectionId)) bySection.get(t.sectionId).push(t);
+    else noSectionTasks.push(t); // sectionId a null, o de una sección ya eliminada
   });
   const sectionsSorted = [...project.sections].sort((a, b) => a.order - b.order);
   const orderedTaskIds = []; // orden real en pantalla, para Shift+clic (puede cruzar secciones)
@@ -68,59 +70,65 @@ export function renderListView(container, opts) {
       <span></span>
     </div>`;
 
-  const sectionsHtml = sectionsSorted
-    .map((section) => {
-      const sectionTasks = bySection.get(section.id) || [];
-      const rows = sectionTasks
-        .map((task) => {
-          orderedTaskIds.push(task.id);
-          const overdue = isOverdue(task.dueDate, task.isComplete);
-          const assignees = task.assigneeIds.map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean);
-          const cellsHtml = visible
-            .map((col) => {
-              if (col.key === "title") {
-                return `
-                <span class="list-row__title-cell">
-                  <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
-                  <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
-                  <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
-                  ${task.tags.slice(0, 2).map((t) => tagPill(t, tagsRegistry)).join("")}
-                </span>`;
-              }
-              if (col.key === "dueDate") {
-                return `<span class="list-table__cell-text${overdue ? " is-overdue" : ""}">${task.dueDate ? formatDate(task.dueDate) : "—"}</span>`;
-              }
-              if (col.key === "assignee") {
-                return `<span class="avatar-stack">${assignees.map((m) => `<span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}" title="${escapeHtml(m.name)}">${initials(m.name)}</span>`).join("") || `<span class="list-table__cell-text">—</span>`}</span>`;
-              }
-              if (col.key === "priority") {
-                return `<span class="tag-pill" style="background:${priorityColor(task.priority)};color:${textColorFor(priorityColor(task.priority))};">${priorityLabel(task.priority)}</span>`;
-              }
-              return `<span class="list-table__cell-text">${escapeHtml(task.customFields?.[col.fieldId] ?? "—")}</span>`;
-            })
-            .join("");
-          return `
-        <div class="list-row${task.isComplete ? " is-complete" : ""}${selection.has(task.id) ? " is-selected" : ""}" data-task-id="${task.id}" style="grid-template-columns:${gridTemplate};">
-          ${cellsHtml}
-          <span></span>
-        </div>`;
-        })
-        .join("");
-
-      return `
-      <div class="section-block">
-        <div class="section-header">
-          <span class="section-header__name">${escapeHtml(section.name)}</span>
-          <span class="section-header__count">${sectionTasks.length}</span>
-          <button class="section-header__add" data-add-section="${section.id}">+ Añadir tarea</button>
-        </div>
-        ${rows || `<p style="color:var(--color-text-faint);font-size:12.5px;padding:8px 10px;">Sin tareas en esta sección.</p>`}
+  /** Un bloque de sección real (con id) o el grupo especial "Sin sección"
+   * (sectionId null) — misma pinta, pero éste no se puede eliminar ni
+   * renombrar desde aquí (no es una sección de verdad, es solo dónde
+   * "aparcan" las tareas que se quedan sin una al borrarla). */
+  function sectionBlockHtml(sectionId, sectionName, sectionTasks) {
+    const rows = sectionTasks
+      .map((task) => {
+        orderedTaskIds.push(task.id);
+        const overdue = isOverdue(task.dueDate, task.isComplete);
+        const assignees = task.assigneeIds.map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean);
+        const cellsHtml = visible
+          .map((col) => {
+            if (col.key === "title") {
+              return `
+              <span class="list-row__title-cell">
+                <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
+                <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
+                <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
+                ${task.tags.slice(0, 2).map((t) => tagPill(t, tagsRegistry)).join("")}
+              </span>`;
+            }
+            if (col.key === "dueDate") {
+              return `<span class="list-table__cell-text${overdue ? " is-overdue" : ""}">${task.dueDate ? formatDate(task.dueDate) : "—"}</span>`;
+            }
+            if (col.key === "assignee") {
+              return `<span class="avatar-stack">${assignees.map((m) => `<span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}" title="${escapeHtml(m.name)}">${initials(m.name)}</span>`).join("") || `<span class="list-table__cell-text">—</span>`}</span>`;
+            }
+            if (col.key === "priority") {
+              return `<span class="tag-pill" style="background:${priorityColor(task.priority)};color:${textColorFor(priorityColor(task.priority))};">${priorityLabel(task.priority)}</span>`;
+            }
+            return `<span class="list-table__cell-text">${escapeHtml(task.customFields?.[col.fieldId] ?? "—")}</span>`;
+          })
+          .join("");
+        return `
+      <div class="list-row${task.isComplete ? " is-complete" : ""}${selection.has(task.id) ? " is-selected" : ""}" data-task-id="${task.id}" style="grid-template-columns:${gridTemplate};">
+        ${cellsHtml}
+        <span></span>
       </div>`;
-    })
-    .join("");
+      })
+      .join("");
+
+    return `
+    <div class="section-block">
+      <div class="section-header">
+        <span class="section-header__name">${escapeHtml(sectionName)}</span>
+        <span class="section-header__count">${sectionTasks.length}</span>
+        <button class="section-header__add" data-add-section="${sectionId || ""}">+ Añadir tarea</button>
+      </div>
+      ${rows || `<p style="color:var(--color-text-faint);font-size:12.5px;padding:8px 10px;">Sin tareas en esta sección.</p>`}
+    </div>`;
+  }
+
+  const sectionsHtml =
+    sectionsSorted.map((section) => sectionBlockHtml(section.id, section.name, bySection.get(section.id) || [])).join("") +
+    (noSectionTasks.length ? sectionBlockHtml(null, "Sin sección", noSectionTasks) : "");
 
   container.innerHTML = `
     <div class="table-toolbar">
+      <button type="button" class="btn btn--ghost btn--sm" id="btn-sections">🗂 Secciones</button>
       <button type="button" class="btn btn--ghost btn--sm" id="btn-columns">☰ Columnas</button>
       <button type="button" class="btn btn--ghost btn--sm" id="list-add-field">+ Campo personalizado</button>
     </div>
@@ -135,6 +143,12 @@ export function renderListView(container, opts) {
       hint: "Se podrán rellenar en cada tarea de este proyecto y usarse como columna y como filtro.",
       fields: project.customFieldDefs,
       onSave: (defs) => updateProject(project.id, { customFieldDefs: defs }),
+    })
+  );
+  container.querySelector("#btn-sections").addEventListener("click", () =>
+    openSectionsModal({
+      project,
+      onSave: (sections) => saveProjectSections(project, sections),
     })
   );
   container.querySelector("#btn-columns").addEventListener("click", (e) => {

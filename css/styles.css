@@ -468,6 +468,12 @@ a { color: var(--color-signal); }
   display: grid; align-items: center; gap: 10px;
   padding: 0 10px 8px; margin-bottom: 6px;
   border-bottom: 1px solid var(--color-line);
+  /* fija los nombres de columna (y sus botones de orden/redimensionado)
+     arriba del todo mientras solo las filas hacen scroll debajo — ver la
+     regla de .list-table-scroll más abajo, que es quien de verdad
+     scrollea y por tanto contra quien se ancla este sticky */
+  position: sticky; top: 0; z-index: 5;
+  background: var(--color-void);
 }
 .list-table__col {
   display: flex; align-items: center; gap: 4px; position: relative;
@@ -482,7 +488,16 @@ a { color: var(--color-signal); }
 
 /* ---------- redimensionar / ocultar columnas ---------- */
 .table-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
-.list-table-scroll { overflow-x: auto; padding-bottom: 2px; }
+/* .list-table-scroll ya se comporta, sin buscarlo, como contenedor de
+   scroll en LOS DOS EJES: al fijar overflow-x:auto sin tocar overflow-y,
+   la spec de CSS Overflow obliga a que este último pase a auto aunque no
+   se pida explícitamente. En vez de pelear contra eso, lo aprovechamos —
+   le damos aquí una altura acotada (el hueco libre dentro de
+   .main-content, que pasa a no scrollear él mismo para esta vista) y así
+   .list-table-scroll pasa a ser el contenedor con scroll real más
+   cercano a .list-table__header, que se apoya en él con position:sticky. */
+.main-content:has(> .list-table-scroll) { display: flex; flex-direction: column; overflow: hidden; }
+.list-table-scroll { flex: 1; min-height: 0; overflow-x: auto; padding-bottom: 2px; }
 .list-table-scroll .list-table { display: inline-block; min-width: 100%; }
 .col-resize-handle {
   position: absolute; top: 0; bottom: 0; right: -6px; width: 12px;
@@ -534,6 +549,13 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .tag-pill {
   font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
   white-space: nowrap;
+  /* dentro de una celda de grid (columna "Proyecto"/"Prioridad" de la
+     tabla), un <span> se "blockifica" y por defecto se ESTIRA al ancho
+     de la columna — con nombres de proyecto largos, el texto (nowrap)
+     se salía de ese ancho fijo sin fondo detrás. Con esto el fondo pasa
+     a abrazar el texto entero en vez de cortarse en el ancho de columna
+     (fuera de una grid, justify-self no tiene ningún efecto). */
+  width: max-content; justify-self: start;
 }
 
 /* ---------- tag picker (autocompletar + color) ---------- */

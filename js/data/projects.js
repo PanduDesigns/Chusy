@@ -92,6 +92,29 @@ export function setProjectSections(projectId, sections) {
 }
 
 /**
+ * Igual que setProjectSections, pero además se encarga de las tareas que
+ * se quedan huérfanas cuando una sección desaparece de la lista: en vez
+ * de dejarlas apuntando a un id de sección que ya no existe (con lo que
+ * dejarían de verse en Lista/Tablero), las pasa a "sin sección"
+ * (sectionId: null) — nunca se borran tareas por borrar una sección.
+ */
+export async function saveProjectSections(project, newSections) {
+  const keptIds = new Set(newSections.map((s) => s.id));
+  const removedIds = (project.sections || []).map((s) => s.id).filter((id) => !keptIds.has(id));
+
+  if (removedIds.length) {
+    const tasksSnap = await getDocs(query(collection(db, "tasks"), where("projectId", "==", project.id)));
+    const orphaned = tasksSnap.docs.filter((d) => removedIds.includes(d.data().sectionId));
+    for (let i = 0; i < orphaned.length; i += 450) {
+      const batch = writeBatch(db);
+      orphaned.slice(i, i + 450).forEach((d) => batch.update(d.ref, { sectionId: null }));
+      await batch.commit();
+    }
+  }
+  return setProjectSections(project.id, newSections);
+}
+
+/**
  * Escucha en tiempo real TODOS los proyectos del equipo (no solo los tuyos):
  * en un departamento pequeño, todo el mundo debe poder ver cualquier
  * proyecto y las tareas que haya dentro, esté o no asignado a esa persona.

@@ -21,16 +21,25 @@ const PRIORITY_COLORS = {
 
 export function renderBoardView(container, { project, tasks, teamMembers, tagsRegistry, onOpenTask, onAddTask }) {
   const bySection = new Map(project.sections.map((s) => [s.id, []]));
+  const noSectionTasks = [];
   tasks.forEach((t) => {
-    if (!bySection.has(t.sectionId)) bySection.set(t.sectionId, []);
-    bySection.get(t.sectionId).push(t);
+    if (bySection.has(t.sectionId)) bySection.get(t.sectionId).push(t);
+    else noSectionTasks.push(t); // sectionId a null, o de una sección ya eliminada
   });
   const sectionsSorted = [...project.sections].sort((a, b) => a.order - b.order);
+  // "Sin sección" es una columna más para poder arrastrar tareas dentro y
+  // fuera de ella (con id "" — moveTask la guarda como sectionId: null,
+  // ver más abajo), pero solo aparece si hace falta: no tiene sentido
+  // mostrarla vacía todo el rato en un proyecto sin tareas huérfanas.
+  const columnsToRender = noSectionTasks.length
+    ? [...sectionsSorted, { id: "", name: "Sin sección" }]
+    : sectionsSorted;
 
   container.innerHTML = `<div class="board">
-    ${sectionsSorted
+    ${columnsToRender
       .map((section) => {
-        const colTasks = (bySection.get(section.id) || []).sort((a, b) => (a.order || 0) - (b.order || 0));
+        const colTasks = (section.id ? bySection.get(section.id) : noSectionTasks) || [];
+        colTasks.sort((a, b) => (a.order || 0) - (b.order || 0));
         return `
         <div class="board-col">
           <div class="board-col__header">
@@ -78,7 +87,7 @@ export function renderBoardView(container, { project, tasks, teamMembers, tagsRe
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
 
-      const sectionId = colBody.dataset.dropSection;
+      const sectionId = colBody.dataset.dropSection || null; // "" (columna "Sin sección") se guarda como null, igual que en el resto de la app
       const siblings = [...colBody.querySelectorAll(".task-card")].filter((c) => c.dataset.taskId !== taskId);
       const afterEl = getDragAfterElement(colBody, e.clientY);
       let newOrder;

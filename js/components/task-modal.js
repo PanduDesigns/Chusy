@@ -131,6 +131,7 @@ export function openTaskModal({
             <label class="field">
               <span class="field__label">Sección</span>
               <select class="field__select" id="t-section">
+                <option value="" ${!draft.sectionId ? "selected" : ""}>— Sin sección —</option>
                 ${sections.map((s) => `<option value="${s.id}" ${s.id === draft.sectionId ? "selected" : ""}>${escapeHtml(s.name)}</option>`).join("")}
               </select>
             </label>
@@ -275,7 +276,7 @@ export function openTaskModal({
     overlay.querySelector("#t-description").addEventListener("input", (e) => { draft.description = e.target.value; markDirty(); });
 
     const sectionSelect = overlay.querySelector("#t-section");
-    if (sectionSelect) sectionSelect.addEventListener("change", (e) => { draft.sectionId = e.target.value; markDirty(); });
+    if (sectionSelect) sectionSelect.addEventListener("change", (e) => { draft.sectionId = e.target.value || null; markDirty(); });
 
     overlay.querySelector("#t-start").addEventListener("change", (e) => { draft.startDate = e.target.value || null; markDirty(); });
     overlay.querySelector("#t-due").addEventListener("change", (e) => { draft.dueDate = e.target.value || null; markDirty(); });
