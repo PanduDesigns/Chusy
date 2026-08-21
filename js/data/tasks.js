@@ -233,6 +233,25 @@ export function bulkRemoveAssignees(taskIds, uidsToRemove) {
 }
 
 /**
+ * Saca las tareas de su proyecto y las convierte en tareas personales de
+ * `uid` — quedan solo en "Mis tareas" de quien ejecuta la acción (nunca de
+ * quien tuvieran asignado antes), igual que un recordatorio creado a mano
+ * ahí. Como una tarea personal solo la ve su dueña/o, se sustituyen los
+ * responsables anteriores por quien la mueve (si ya era responsable, no
+ * cambia nada de cara a ella/él; si no lo era, queda asignada
+ * automáticamente) — dejar ahí a otras personas como "responsables" no
+ * tendría sentido: ya no podrían ni verla.
+ */
+export function bulkMoveToMyTasks(taskIds, uid) {
+  return runBatchedUpdate(taskIds, () => ({
+    projectId: null,
+    ownerId: uid,
+    sectionId: null,
+    assigneeIds: [uid],
+  }));
+}
+
+/**
  * Borra varias tareas a la vez. Devuelve qué ids se borraron de verdad y
  * cuáles no (por ejemplo, por no ser ni su dueña ni admin) para poder
  * avisar en vez de fallar en silencio.

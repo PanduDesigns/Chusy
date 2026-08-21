@@ -16,6 +16,7 @@ import {
   bulkSetComplete,
   bulkAddAssignees,
   bulkRemoveAssignees,
+  bulkMoveToMyTasks,
   bulkDeleteTasks,
   mergeTasks,
 } from "../data/tasks.js";
@@ -40,12 +41,15 @@ function ensureAnchor() {
  * project: proyecto actual (todas las tareas seleccionadas pertenecen a
  * él, porque la vista de Lista siempre está dentro de un proyecto).
  * projects: TODOS los proyectos del equipo (para "cambiar de proyecto").
+ * currentUser: quien tiene la sesión abierta — para "Mover a mis tareas"
+ * (se mueven a SUS tareas personales, no a las de quien estuviera
+ * asignado antes).
  * onClearSelection: limpia el estado de selección en list-view.js y
  * vuelve a renderizar — las demás acciones no lo necesitan porque, al
  * escribir en Firestore, el listener en tiempo real ya provoca un
  * re-render que "poda" del propio estado las tareas que dejan de encajar.
  */
-export function renderBulkToolbar({ selectedTasks, teamMembers, project, projects, onClearSelection }) {
+export function renderBulkToolbar({ selectedTasks, teamMembers, project, projects, currentUser, onClearSelection }) {
   const anchor = ensureAnchor();
   if (!anchor) return;
 
@@ -115,7 +119,7 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
   anchor.querySelector('[data-action="dates"]').addEventListener("click", (e) => openDatesPopover(e.currentTarget, ids));
   anchor.querySelector('[data-action="delete"]').addEventListener("click", () => handleDelete(ids));
   anchor.querySelector('[data-action="more"]').addEventListener("click", (e) =>
-    openMoreMenu(e.currentTarget, { ids, selectedTasks, teamMembers })
+    openMoreMenu(e.currentTarget, { ids, selectedTasks, teamMembers, currentUser })
   );
   anchor.querySelector('[data-action="clear"]').addEventListener("click", () => onClearSelection());
 }
@@ -153,7 +157,7 @@ async function handleDelete(ids) {
   }
 }
 
-function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers }) {
+function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser }) {
   const rect = anchorBtn.getBoundingClientRect();
   openContextMenu({
     x: rect.left, y: rect.top,
@@ -163,8 +167,29 @@ function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers }) {
       { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers }) },
       { label: "Combinar tareas duplicadas…", icon: "⧉", onClick: () => startMergeFlow(rect, { selectedTasks }) },
       { label: "Convertir en hitos", icon: "🚩", onClick: () => runAction(bulkUpdateTasks(ids, { isMilestone: true }), "Convertidas en hitos.") },
+      { divider: true },
+      { label: "Mover a mis tareas", icon: "🔒", onClick: () => handleMoveToMyTasks(ids, currentUser) },
     ],
   });
+}
+
+/**
+ * Saca las tareas seleccionadas de este proyecto y las deja como tareas
+ * personales de QUIEN EJECUTA la acción (no de quien tuvieran asignado
+ * antes) — a partir de ahí solo esa persona las verá, en "Mis tareas". Se
+ * avisa antes porque, a diferencia del resto de acciones masivas, esta
+ * cambia quién puede ver la tarea, no solo un campo suyo.
+ */
+async function handleMoveToMyTasks(ids, currentUser) {
+  const n = ids.length;
+  const ok = confirm(
+    `¿Mover ${n} ${n === 1 ? "tarea" : "tareas"} a tus tareas personales? ${n === 1 ? "Saldrá" : "Saldrán"} de este proyecto, dejará${n === 1 ? "" : "n"} de ser visible${n === 1 ? "" : "s"} para el resto del equipo, y quedará${n === 1 ? "" : "n"} asignada${n === 1 ? "" : "s"} solo a ti.`
+  );
+  if (!ok) return;
+  runAction(
+    bulkMoveToMyTasks(ids, currentUser.uid),
+    `${n} ${n === 1 ? "tarea movida" : "tareas movidas"} a Mis tareas.`
+  );
 }
 
 // ----------------------------------------------------------------------

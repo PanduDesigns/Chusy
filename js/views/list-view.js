@@ -192,6 +192,7 @@ export function renderListView(container, opts) {
       teamMembers,
       project,
       projects: projects || [],
+      currentUser,
       onClearSelection: () => { selection.clear(); rerenderSelf(); },
     });
   }
