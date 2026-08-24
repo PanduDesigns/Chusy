@@ -171,7 +171,11 @@ function selectProject(projectId) {
 
 function selectMyTasks() {
   mode = "mytasks";
-  activeFilters = {};
+  // Filtro de estado en "Pendiente" por defecto: lo normal es querer ver
+  // lo que tienes por hacer ahí, no rebuscar entre lo ya completado —
+  // que sea la persona quien decida activamente ver también lo
+  // completado (quitando este filtro), no al revés.
+  activeFilters = { status: new Set(["pendiente"]) };
   sortState = { column: null, direction: "asc" };
   renderShell();
 }
