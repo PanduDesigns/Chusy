@@ -126,8 +126,12 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
 }
 
 function sortedMembers(teamMembers) {
-  // Cuentas ficticias importadas de Asana al final, igual que en el modal de tarea.
-  return [...(teamMembers || [])].sort((a, b) => (a.isImported ? 1 : 0) - (b.isImported ? 1 : 0));
+  // Igual que en el modal de tarea: a la hora de asignar, los usuarios
+  // ficticios de Asana no se ofrecen como opción (si ya estaban
+  // asignados a una tarea concreta se siguen viendo ahí, pero esto es
+  // una acción masiva sobre varias tareas a la vez, así que no hay un
+  // "ya asignado" único que pueda hacer de excepción).
+  return (teamMembers || []).filter((m) => !m.isImported);
 }
 
 async function runAction(promise, successMsg) {

@@ -190,3 +190,72 @@ export function el(html) {
   template.innerHTML = html.trim();
   return template.content.firstElementChild;
 }
+
+// ============================================================================
+// HTML del editor de descripción enriquecido (rich-text-editor.js). Van
+// aquí, junto a escapeHtml, porque son las mismas herramientas: convertir
+// texto a HTML seguro y viceversa.
+// ============================================================================
+
+const RTE_ALLOWED_TAGS = new Set([
+  "P", "BR", "B", "STRONG", "I", "EM", "U", "S", "STRIKE",
+  "UL", "OL", "LI", "BLOCKQUOTE", "PRE", "CODE", "A",
+  "H1", "H2", "H3", "DIV", "SPAN",
+]);
+const RTE_ALLOWED_ATTRS = { A: ["href", "target", "rel"] };
+
+/**
+ * Limpia HTML de todo lo que no sea una etiqueta/atributo permitido
+ * (nada de script, style, iframe, atributos on*, links javascript:…).
+ * Se usa SIEMPRE antes de guardar una descripción en Firestore — el
+ * campo lo puede editar cualquiera del equipo, así que no basta con
+ * confiar en que el editor de turno solo genere HTML "bueno".
+ */
+export function sanitizeHtml(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html || "";
+  (function walk(node) {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        if (!RTE_ALLOWED_TAGS.has(child.tagName)) {
+          child.replaceWith(document.createTextNode(child.textContent));
+          return;
+        }
+        const allowedAttrs = RTE_ALLOWED_ATTRS[child.tagName] || [];
+        [...child.attributes].forEach((attr) => {
+          const name = attr.name.toLowerCase();
+          if (!allowedAttrs.includes(name) || /^\s*javascript:/i.test(attr.value)) {
+            child.removeAttribute(attr.name);
+          }
+        });
+        if (child.tagName === "A") {
+          child.setAttribute("target", "_blank");
+          child.setAttribute("rel", "noopener");
+        }
+        walk(child);
+      } else if (child.nodeType !== Node.TEXT_NODE) {
+        child.remove(); // comentarios y demás
+      }
+    });
+  })(template.content);
+  return template.innerHTML;
+}
+
+/**
+ * Convierte texto plano (descripciones de antes de tener editor
+ * enriquecido, o importadas de Asana) en HTML seguro, respetando líneas
+ * en blanco como párrafos separados. Si el texto ya parece HTML del
+ * editor (trae alguna etiqueta de bloque reconocible), se deja pasar tal
+ * cual — ya saneado — para no escapar dos veces una descripción que ya
+ * se guardó con el editor nuevo.
+ */
+export function toEditableHtml(text) {
+  if (!text) return "";
+  if (/<(p|ul|ol|li|blockquote|pre|h[1-3]|div|br)[\s/>]/i.test(text)) {
+    return sanitizeHtml(text);
+  }
+  return text
+    .split(/\n{2,}/)
+    .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}

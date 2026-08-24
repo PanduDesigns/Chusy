@@ -64,6 +64,34 @@ function toggleSidebarCollapse() {
   renderShell();
 }
 
+// Los filtros de "Mis tareas" se recuerdan por persona en este navegador
+// (localStorage, no en la cuenta — mismo criterio que sidebarCollapsed, así
+// que en un ordenador compartido cada cuenta guarda los suyos por
+// separado). La primera vez que alguien entra no hay nada guardado
+// todavía: por defecto se aplica "Pendiente", para no enterrar la vista
+// bajo todo lo que ya está completado.
+function loadMyTasksFilters() {
+  if (!currentUser) return {};
+  try {
+    const raw = localStorage.getItem(`chusy:myTasksFilters:${currentUser.uid}`);
+    if (raw === null) return { status: new Set(["pendiente"]) };
+    const parsed = JSON.parse(raw);
+    const restored = {};
+    Object.entries(parsed).forEach(([key, values]) => { restored[key] = new Set(values); });
+    return restored;
+  } catch (e) {
+    return { status: new Set(["pendiente"]) };
+  }
+}
+function saveMyTasksFilters(filters) {
+  if (!currentUser) return;
+  try {
+    const plain = {};
+    Object.entries(filters).forEach(([key, set]) => { if (set && set.size) plain[key] = [...set]; });
+    localStorage.setItem(`chusy:myTasksFilters:${currentUser.uid}`, JSON.stringify(plain));
+  } catch (e) { /* localStorage no disponible */ }
+}
+
 let unsubProjects = null;
 let unsubArchivedProjects = null;
 let unsubUsers = null;
@@ -171,11 +199,7 @@ function selectProject(projectId) {
 
 function selectMyTasks() {
   mode = "mytasks";
-  // Filtro de estado en "Pendiente" por defecto: lo normal es querer ver
-  // lo que tienes por hacer ahí, no rebuscar entre lo ya completado —
-  // que sea la persona quien decida activamente ver también lo
-  // completado (quitando este filtro), no al revés.
-  activeFilters = { status: new Set(["pendiente"]) };
+  activeFilters = loadMyTasksFilters();
   sortState = { column: null, direction: "asc" };
   renderShell();
 }
@@ -205,6 +229,7 @@ function toggleTimelineHolidays() {
 
 function handleFilterChange(key, newSet) {
   activeFilters = { ...activeFilters, [key]: newSet };
+  if (mode === "mytasks") saveMyTasksFilters(activeFilters);
   if (mode === "project") renderMain();
   else renderShell();
 }
@@ -267,17 +292,21 @@ function renderShell() {
   }
 
   if (mode === "mytasks") {
+    const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, projects, includeProject: true, customFieldDefs: currentUser.personalCustomFieldDefs, tasks: myTasks });
+    const filteredMyTasks = sortTasks(applyTaskFilters(myTasks, activeFilters), sortState, { teamMembers, projects });
+    const countLabel = filteredMyTasks.length === myTasks.length
+      ? `${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}`
+      : `${filteredMyTasks.length} de ${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}`;
+
     topbarEl.innerHTML = `
       <div>
         <span class="topbar__title">Mis tareas</span>
-        <span class="topbar__count">${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}</span>
+        <span class="topbar__count">${countLabel}</span>
       </div>
       <button class="btn btn--primary btn--sm" id="btn-new-personal-task" style="margin-left:auto;">+ Tarea personal</button>`;
     topbarEl.querySelector("#btn-new-personal-task").addEventListener("click", openNewPersonalTask);
 
-    const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, projects, includeProject: true, customFieldDefs: currentUser.personalCustomFieldDefs, tasks: myTasks });
     renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
-    const filteredMyTasks = sortTasks(applyTaskFilters(myTasks, activeFilters), sortState, { teamMembers, projects });
     renderMyTasksView(mainContentEl, { tasks: filteredMyTasks, teamMembers, projects, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, currentUser });
     return;
   }

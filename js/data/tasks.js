@@ -28,6 +28,7 @@ import {
   arrayUnion,
   arrayRemove,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
+import { toEditableHtml, escapeHtml } from "../utils.js";
 
 export async function createTask(projectId, data) {
   const ref = await addDoc(collection(db, "tasks"), {
@@ -292,7 +293,7 @@ export async function mergeTasks(survivorId, duplicateIds) {
   const subtasks = [...(survivor.subtasks || [])];
   const attachments = [...(survivor.attachments || [])];
   const attachmentUrls = new Set(attachments.map((a) => a.url));
-  let description = survivor.description || "";
+  let description = toEditableHtml(survivor.description || "");
 
   dups.forEach((t) => {
     (t.assigneeIds || []).forEach((id) => assigneeIds.add(id));
@@ -300,8 +301,11 @@ export async function mergeTasks(survivorId, duplicateIds) {
     (t.dependsOn || []).forEach((id) => dependsOn.add(id));
     (t.subtasks || []).forEach((s) => subtasks.push(s));
     (t.attachments || []).forEach((a) => { if (!attachmentUrls.has(a.url)) { attachments.push(a); attachmentUrls.add(a.url); } });
-    if (t.description && t.description.trim() && t.description.trim() !== description.trim()) {
-      description += `${description ? "\n\n" : ""}— Combinado desde «${t.title}» —\n${t.description}`;
+    if (t.description && t.description.trim()) {
+      const dupHtml = toEditableHtml(t.description);
+      if (dupHtml && dupHtml !== description) {
+        description += `<p>— Combinado desde «${escapeHtml(t.title)}» —</p>${dupHtml}`;
+      }
     }
   });
   dependsOn.delete(survivorId); // por si alguna dependía de la propia superviviente

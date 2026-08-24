@@ -24,6 +24,7 @@ import {
   PRIORITY_LABELS,
 } from "../utils.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
+import { createRichTextEditor } from "./rich-text-editor.js";
 
 const PRIORITIES = ["urgente", "alta", "media", "baja"];
 let lastPickedTagColor = TAG_COLOR_PALETTE[0];
@@ -66,6 +67,7 @@ export function openTaskModal({
   let dirty = false;
   let comments = [];
   let unsubComments = null;
+  let descriptionEditor = null;
 
   const overlay = el(`<div class="modal-overlay"><div class="modal"><div style="padding:40px;text-align:center;color:var(--color-text-lo);">Cargando…</div></div></div>`);
   root.appendChild(overlay);
@@ -99,6 +101,7 @@ export function openTaskModal({
 
   function close(skipCallback) {
     if (unsubComments) unsubComments();
+    if (descriptionEditor) descriptionEditor.destroy();
     document.removeEventListener("keydown", onKeydown);
     overlay.remove();
     if (!skipCallback) onClosed();
@@ -113,8 +116,6 @@ export function openTaskModal({
 
   // --------------------------------------------------------------------
   function buildForm() {
-    const excludeId = taskId;
-    const depCandidates = isPersonal ? [] : (allProjectTasks || []).filter((t) => t.id !== excludeId);
     const sections = isPersonal ? [] : (project?.sections || []);
 
     overlay.innerHTML = `
@@ -164,7 +165,10 @@ export function openTaskModal({
           <div class="field">
             <span class="field__label">Responsables</span>
             <div class="chip-select" id="t-assignees">
-              ${[...(teamMembers || [])].sort((a, b) => (a.isImported ? 1 : 0) - (b.isImported ? 1 : 0)).map((m) => `
+              ${[...(teamMembers || [])]
+                .filter((m) => !m.isImported || draft.assigneeIds.includes(m.uid))
+                .sort((a, b) => (a.isImported ? 1 : 0) - (b.isImported ? 1 : 0))
+                .map((m) => `
                 <button type="button" class="chip${draft.assigneeIds.includes(m.uid) ? " is-selected" : ""}" data-uid="${m.uid}">
                   <span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}">${initials(m.name)}</span>
                   ${escapeHtml(m.name)}${m.isImported ? ` <span style="color:var(--color-text-faint);">· Asana</span>` : ""}
@@ -180,14 +184,6 @@ export function openTaskModal({
               <div id="t-tag-suggest"></div>
             </div>
           </div>
-
-          ${!isPersonal && depCandidates.length ? `
-          <div class="field">
-            <span class="field__label">Bloqueada por</span>
-            <div class="chip-select" id="t-depends">
-              ${depCandidates.map((t) => `<button type="button" class="chip${draft.dependsOn.includes(t.id) ? " is-selected" : ""}" data-dep="${t.id}">${t.isComplete ? "✓ " : ""}${escapeHtml(t.title)}</button>`).join("")}
-            </div>
-          </div>` : ""}
 
           ${(() => {
             const projectFieldDefs = (!isPersonal && project?.customFieldDefs) || [];
@@ -207,10 +203,10 @@ export function openTaskModal({
           </label>`).join("");
           })()}
 
-          <label class="field">
+          <div class="field">
             <span class="field__label">Descripción</span>
-            <textarea class="field__textarea" id="t-description" placeholder="Añade detalles, contexto o enlaces…">${escapeHtml(draft.description)}</textarea>
-          </label>
+            <div id="t-description-mount"></div>
+          </div>
 
           <div class="field">
             <span class="field__label">Subtareas</span>
@@ -251,6 +247,12 @@ export function openTaskModal({
     renderSubtasks();
     renderAttachments();
     if (!isNew) renderComments();
+
+    descriptionEditor = createRichTextEditor(overlay.querySelector("#t-description-mount"), {
+      initialValue: draft.description,
+      placeholder: "Escribe «/» para ver el menú",
+      onChange: (html) => { draft.description = html; markDirty(); },
+    });
   }
 
   function priorityChipsHtml() {
@@ -273,7 +275,6 @@ export function openTaskModal({
     });
 
     overlay.querySelector("#t-title").addEventListener("input", (e) => { draft.title = e.target.value; markDirty(); });
-    overlay.querySelector("#t-description").addEventListener("input", (e) => { draft.description = e.target.value; markDirty(); });
 
     const sectionSelect = overlay.querySelector("#t-section");
     if (sectionSelect) sectionSelect.addEventListener("change", (e) => { draft.sectionId = e.target.value || null; markDirty(); });
@@ -313,20 +314,6 @@ export function openTaskModal({
           set.has(u) ? set.delete(u) : set.add(u);
           draft.assigneeIds = [...set];
           chip.classList.toggle("is-selected", set.has(u));
-          markDirty();
-        });
-      });
-    }
-
-    const dependsBox = overlay.querySelector("#t-depends");
-    if (dependsBox) {
-      dependsBox.querySelectorAll(".chip").forEach((chip) => {
-        chip.addEventListener("click", () => {
-          const d = chip.dataset.dep;
-          const set = new Set(draft.dependsOn);
-          set.has(d) ? set.delete(d) : set.add(d);
-          draft.dependsOn = [...set];
-          chip.classList.toggle("is-selected", set.has(d));
           markDirty();
         });
       });
