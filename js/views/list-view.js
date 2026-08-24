@@ -8,6 +8,7 @@
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast } from "../utils.js";
 import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
+import { celebrateTask } from "../components/celebration.js";
 import { updateProject, saveProjectSections } from "../data/projects.js";
 import { openContextMenu } from "../components/context-menu.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
@@ -161,7 +162,9 @@ export function renderListView(container, opts) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const task = tasks.find((t) => t.id === btn.dataset.check);
-      toggleTaskComplete(task.id, !task.isComplete);
+      const willComplete = !task.isComplete;
+      toggleTaskComplete(task.id, willComplete);
+      if (willComplete) celebrateTask(btn); // pequeña recompensa — solo al completar, no al desmarcar
     });
   });
   container.querySelectorAll("[data-open]").forEach((elx) => {

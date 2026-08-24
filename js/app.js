@@ -3,7 +3,7 @@
 // proyecto/vista, y conecta los componentes con los datos de Firestore.
 // ============================================================================
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
-import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject } from "./data/projects.js";
+import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks } from "./data/projects.js";
 import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { renderSidebar } from "./components/sidebar.js";
@@ -257,6 +257,7 @@ function renderShell() {
       archivedProjects,
       onOpenProject: (id) => selectProject(id),
       onUnarchive: (id) => archiveProject(id, false).then(() => showToast("Proyecto restaurado.")),
+      onDelete: (id) => deleteProjectWithTasks(id).then(() => showToast("Proyecto eliminado.")),
     });
     return;
   }

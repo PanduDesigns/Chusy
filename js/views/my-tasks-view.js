@@ -8,6 +8,8 @@
 // se pueden redimensionar y ocultar/mostrar, también de forma personal.
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon } from "../utils.js";
+import { toggleTaskComplete } from "../data/tasks.js";
+import { celebrateTask } from "../components/celebration.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
 import { updateUserProfile } from "../data/users.js";
@@ -117,6 +119,7 @@ export function renderMyTasksView(container, { tasks, teamMembers, projects, tag
           return `
             <span class="list-row__title-cell">
               <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
+              <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
               <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
               ${task.tags.slice(0, 2).map((t) => tagPill(t, tagsRegistry)).join("")}
             </span>`;
@@ -169,6 +172,16 @@ export function renderMyTasksView(container, { tasks, teamMembers, projects, tag
 
   container.querySelectorAll("[data-open]").forEach((elx) => {
     elx.addEventListener("click", () => onOpenTask(elx.dataset.open));
+  });
+  container.querySelectorAll("[data-check]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const task = tasks.find((t) => t.id === btn.dataset.check);
+      if (!task) return;
+      const willComplete = !task.isComplete;
+      toggleTaskComplete(task.id, willComplete);
+      if (willComplete) celebrateTask(btn); // pequeña recompensa — solo al completar, no al desmarcar
+    });
   });
   container.querySelectorAll(".list-row").forEach((row) => {
     row.addEventListener("contextmenu", (e) => {

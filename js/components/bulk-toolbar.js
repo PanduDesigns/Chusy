@@ -20,6 +20,7 @@ import {
   bulkDeleteTasks,
   mergeTasks,
 } from "../data/tasks.js";
+import { celebrateBulk } from "./celebration.js";
 
 export function removeBulkToolbar() {
   document.querySelectorAll(".bulk-toolbar-anchor").forEach((a) => a.remove());
@@ -162,7 +163,10 @@ function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser 
   openContextMenu({
     x: rect.left, y: rect.top,
     items: [
-      { label: "Marcar como completadas", icon: "✓", onClick: () => runAction(bulkSetComplete(ids, true), "Marcadas como completadas.") },
+      { label: "Marcar como completadas", icon: "✓", onClick: () => {
+        runAction(bulkSetComplete(ids, true), "Marcadas como completadas.");
+        celebrateBulk(ids.length); // la recompensa "grande" — varias de golpe
+      } },
       { label: "Marcar como sin finalizar", icon: "↺", onClick: () => runAction(bulkSetComplete(ids, false), "Marcadas como sin finalizar.") },
       { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers }) },
       { label: "Combinar tareas duplicadas…", icon: "⧉", onClick: () => startMergeFlow(rect, { selectedTasks }) },
