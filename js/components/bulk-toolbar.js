@@ -1,13 +1,14 @@
 // ============================================================================
-// Barra flotante de acciones masivas (selección múltiple en la vista de
-// Lista, al estilo Asana). Vive anclada dentro de .main-col — ver
-// ".bulk-toolbar-anchor" en styles.css — así que sobrevive a que
-// list-view.js reconstruya el contenido de la tabla en cada render, y
+// Barra flotante de acciones masivas (selección múltiple al estilo Asana).
+// La usan la vista de Lista y Mis tareas. Vive anclada dentro de .main-col
+// — ver ".bulk-toolbar-anchor" en styles.css — así que sobrevive a que esas
+// vistas reconstruyan el contenido de la tabla en cada render, y
 // desaparece sola en cuanto la selección queda vacía.
 //
-// list-view.js es quien decide CUÁNDO mostrarla (según su `selection`) y
-// nos pasa ya resueltos los objetos de tarea seleccionados; este módulo
-// solo pinta la barra y traduce cada botón en una llamada a data/tasks.js.
+// Quien llama (list-view.js o my-tasks-view.js) decide CUÁNDO mostrarla
+// (según su propio `selection`, ver bulk-selection.js) y nos pasa ya
+// resueltos los objetos de tarea seleccionados; este módulo solo pinta la
+// barra y traduce cada botón en una llamada a data/tasks.js.
 // ============================================================================
 import { showToast, escapeHtml, initials, colorFromString, projectIcon } from "../utils.js";
 import { openContextMenu } from "./context-menu.js";
@@ -39,16 +40,23 @@ function ensureAnchor() {
 }
 
 /**
- * project: proyecto actual (todas las tareas seleccionadas pertenecen a
- * él, porque la vista de Lista siempre está dentro de un proyecto).
+ * project: proyecto actual — solo cuando TODAS las tareas seleccionadas
+ * pertenecen a uno solo, como en la vista de Lista. En "Mis tareas" la
+ * selección puede mezclar tareas de varios proyectos distintos y
+ * recordatorios personales a la vez, así que ahí se omite (undefined/null):
+ * "Mover a otra sección" no tiene sentido sin un proyecto único de
+ * referencia (las secciones son de un proyecto concreto) y se oculta del
+ * todo, y "Cambiar de proyecto" deja de excluir "el proyecto actual" de la
+ * lista (no hay uno) y ofrece todos.
  * projects: TODOS los proyectos del equipo (para "cambiar de proyecto").
  * currentUser: quien tiene la sesión abierta — para "Mover a mis tareas"
  * (se mueven a SUS tareas personales, no a las de quien estuviera
  * asignado antes).
- * onClearSelection: limpia el estado de selección en list-view.js y
- * vuelve a renderizar — las demás acciones no lo necesitan porque, al
- * escribir en Firestore, el listener en tiempo real ya provoca un
- * re-render que "poda" del propio estado las tareas que dejan de encajar.
+ * onClearSelection: limpia el estado de selección en la vista que llama
+ * (list-view.js o my-tasks-view.js) y vuelve a renderizar — las demás
+ * acciones no lo necesitan porque, al escribir en Firestore, el listener
+ * en tiempo real ya provoca un re-render que "poda" del propio estado las
+ * tareas que dejan de encajar.
  */
 export function renderBulkToolbar({ selectedTasks, teamMembers, project, projects, currentUser, onClearSelection }) {
   const anchor = ensureAnchor();
@@ -61,7 +69,7 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
     <div class="bulk-toolbar" role="toolbar" aria-label="Acciones sobre la selección">
       <span class="bulk-toolbar__count">${n} ${n === 1 ? "tarea seleccionada" : "tareas seleccionadas"}</span>
       <span class="bulk-toolbar__divider"></span>
-      <button type="button" class="bulk-toolbar__btn" data-action="move-section" title="Mover a otra sección">⇅</button>
+      ${project ? `<button type="button" class="bulk-toolbar__btn" data-action="move-section" title="Mover a otra sección">⇅</button>` : ""}
       <button type="button" class="bulk-toolbar__btn" data-action="change-project" title="Cambiar de proyecto">🗂</button>
       <button type="button" class="bulk-toolbar__btn" data-action="assign" title="Asignar a alguien">👤</button>
       <button type="button" class="bulk-toolbar__btn" data-action="dates" title="Establecer fechas">📅</button>
@@ -71,7 +79,7 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
       <button type="button" class="bulk-toolbar__btn" data-action="clear" title="Deseleccionar todo">✕</button>
     </div>`;
 
-  anchor.querySelector('[data-action="move-section"]').addEventListener("click", (e) => {
+  anchor.querySelector('[data-action="move-section"]')?.addEventListener("click", (e) => {
     const sections = [...(project.sections || [])].sort((a, b) => a.order - b.order);
     if (!sections.length) { showToast("Este proyecto no tiene secciones."); return; }
     const rect = e.currentTarget.getBoundingClientRect();
@@ -86,8 +94,8 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
   });
 
   anchor.querySelector('[data-action="change-project"]').addEventListener("click", (e) => {
-    const others = (projects || []).filter((p) => p.id !== project.id);
-    if (!others.length) { showToast("No hay otro proyecto al que mover estas tareas."); return; }
+    const others = project ? (projects || []).filter((p) => p.id !== project.id) : (projects || []);
+    if (!others.length) { showToast("No hay proyectos a los que mover estas tareas."); return; }
     const rect = e.currentTarget.getBoundingClientRect();
     openContextMenu({
       x: rect.left, y: rect.top,

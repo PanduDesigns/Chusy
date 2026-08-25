@@ -22,6 +22,16 @@
   --color-text-lo: #B4BCC2;
   --color-text-faint: #909AA0;
 
+  /* Texto que SIEMPRE va sobre --color-signal (dorado) u otro fondo claro
+     y saturado — insignia de admin, botón primario, hoy del calendario…
+     Antes esos sitios usaban --color-void (que también hacía de fondo de
+     página) para el texto oscuro: funcionaba porque --color-void ERA
+     oscuro en el único tema que existía. Con el modo claro, --color-void
+     pasa a ser claro y ese texto dejaría de leerse — de ahí esta variable
+     aparte, fija en los dos temas, que separa "texto oscuro para poner
+     encima de algo brillante" de "fondo de página". */
+  --color-ink: #14161A;
+
   --color-danger: #FF5C6C;
   --color-danger-soft: rgba(255, 92, 108, 0.14);
   --color-warning: #E8963C;
@@ -43,6 +53,42 @@
   --shadow-raised: 0 8px 30px rgba(0, 0, 0, 0.45);
   --transition-fast: 120ms ease;
   --transition-med: 220ms cubic-bezier(.2,.7,.3,1);
+
+  color-scheme: dark;
+}
+
+/* ==========================================================================
+   Modo claro — se activa con [data-theme="light"] en <html> (ver js/theme.js
+   y el script embebido al principio de index.html, que lo aplica antes del
+   primer pintado para no dar un parpadeo del tema equivocado). Oscuro sigue
+   siendo el de por defecto si no hay nada elegido todavía.
+
+   Solo se redefinen aquí los tokens de superficie/texto y --color-signal
+   (el dorado original, #FCD000, da muy poco contraste como TEXTO sobre un
+   fondo claro — como fondo con texto oscuro encima sigue funcionando, pero
+   se usa igual en botones/insignias/enlaces con el propio color como texto,
+   así que hace falta una versión más oscura para los dos usos a la vez).
+   --color-signal-dim, --color-signal-soft y los colores de estado
+   (danger/warning/success) se dejan igual en ambos temas: son washes de
+   baja opacidad que ya se adaptan solos al fondo que tengan detrás, o
+   colores de estado que conviene que se reconozcan igual en cualquier tema. */
+:root[data-theme="light"] {
+  --color-void: #F1F2F4;
+  --color-void-raised: #F8F9FA;
+  --color-panel: #FFFFFF;
+  --color-panel-raised: #ECEEF1;
+  --color-line: #DBDFE3;
+  --color-line-bright: #C3C9CE;
+
+  --color-signal: #8A6D00;
+
+  --color-text-hi: #1D2023;
+  --color-text-lo: #4E555C;
+  --color-text-faint: #7D848B;
+
+  --shadow-raised: 0 8px 30px rgba(20, 22, 26, 0.14);
+
+  color-scheme: light;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -273,7 +319,7 @@ a { color: var(--color-signal); }
   transition: var(--transition-fast);
   white-space: nowrap;
 }
-.btn--primary { background: var(--color-signal); color: var(--color-void); font-weight: 700; }
+.btn--primary { background: var(--color-signal); color: var(--color-ink); font-weight: 700; }
 .btn--primary:hover { background: #ffde3d; }
 .btn--ghost { background: transparent; color: var(--color-text-hi); border-color: var(--color-line); }
 .btn--ghost:hover { border-color: var(--color-line-bright); background: var(--color-panel-raised); }
@@ -337,6 +383,16 @@ a { color: var(--color-signal); }
 .sidebar.is-collapsed .sidebar__user { justify-content: center; gap: 0; }
 .sidebar.is-collapsed .sidebar__footer { justify-content: center; }
 .sidebar.is-collapsed .sidebar__logout { display: none; }
+/* El contador de "Mis tareas" (.sidebar__item-count) es también un
+   .sidebar__label, así que la regla de arriba ya lo lleva a max-width:0 +
+   opacity:0 — pero como además tiene padding y borde propios, esa caja no
+   llega a pesar 0px de verdad (padding/borde no encogen por debajo de su
+   propio tamaño aunque el contenido sí). Ese resto invisible pero presente
+   descuadraba el centrado del icono de "Mis tareas" frente al resto de
+   iconos (Línea de tiempo, Archivo…), que al no tener un tercer elemento
+   quedaban perfectamente centrados. Quitarlo del todo del flujo con
+   display:none deja un único hijo visible (el icono) para centrar. */
+.sidebar.is-collapsed .sidebar__item-count { display: none; }
 
 .sidebar__brand {
   text-align: center;
@@ -437,7 +493,7 @@ a { color: var(--color-signal); }
   width: 26px; height: 26px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-size: 10.5px; font-weight: 500;
-  color: var(--color-void); flex-shrink: 0;
+  color: var(--color-ink); flex-shrink: 0;
 }
 .avatar--sm { width: 20px; height: 20px; font-size: 9px; }
 .avatar-stack { display: flex; }
@@ -821,7 +877,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .cal-daynum span:first-child {
   width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
 }
-.cal-daynum.is-today span:first-child { background: var(--color-signal); color: var(--color-void); font-weight: 700; }
+.cal-daynum.is-today span:first-child { background: var(--color-signal); color: var(--color-ink); font-weight: 700; }
 .calendar-day__add {
   margin-left: auto; opacity: 0; background: none; border: none;
   color: var(--color-text-faint); font-size: 13px; padding: 0 4px; border-radius: var(--radius-sm);
@@ -838,7 +894,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .cal-bar { opacity: 0.9; }
 .cal-bar:hover { opacity: 1; }
 .cal-bar.is-complete { opacity: 0.35; }
-.cal-bar__label { font-size: 10px; font-weight: 600; color: var(--color-void); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-bar__label { font-size: 10px; font-weight: 600; color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-milestone { background: var(--color-signal-soft); }
 .cal-milestone .cal-bar__label { color: var(--color-signal); }
 .cal-milestone__diamond { width: 8px; height: 8px; background: var(--color-signal); transform: rotate(45deg); border-radius: 1px; flex-shrink: 0; }
@@ -991,7 +1047,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .filterbar__btn:hover { border-color: var(--color-line-bright); color: var(--color-text-hi); }
 .filterbar__btn.has-active { border-color: var(--color-signal-dim); color: var(--color-signal); background: var(--color-signal-soft); }
 .filterbar__count {
-  font-family: var(--font-mono); font-size: 10px; background: var(--color-signal); color: var(--color-void);
+  font-family: var(--font-mono); font-size: 10px; background: var(--color-signal); color: var(--color-ink);
   border-radius: 20px; padding: 0 6px; font-weight: 700;
 }
 .filterbar__clear { background: none; border: none; color: var(--color-text-faint); font-size: 12px; padding: 6px 4px; }
@@ -1143,6 +1199,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
   .sidebar.is-open { transform: translateX(0); }
   .sidebar.is-collapsed { width: var(--sidebar-w); padding-left: 14px; padding-right: 14px; }
   .sidebar.is-collapsed .sidebar__label { opacity: 1; max-width: 220px; }
+  .sidebar.is-collapsed .sidebar__item-count { display: inline-block; } /* aquí sí se ve: el móvil siempre muestra la barra "expandida" */
   .sidebar.is-collapsed .sidebar__item,
   .sidebar.is-collapsed .sidebar__search,
   .sidebar.is-collapsed .sidebar__new-project,

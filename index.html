@@ -4,6 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Chusy · Martech Corporation</title>
+<script>
+  // Aplica el tema (claro/oscuro) ANTES del primer pintado, para no dar un
+  // parpadeo del tema equivocado mientras carga el resto de la app. Solo
+  // lee la caché de este navegador (misma clave que js/theme.js) — la
+  // fuente de verdad de verdad es la cuenta (Firestore), pero eso solo se
+  // puede leer una vez Firebase resuelve la sesión, y para entonces ya
+  // habría dado tiempo a pintar con el tema que no toca. En cuanto
+  // app.js arranca, reconcilia esto con lo que haya en la cuenta.
+  try {
+    if (localStorage.getItem('chusy:theme') === 'light') {
+      document.documentElement.dataset.theme = 'light';
+    }
+  } catch (e) {}
+</script>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/favicon-180.png">
 <meta name="color-scheme" content="dark">

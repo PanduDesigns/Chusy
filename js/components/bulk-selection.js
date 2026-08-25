@@ -1,12 +1,14 @@
 // ============================================================================
-// Controlador de selección múltiple para tablas de tareas (de momento solo
-// lo usa la vista de Lista). Vive FUERA del ciclo de renderizado —
-// list-view.js reconstruye su HTML entero en cada render (cada cambio de
+// Controlador de selección múltiple para tablas de tareas (lo usan la vista
+// de Lista y Mis tareas — cada una con su propia instancia, ver
+// list-view.js y my-tasks-view.js). Vive FUERA del ciclo de renderizado —
+// esas vistas reconstruyen su HTML entero en cada render (cada cambio de
 // filtro, cada actualización en tiempo real de Firestore...), así que si
-// este estado viviera dentro de renderListView() se perdería la selección
-// cada vez que llega un dato nuevo. Guardándolo a nivel de módulo
-// sobrevive entre renders y solo se limpia cuando list-view.js decide que
-// toca (cambio de proyecto, o el botón "✕" de la barra flotante).
+// este estado viviera dentro de la función de render se perdería la
+// selección cada vez que llega un dato nuevo. Guardándolo a nivel de
+// módulo sobrevive entre renders y solo se limpia cuando la vista decide
+// que toca (cambio de proyecto en Lista, o el botón "✕" de la barra
+// flotante en cualquiera de las dos).
 // ============================================================================
 
 export function createSelectionController() {

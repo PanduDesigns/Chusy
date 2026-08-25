@@ -5,13 +5,21 @@
 import { el, escapeHtml, initials, colorFromString, formatDateLong, showToast } from "../utils.js";
 import { updateDisplayName, changePassword } from "../auth.js";
 import { updateUserProfile } from "../data/users.js";
+import { applyTheme } from "../theme.js";
 
 export function openAccountModal({ userProfile }) {
   const root = document.getElementById("modal-root");
 
-  const roleBg = userProfile.role === "admin" ? "var(--color-signal)" : "var(--color-line-bright)";
-  const roleFg = userProfile.role === "admin" ? "#0B0D0E" : "#ECEDED";
+  // --color-ink/--color-text-hi en vez de hexadecimales sueltos: la
+  // insignia de admin va sobre --color-signal (dorado) y la de miembro
+  // sobre --color-panel-raised — las dos cambian de valor entre modo claro
+  // y oscuro, así que el texto tiene que ser la variable pensada para
+  // seguir contrastando en los dos casos, no un color fijo copiado del
+  // aspecto que tenía en un solo tema.
+  const roleBg = userProfile.role === "admin" ? "var(--color-signal)" : "var(--color-panel-raised)";
+  const roleFg = userProfile.role === "admin" ? "var(--color-ink)" : "var(--color-text-hi)";
   const memberSince = userProfile.createdAt ? formatDateLong(userProfile.createdAt) : "";
+  const currentTheme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
 
   const overlay = el(`
     <div class="modal-overlay">
@@ -37,6 +45,15 @@ export function openAccountModal({ userProfile }) {
           </label>
           <p class="field__error" data-name-error></p>
           <button class="btn btn--ghost btn--sm" id="acc-save-name" type="button" style="width:fit-content;">Guardar nombre</button>
+
+          <div style="border-top:1px solid var(--color-line);"></div>
+
+          <span class="field__label" style="font-size:13px;">Apariencia</span>
+          <div class="chip-select" id="acc-theme-toggle">
+            <button type="button" class="chip${currentTheme === "dark" ? " is-selected" : ""}" data-theme-choice="dark">🌙 Oscuro</button>
+            <button type="button" class="chip${currentTheme === "light" ? " is-selected" : ""}" data-theme-choice="light">☀️ Claro</button>
+          </div>
+          <p class="field__hint">Se aplica al momento y se recuerda en tu cuenta, también si entras desde otro dispositivo.</p>
 
           <div style="border-top:1px solid var(--color-line);"></div>
 
@@ -74,6 +91,23 @@ export function openAccountModal({ userProfile }) {
   overlay.querySelector("#close").addEventListener("click", close);
   overlay.querySelector("#cancel").addEventListener("click", close);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  // Se aplica al momento (sin esperar a Firestore, para que se note
+  // inmediato) y se guarda en la cuenta después — si ese guardado falla
+  // (sin conexión, etc.) el tema se queda igualmente aplicado en este
+  // navegador, solo avisamos de que no viajará a otro dispositivo.
+  overlay.querySelectorAll("[data-theme-choice]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const theme = btn.dataset.themeChoice;
+      applyTheme(theme);
+      overlay.querySelectorAll("[data-theme-choice]").forEach((b) => b.classList.toggle("is-selected", b === btn));
+      try {
+        await updateUserProfile(userProfile.uid, { theme });
+      } catch (e) {
+        showToast("No se pudo guardar el tema en tu cuenta (sí se aplicó en este navegador).", "error");
+      }
+    });
+  });
 
   overlay.querySelector("#acc-save-name").addEventListener("click", async () => {
     const errorEl = overlay.querySelector("[data-name-error]");

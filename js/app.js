@@ -3,6 +3,7 @@
 // proyecto/vista, y conecta los componentes con los datos de Firestore.
 // ============================================================================
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
+import { applyTheme, getCachedTheme } from "./theme.js";
 import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks } from "./data/projects.js";
 import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
@@ -103,8 +104,18 @@ let unsubCurrentTasks = null;
 function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
 function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.add("hidden"); authScreen.classList.remove("hidden"); }
 
+// El script embebido al principio de index.html ya pinta el tema cacheado
+// de este navegador antes del primer fotograma (para no dar un parpadeo);
+// esto solo confirma lo mismo dentro del módulo. En cuanto se resuelva la
+// sesión, más abajo, se reconcilia con lo que diga la cuenta de verdad.
+applyTheme(getCachedTheme());
+
 onAuthChange((profile) => {
   currentUser = profile;
+  // La cuenta manda en cuanto se conoce (puede diferir de la caché de
+  // este navegador si la persona cambió el tema desde otro dispositivo);
+  // sin sesión, nos quedamos con lo último aplicado en este navegador.
+  applyTheme(profile ? profile.theme : getCachedTheme());
   if (!profile) {
     cleanup();
     showAuth();
@@ -245,9 +256,10 @@ function handleSortChange(column) {
 function renderShell() {
   if (!currentUser) return;
 
-  // Solo la vista de Lista vuelve a poblarla (al final de renderMain()); si
-  // el destino es otra vista/modo, queda limpia. Es barato: si sí toca
-  // mostrarla, se reconstruye igualmente unas líneas más abajo.
+  // La vuelven a poblar la vista de Lista y Mis tareas (cada una al final
+  // de su propio render); si el destino es otro modo/vista, queda limpia.
+  // Es barato: si sí toca mostrarla, se reconstruye igualmente unas
+  // líneas más abajo.
   removeBulkToolbar();
 
   renderSidebar(sidebarEl, {
