@@ -358,16 +358,26 @@ function renderShell() {
     return;
   }
 
+  renderProjectTopbar();
+  renderMain();
+}
+
+/** Repinta solo el topbar del modo proyecto (título, contador, pestañas de
+ * vista, "+ Nueva tarea"). Aparte de renderShell(), también la llama el
+ * propio cambio de vista (más abajo, dentro de onViewChange) — antes esa
+ * pestaña activa (Lista/Tablero/Calendario/Línea de tiempo) se quedaba
+ * pintada en la vista anterior al cambiar, porque solo se volvía a
+ * renderMain() y este topbar nunca se tocaba hasta el siguiente render
+ * completo. */
+function renderProjectTopbar() {
   renderTopbar(topbarEl, {
     project: currentProject,
     taskCount: currentTasks.length,
     currentView,
-    onViewChange: (v) => { currentView = v; renderMain(); },
+    onViewChange: (v) => { currentView = v; renderProjectTopbar(); renderMain(); },
     onNewTask: () => openNewProjectTask(currentProject.sections[0]?.id),
     onToggleSidebar: () => sidebarEl.classList.toggle("is-open"),
   });
-
-  renderMain();
 }
 
 function renderMain() {

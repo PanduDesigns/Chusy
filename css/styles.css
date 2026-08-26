@@ -14,6 +14,15 @@
   --color-line: #3A3D40;
   --color-line-bright: #52565A;
 
+  /* Para sombrear una celda como "fuera de lo normal" dentro de una
+     cuadrícula — días de otro mes en Calendario, fines de semana en Línea
+     de tiempo — sin depender de --color-void/-raised: esos dos son casi
+     iguales entre sí en el tema claro (a propósito, para que el fondo
+     general de la página quede muy suave — ver más abajo), así que ya no
+     bastan para que esta distinción se note. Independiente del todo de
+     esos dos, para poder oscurecerla sin más efectos secundarios. */
+  --color-dim: #1A1B1D;
+
   --color-signal: #FCD000;
   --color-signal-dim: #A8860A;
   --color-signal-soft: rgba(252, 208, 0, 0.14);
@@ -92,6 +101,7 @@
   --color-panel-raised: #ECEEF1;
   --color-line: #DBDFE3;
   --color-line-bright: #C3C9CE;
+  --color-dim: #E7E8EA;
 
   --color-signal-text: #96700A;
 
@@ -880,7 +890,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .calendar-week:last-child { border-bottom: none; }
 
 .cal-daybg { background: var(--color-void-raised); border-right: 1px solid var(--color-line); }
-.cal-daybg.is-other-month { background: var(--color-void); }
+.cal-daybg.is-other-month { background: var(--color-dim); }
 .cal-daybg.is-today { background: var(--color-signal-soft); }
 
 .cal-daynum {
@@ -945,7 +955,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
   font-family: var(--font-mono); font-size: 11px; color: var(--color-text-lo);
   padding: 2px 0;
 }
-.tl-daycol.is-weekend { background: var(--color-void-raised); }
+.tl-daycol.is-weekend { background: var(--color-dim); }
 .tl-month { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-signal-text); }
 
 .tl-group-label, .tl-task-label {
