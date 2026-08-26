@@ -86,8 +86,8 @@
    washes de baja opacidad que ya se adaptan solos al fondo que tengan
    detrás, o colores que conviene reconocer igual en cualquier tema. */
 :root[data-theme="light"] {
-  --color-void: #F4F4F4;
-  --color-void-raised: #F9F9F9;
+  --color-void: #FCFCFB;
+  --color-void-raised: #FDFDFC;
   --color-panel: #FFFFFF;
   --color-panel-raised: #ECEEF1;
   --color-line: #DBDFE3;
