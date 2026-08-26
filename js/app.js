@@ -93,6 +93,42 @@ function saveMyTasksFilters(filters) {
   } catch (e) { /* localStorage no disponible */ }
 }
 
+// La última sección visitada (un proyecto concreto —con la vista que
+// tenía abierta, Lista/Tablero/Calendario/Línea de tiempo—, Mis tareas,
+// Línea de tiempo global o Archivo) se recuerda con el mismo criterio que
+// sidebarCollapsed y los filtros de Mis tareas: por persona, en este
+// navegador — no en la cuenta, así que en un ordenador compartido cada
+// quien vuelve a SU última sección, y en un dispositivo nuevo se empieza
+// de cero. Sin nada guardado todavía, el destino por defecto es "Mis
+// tareas" (ver restoreLastLocation, llamada una sola vez por sesión desde
+// bootstrap()).
+function loadLastLocation() {
+  if (!currentUser) return null;
+  try {
+    const raw = localStorage.getItem(`chusy:lastLocation:${currentUser.uid}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+function saveLastLocation(loc) {
+  if (!currentUser) return;
+  try { localStorage.setItem(`chusy:lastLocation:${currentUser.uid}`, JSON.stringify(loc)); } catch (e) { /* localStorage no disponible */ }
+}
+function restoreLastLocation() {
+  const saved = loadLastLocation();
+  if (saved && saved.mode === "project" && saved.projectId) {
+    if (saved.view) currentView = saved.view;
+    selectProject(saved.projectId);
+  } else if (saved && saved.mode === "timeline") {
+    selectTimeline();
+  } else if (saved && saved.mode === "archive") {
+    selectArchive();
+  } else {
+    selectMyTasks();
+  }
+}
+
 let unsubProjects = null;
 let unsubArchivedProjects = null;
 let unsubUsers = null;
@@ -100,6 +136,7 @@ let unsubMyTasks = null;
 let unsubTags = null;
 let unsubCurrentProject = null;
 let unsubCurrentTasks = null;
+let hasRestoredLocation = false; // solo se restaura la sección al arrancar una vez por sesión — ver restoreLastLocation()
 
 function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
 function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.add("hidden"); authScreen.classList.remove("hidden"); }
@@ -133,6 +170,7 @@ function cleanup() {
   projects = []; archivedProjects = []; teamMembers = []; myTasks = []; tagsRegistry = [];
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
   activeFilters = {}; sortState = { column: null, direction: "asc" };
+  hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
   removeBulkToolbar();
 }
 
@@ -153,17 +191,23 @@ function bootstrap() {
   unsubProjects = subscribeToAllProjects((allProjects) => {
     projects = allProjects;
     syncGlobalTimelineSubscriptions();
-    if (mode === "project") {
-      if (!currentProjectId && projects.length) {
-        selectProject(projects[0].id);
-        return;
-      }
-      if (currentProjectId && !projects.find((p) => p.id === currentProjectId)) {
-        currentProjectId = null; currentProject = null; currentTasks = [];
-      }
+    if (mode === "project" && currentProjectId && !projects.find((p) => p.id === currentProjectId)) {
+      // La sección recordada (o la que se acaba de seleccionar) ya no
+      // existe — se borró o se archivó. Igual que si no hubiera nada
+      // guardado, el destino por defecto es "Mis tareas".
+      selectMyTasks();
+      return;
     }
     renderShell();
   });
+
+  // Solo una vez por sesión: aterriza en la última sección que esta
+  // persona visitó en este navegador, en vez de forzar siempre el primer
+  // proyecto de la lista (ver restoreLastLocation).
+  if (!hasRestoredLocation) {
+    hasRestoredLocation = true;
+    restoreLastLocation();
+  }
 }
 
 /**
@@ -196,6 +240,7 @@ function syncGlobalTimelineSubscriptions() {
 
 function selectProject(projectId) {
   mode = "project";
+  saveLastLocation({ mode: "project", projectId, view: currentView });
   if (projectId === currentProjectId) { renderShell(); return; }
   currentProjectId = projectId;
   activeFilters = {};
@@ -210,6 +255,7 @@ function selectProject(projectId) {
 
 function selectMyTasks() {
   mode = "mytasks";
+  saveLastLocation({ mode: "mytasks" });
   activeFilters = loadMyTasksFilters();
   sortState = { column: null, direction: "asc" };
   renderShell();
@@ -217,12 +263,14 @@ function selectMyTasks() {
 
 function selectTimeline() {
   mode = "timeline";
+  saveLastLocation({ mode: "timeline" });
   activeFilters = {};
   renderShell();
 }
 
 function selectArchive() {
   mode = "archive";
+  saveLastLocation({ mode: "archive" });
   renderShell();
 }
 
@@ -374,7 +422,7 @@ function renderProjectTopbar() {
     project: currentProject,
     taskCount: currentTasks.length,
     currentView,
-    onViewChange: (v) => { currentView = v; renderProjectTopbar(); renderMain(); },
+    onViewChange: (v) => { currentView = v; saveLastLocation({ mode: "project", projectId: currentProjectId, view: v }); renderProjectTopbar(); renderMain(); },
     onNewTask: () => openNewProjectTask(currentProject.sections[0]?.id),
     onToggleSidebar: () => sidebarEl.classList.toggle("is-open"),
   });

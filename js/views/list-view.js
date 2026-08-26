@@ -1,10 +1,13 @@
 // ============================================================================
 // Vista de Lista: tabla con columnas (Nombre, Fecha límite, Responsables,
-// Prioridad y los campos personalizados del proyecto), agrupada por
-// sección. Cada columna se puede pulsar para ordenar (alfabético / fecha /
-// prioridad / valor del campo), con flecha indicando la dirección.
-// Las columnas se pueden redimensionar arrastrando su borde derecho y
-// ocultar/mostrar desde "Columnas" — son preferencias de cada persona.
+// Prioridad, Etiquetas y los campos personalizados del proyecto), agrupada
+// por sección. Cada columna se puede pulsar para ordenar (alfabético /
+// fecha / prioridad / valor del campo), con flecha indicando la dirección.
+// Las columnas se pueden redimensionar arrastrando su borde derecho,
+// reordenar arrastrando su cabecera (salvo "Nombre", que es fija) y
+// ocultar/mostrar desde "Columnas". Ancho y ocultas son de cada persona en
+// esta tabla; el orden es único por persona y se comparte con Mis tareas y
+// el resto de proyectos (ver components/table-columns.js).
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml } from "../utils.js";
 import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
@@ -13,7 +16,7 @@ import { updateProject, saveProjectSections } from "../data/projects.js";
 import { openContextMenu } from "../components/context-menu.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
 import { openSectionsModal } from "../components/sections-modal.js";
-import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, openColumnsMenu } from "../components/table-columns.js";
+import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, wireColumnReorder, openColumnsMenu } from "../components/table-columns.js";
 import { createSelectionController } from "../components/bulk-selection.js";
 import { renderBulkToolbar, removeBulkToolbar } from "../components/bulk-toolbar.js";
 
@@ -28,6 +31,7 @@ const BASE_COLUMNS = [
   { key: "dueDate", label: "Fecha límite", defaultWidth: 88, minWidth: 70 },
   { key: "assignee", label: "Responsables", defaultWidth: 96, minWidth: 60 },
   { key: "priority", label: "Prioridad", defaultWidth: 80, minWidth: 64 },
+  { key: "tags", label: "Etiquetas", defaultWidth: 160, minWidth: 90 },
 ];
 
 // Selección múltiple: vive fuera de renderListView() para sobrevivir a que
@@ -54,7 +58,7 @@ export function renderListView(container, opts) {
   const allColumns = [...BASE_COLUMNS, ...customCols];
   const scopeKey = `project:${project.id}`;
   const prefs = (currentUser.columnPrefs || {})[scopeKey];
-  const { visible, gridTemplate, widthOf } = resolveColumns(allColumns, prefs);
+  const { visible, gridTemplate, widthOf } = resolveColumns(allColumns, prefs, currentUser.columnOrder);
 
   const bySection = new Map(project.sections.map((s) => [s.id, []]));
   const noSectionTasks = [];
@@ -89,7 +93,6 @@ export function renderListView(container, opts) {
                 <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
                 <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
                 <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
-                ${task.tags.slice(0, 2).map((t) => tagPill(t, tagsRegistry)).join("")}
               </span>`;
             }
             if (col.key === "dueDate") {
@@ -100,6 +103,11 @@ export function renderListView(container, opts) {
             }
             if (col.key === "priority") {
               return `<span class="tag-pill" style="background:${priorityColor(task.priority)};color:${textColorFor(priorityColor(task.priority))};">${priorityLabel(task.priority)}</span>`;
+            }
+            if (col.key === "tags") {
+              return task.tags && task.tags.length
+                ? `<span class="list-table__tags-cell">${task.tags.map((t) => tagPill(t, tagsRegistry)).join("")}</span>`
+                : `<span class="list-table__cell-text">—</span>`;
             }
             return `<span class="list-table__cell-text">${escapeHtml(task.customFields?.[col.fieldId] ?? "—")}</span>`;
           })
@@ -154,9 +162,10 @@ export function renderListView(container, opts) {
   );
   container.querySelector("#btn-columns").addEventListener("click", (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    openColumnsMenu({ x: rect.left, y: rect.bottom + 4, allColumns, hidden: prefs?.hidden, scopeKey, currentUserUid: currentUser.uid });
+    openColumnsMenu({ x: rect.left, y: rect.bottom + 4, allColumns, order: currentUser.columnOrder, hidden: prefs?.hidden, scopeKey, currentUserUid: currentUser.uid });
   });
   wireColumnResize(container, { visible, widthOf, scopeKey, currentUserUid: currentUser.uid });
+  wireColumnReorder(container, { allColumns, order: currentUser.columnOrder, currentUserUid: currentUser.uid });
 
   container.querySelectorAll("[data-check]").forEach((btn) => {
     btn.addEventListener("click", (e) => {

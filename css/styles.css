@@ -628,6 +628,13 @@ a { color: var(--color-signal-text); }
 .list-table__col-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .list-table__arrow { font-size: 10px; flex-shrink: 0; }
 
+/* ---------- reordenar columnas (arrastrar cabecera) ---------- */
+.list-table__col[draggable="true"] { cursor: grab; user-select: none; }
+.list-table__col--locked { cursor: default; } /* "Nombre": ni se oculta ni se arrastra */
+.list-table__col.is-dragging-col { opacity: 0.35; }
+.list-table__col.is-drop-before { box-shadow: inset 3px 0 0 var(--color-signal); }
+.list-table__col.is-drop-after { box-shadow: inset -3px 0 0 var(--color-signal); }
+
 /* ---------- redimensionar / ocultar columnas ---------- */
 .table-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
 /* .list-table-scroll ya se comporta, sin buscarlo, como contenedor de
@@ -683,6 +690,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .avatar-stack { overflow: hidden; }
 .list-table__cell-text { font-size: 12.5px; color: var(--color-text-lo); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .list-table__cell-text.is-overdue { color: var(--color-danger); }
+.list-table__tags-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 
 .tag {
   font-size: 10.5px; font-family: var(--font-mono); padding: 2px 7px; border-radius: 4px;

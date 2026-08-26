@@ -1,11 +1,14 @@
 // ============================================================================
 // Vista "Mis tareas": todo lo asignado a la persona, en cualquier proyecto
-// (más sus recordatorios personales), agrupado por urgencia de fecha y
-// con columnas ordenables (como la vista personal de Asana).
+// (más sus recordatorios personales), agrupado por urgencia de fecha
+// (Vencidas / Hoy / Mañana / Próximos 7 días / Más adelante / Sin fecha,
+// como la vista personal de Asana) y con columnas ordenables.
 // Además de las columnas de siempre, cada persona puede definir sus
 // propios campos personalizados (botón "+ Campo personalizado") — son
-// solo suyos y se aplican a cualquier tarea que vea aquí. Las columnas
-// se pueden redimensionar y ocultar/mostrar, también de forma personal.
+// solo suyos y se aplican a cualquier tarea que vea aquí. Las columnas se
+// pueden redimensionar, reordenar arrastrando su cabecera y ocultar/
+// mostrar, también de forma personal — el orden es el mismo que en la
+// vista de Lista de cualquier proyecto (ver components/table-columns.js).
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon, setListHtml } from "../utils.js";
 import { toggleTaskComplete } from "../data/tasks.js";
@@ -13,7 +16,7 @@ import { celebrateTask } from "../components/celebration.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
 import { updateUserProfile } from "../data/users.js";
-import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, openColumnsMenu } from "../components/table-columns.js";
+import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, wireColumnReorder, openColumnsMenu } from "../components/table-columns.js";
 import { createSelectionController } from "../components/bulk-selection.js";
 import { renderBulkToolbar, removeBulkToolbar } from "../components/bulk-toolbar.js";
 
@@ -31,6 +34,7 @@ const BASE_COLUMNS = [
   { key: "dueDate", label: "Fecha límite", defaultWidth: 88, minWidth: 70 },
   { key: "assignee", label: "Responsables", defaultWidth: 96, minWidth: 60 },
   { key: "priority", label: "Prioridad", defaultWidth: 80, minWidth: 64 },
+  { key: "tags", label: "Etiquetas", defaultWidth: 160, minWidth: 90 },
   { key: "project", label: "Proyecto", defaultWidth: 140, minWidth: 80 },
 ];
 
@@ -57,14 +61,16 @@ export function renderMyTasksView(container, opts) {
   const customCols = (currentUser.personalCustomFieldDefs || []).map((f) => ({ key: `cf:${f.id}`, label: f.name, fieldId: f.id, defaultWidth: 120, minWidth: 70 }));
   const allColumns = [...BASE_COLUMNS, ...customCols];
   const prefs = (currentUser.columnPrefs || {})[SCOPE_KEY];
-  const { visible, gridTemplate, widthOf } = resolveColumns(allColumns, prefs);
+  const { visible, gridTemplate, widthOf } = resolveColumns(allColumns, prefs, currentUser.columnOrder);
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
   const weekLimit = new Date(todayStart);
   weekLimit.setDate(weekLimit.getDate() + 7);
 
-  const groups = { vencidas: [], hoy: [], semana: [], adelante: [], sinFecha: [] };
+  const groups = { vencidas: [], hoy: [], manana: [], semana: [], adelante: [], sinFecha: [] };
   tasks.forEach((task) => {
     if (!task.dueDate) { groups.sinFecha.push(task); return; }
     const d = toDate(task.dueDate);
@@ -73,6 +79,8 @@ export function renderMyTasksView(container, opts) {
       (task.isComplete ? groups.hoy : groups.vencidas).push(task);
     } else if (d.getTime() === todayStart.getTime()) {
       groups.hoy.push(task);
+    } else if (d.getTime() === tomorrowStart.getTime()) {
+      groups.manana.push(task);
     } else if (d.getTime() < weekLimit.getTime()) {
       groups.semana.push(task);
     } else {
@@ -84,7 +92,8 @@ export function renderMyTasksView(container, opts) {
   const sections = [
     { key: "vencidas", label: "Vencidas" },
     { key: "hoy", label: "Hoy" },
-    { key: "semana", label: "Esta semana" },
+    { key: "manana", label: "Mañana" },
+    { key: "semana", label: "Próximos 7 días" },
     { key: "adelante", label: "Más adelante" },
     { key: "sinFecha", label: "Sin fecha" },
   ];
@@ -101,7 +110,7 @@ export function renderMyTasksView(container, opts) {
     );
     container.querySelector("#btn-columns")?.addEventListener("click", (e) => {
       const rect = e.currentTarget.getBoundingClientRect();
-      openColumnsMenu({ x: rect.left, y: rect.bottom + 4, allColumns, hidden: prefs?.hidden, scopeKey: SCOPE_KEY, currentUserUid: currentUser.uid });
+      openColumnsMenu({ x: rect.left, y: rect.bottom + 4, allColumns, order: currentUser.columnOrder, hidden: prefs?.hidden, scopeKey: SCOPE_KEY, currentUserUid: currentUser.uid });
     });
   }
 
@@ -141,7 +150,6 @@ export function renderMyTasksView(container, opts) {
               <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
               <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
               <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
-              ${task.tags.slice(0, 2).map((t) => tagPill(t, tagsRegistry)).join("")}
             </span>`;
         }
         if (col.key === "dueDate") {
@@ -152,6 +160,11 @@ export function renderMyTasksView(container, opts) {
         }
         if (col.key === "priority") {
           return `<span class="tag-pill" style="background:${PRIORITY_COLORS[task.priority] || "#8B959C"};color:${textColorFor(PRIORITY_COLORS[task.priority] || "#8B959C")};">${PRIORITY_LABELS[task.priority] || task.priority}</span>`;
+        }
+        if (col.key === "tags") {
+          return task.tags && task.tags.length
+            ? `<span class="list-table__tags-cell">${task.tags.map((t) => tagPill(t, tagsRegistry)).join("")}</span>`
+            : `<span class="list-table__cell-text">—</span>`;
         }
         if (col.key === "project") {
           return !task.projectId
@@ -194,6 +207,7 @@ export function renderMyTasksView(container, opts) {
   });
   wireColumnsToolbar();
   wireColumnResize(container, { visible, widthOf, scopeKey: SCOPE_KEY, currentUserUid: currentUser.uid });
+  wireColumnReorder(container, { allColumns, order: currentUser.columnOrder, currentUserUid: currentUser.uid });
 
   container.querySelectorAll("[data-open]").forEach((elx) => {
     elx.addEventListener("click", (e) => {

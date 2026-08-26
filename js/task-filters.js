@@ -102,15 +102,27 @@ const PRIORITY_ORDER = { urgente: 0, alta: 1, media: 2, baja: 3 };
 
 /**
  * Ordena por una columna: 'title' | 'dueDate' | 'priority' | 'assignee' |
- * 'project' | `cf:<id>`. Las completadas siempre van al final, tengan o no
- * columna elegida; dentro de cada bloque (pendientes/completadas), si no
- * hay columna elegida se ordena por prioridad.
+ * 'project' | 'tags' | `cf:<id>`. Las completadas siempre van al final,
+ * tengan o no columna elegida.
+ *
+ * SIN columna elegida (el estado inicial, al entrar o tras limpiar el
+ * orden): fecha límite ascendente — las tareas sin fecha siempre al
+ * final — y, dentro de la misma fecha (o entre las que no tienen),
+ * por prioridad (urgente primero). Antes se ordenaba solo por prioridad
+ * ignorando la fecha por completo, así que con varias tareas de la misma
+ * prioridad el orden real dependía de cómo las hubiera devuelto
+ * Firestore — no de nada visible para quien mira la lista.
+ *
+ * 'tags': una tarea puede llevar varias etiquetas, así que se ordena por
+ * la que sea alfabéticamente primera entre las suyas (mismo criterio que
+ * 'assignee', que ya usaba el primer responsable de la lista).
  */
 export function sortTasks(tasks, sort, { teamMembers = [], projects = [] } = {}) {
   const dir = sort && sort.direction === "desc" ? -1 : 1;
+  const hasColumn = !!(sort && sort.column);
 
   const valueOf = (t) => {
-    switch (sort && sort.column) {
+    switch (sort.column) {
       case "title":
         return (t.title || "").toLowerCase();
       case "dueDate":
@@ -125,15 +137,17 @@ export function sortTasks(tasks, sort, { teamMembers = [], projects = [] } = {})
         const p = projects.find((p) => p.id === t.projectId);
         return p ? p.name.toLowerCase() : null;
       }
+      case "tags":
+        return t.tags && t.tags.length ? [...t.tags].map((s) => s.toLowerCase()).sort()[0] : null;
       default:
-        if (sort && sort.column && sort.column.startsWith("cf:")) {
+        if (sort.column.startsWith("cf:")) {
           const fieldId = sort.column.slice(3);
           const v = t.customFields ? t.customFields[fieldId] : null;
           if (v === undefined || v === null || v === "") return null;
           const n = Number(v);
           return Number.isNaN(n) ? String(v).toLowerCase() : n;
         }
-        return PRIORITY_ORDER[t.priority]; // sin columna elegida: prioridad
+        return null;
     }
   };
 
@@ -150,7 +164,15 @@ export function sortTasks(tasks, sort, { teamMembers = [], projects = [] } = {})
     return 0;
   };
 
-  const pending = tasks.filter((t) => !t.isComplete).sort(compare);
-  const done = tasks.filter((t) => t.isComplete).sort(compare);
+  const defaultCompare = (a, b) => {
+    const aEmpty = !a.dueDate, bEmpty = !b.dueDate;
+    if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+    if (!aEmpty && a.dueDate !== b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+    return (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
+  };
+
+  const finalCompare = hasColumn ? compare : defaultCompare;
+  const pending = tasks.filter((t) => !t.isComplete).sort(finalCompare);
+  const done = tasks.filter((t) => t.isComplete).sort(finalCompare);
   return [...pending, ...done];
 }

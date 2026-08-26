@@ -53,3 +53,18 @@ export function setColumnHidden(uid, scopeKey, colKey, hidden) {
     [`columnPrefs.${scopeKey}.hidden`]: hidden ? arrayUnion(colKey) : arrayRemove(colKey),
   });
 }
+
+/**
+ * Orden de columnas de las tablas de tareas (Lista de proyecto y Mis
+ * tareas) — a diferencia del ancho y de qué columnas están ocultas (que
+ * son por "ámbito": un proyecto concreto o "mytasks", ver arriba), el
+ * ORDEN es una preferencia única y GLOBAL de cada persona: reordenar
+ * columnas en cualquier sitio las reordena en todos. Vive suelto en el
+ * perfil (`users/{uid}.columnOrder`, fuera de `columnPrefs`) como un
+ * array con las claves de columna en el orden elegido — ver
+ * `applyColumnOrder()` en `components/table-columns.js` para cómo se
+ * interpreta (una clave ausente aquí se coloca al final).
+ */
+export function setColumnOrder(uid, order) {
+  return updateDoc(doc(db, "users", uid), { columnOrder: order });
+}
