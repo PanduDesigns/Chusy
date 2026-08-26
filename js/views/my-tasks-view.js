@@ -7,7 +7,7 @@
 // solo suyos y se aplican a cualquier tarea que vea aquí. Las columnas
 // se pueden redimensionar y ocultar/mostrar, también de forma personal.
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon, setListHtml } from "../utils.js";
 import { toggleTaskComplete } from "../data/tasks.js";
 import { celebrateTask } from "../components/celebration.js";
 import { openTaskContextMenu } from "./list-view.js";
@@ -187,7 +187,7 @@ export function renderMyTasksView(container, opts) {
     )
     .join("");
 
-  container.innerHTML = `${toolbarHtml}<div class="list-table-scroll"><div class="list-table">${headerHtml}${sectionsHtml}</div></div>`;
+  setListHtml(container, `${toolbarHtml}<div class="list-table-scroll"><div class="list-table">${headerHtml}${sectionsHtml}</div></div>`);
 
   container.querySelectorAll("[data-sort]").forEach((btn) => {
     btn.addEventListener("click", () => onSortChange(btn.dataset.sort));

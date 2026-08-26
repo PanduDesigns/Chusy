@@ -6,7 +6,7 @@
 // Las columnas se pueden redimensionar arrastrando su borde derecho y
 // ocultar/mostrar desde "Columnas" — son preferencias de cada persona.
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml } from "../utils.js";
 import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
 import { celebrateTask } from "../components/celebration.js";
 import { updateProject, saveProjectSections } from "../data/projects.js";
@@ -127,13 +127,13 @@ export function renderListView(container, opts) {
     sectionsSorted.map((section) => sectionBlockHtml(section.id, section.name, bySection.get(section.id) || [])).join("") +
     (noSectionTasks.length ? sectionBlockHtml(null, "Sin sección", noSectionTasks) : "");
 
-  container.innerHTML = `
+  setListHtml(container, `
     <div class="table-toolbar">
       <button type="button" class="btn btn--ghost btn--sm" id="btn-sections">🗂 Secciones</button>
       <button type="button" class="btn btn--ghost btn--sm" id="btn-columns">☰ Columnas</button>
       <button type="button" class="btn btn--ghost btn--sm" id="list-add-field">+ Campo personalizado</button>
     </div>
-    <div class="list-table-scroll"><div class="list-table">${headerHtml}${sectionsHtml}</div></div>`;
+    <div class="list-table-scroll"><div class="list-table">${headerHtml}${sectionsHtml}</div></div>`);
 
   container.querySelectorAll("[data-sort]").forEach((btn) => {
     btn.addEventListener("click", () => onSortChange(btn.dataset.sort));

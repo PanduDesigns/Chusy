@@ -32,6 +32,15 @@
      encima de algo brillante" de "fondo de página". */
   --color-ink: #14161A;
 
+  /* El dorado (--color-signal) también se usa como color de TEXTO en unos
+     pocos sitios muy puntuales (enlaces, contenido de la descripción de
+     tarea, alguna etiqueta persistente) — no como fondo. En modo oscuro
+     el propio --color-signal ya lee bien ahí, así que esta variable vale
+     lo mismo; el modo claro la redefine más abajo, sin tocar
+     --color-signal (que en botones/insignias/acentos decorativos se
+     queda siempre con el dorado de siempre). */
+  --color-signal-text: #FCD000;
+
   --color-danger: #FF5C6C;
   --color-danger-soft: rgba(255, 92, 108, 0.14);
   --color-warning: #E8963C;
@@ -63,24 +72,28 @@
    primer pintado para no dar un parpadeo del tema equivocado). Oscuro sigue
    siendo el de por defecto si no hay nada elegido todavía.
 
-   Solo se redefinen aquí los tokens de superficie/texto y --color-signal
-   (el dorado original, #FCD000, da muy poco contraste como TEXTO sobre un
-   fondo claro — como fondo con texto oscuro encima sigue funcionando, pero
-   se usa igual en botones/insignias/enlaces con el propio color como texto,
-   así que hace falta una versión más oscura para los dos usos a la vez).
-   --color-signal-dim, --color-signal-soft y los colores de estado
-   (danger/warning/success) se dejan igual en ambos temas: son washes de
-   baja opacidad que ya se adaptan solos al fondo que tengan detrás, o
-   colores de estado que conviene que se reconozcan igual en cualquier tema. */
+   --color-signal se queda IGUAL que en oscuro a propósito (el mismo dorado
+   vivo de siempre en botones, insignias, hitos, acentos decorativos…):
+   sobre esos fondos el texto es --color-ink, siempre oscuro pase lo que
+   pase, así que el contraste no depende de cuánto brille el dorado. Lo
+   único que se redefine aquí es --color-signal-text — el dorado usado
+   como color de TEXTO suelto sobre una superficie clara, en un puñado de
+   sitios muy concretos (enlaces, contenido de la descripción de tarea,
+   alguna etiqueta persistente) — con una versión más oscura: el dorado
+   original da ~1,5:1 de contraste como texto sobre blanco, prácticamente
+   ilegible ahí. --color-signal-dim, --color-signal-soft y los colores de
+   estado (danger/warning/success) se dejan igual en ambos temas: son
+   washes de baja opacidad que ya se adaptan solos al fondo que tengan
+   detrás, o colores que conviene reconocer igual en cualquier tema. */
 :root[data-theme="light"] {
-  --color-void: #F1F2F4;
-  --color-void-raised: #F8F9FA;
+  --color-void: #F4F4F4;
+  --color-void-raised: #F9F9F9;
   --color-panel: #FFFFFF;
   --color-panel-raised: #ECEEF1;
   --color-line: #DBDFE3;
   --color-line-bright: #C3C9CE;
 
-  --color-signal: #8A6D00;
+  --color-signal-text: #96700A;
 
   --color-text-hi: #1D2023;
   --color-text-lo: #4E555C;
@@ -116,7 +129,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 600; margin: 0; 
 p { margin: 0; }
 button, input, textarea, select { font-family: inherit; color: inherit; }
 button { cursor: pointer; }
-a { color: var(--color-signal); }
+a { color: var(--color-signal-text); }
 .hidden { display: none !important; }
 ::selection { background: var(--color-signal-soft); color: var(--color-text-hi); }
 
@@ -125,7 +138,7 @@ a { color: var(--color-signal); }
 ::-webkit-scrollbar-thumb { background: var(--color-line-bright); border-radius: 8px; }
 
 :focus-visible {
-  outline: 2px solid var(--color-signal);
+  outline: 2px solid var(--color-signal-text);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
@@ -279,9 +292,9 @@ a { color: var(--color-signal); }
 .rte__editor li { margin-bottom: 3px; }
 .rte__editor blockquote { margin: 0 0 10px; padding: 4px 12px; border-left: 3px solid var(--color-signal-dim); color: var(--color-text-lo); font-style: italic; }
 .rte__editor pre { margin: 0 0 10px; padding: 10px 12px; background: var(--color-void); border: 1px solid var(--color-line); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; color: var(--color-text-lo); }
-.rte__editor code { font-family: var(--font-mono); font-size: 12px; background: var(--color-void); border: 1px solid var(--color-line); border-radius: 4px; padding: 1px 5px; color: var(--color-signal); }
+.rte__editor code { font-family: var(--font-mono); font-size: 12px; background: var(--color-void); border: 1px solid var(--color-line); border-radius: 4px; padding: 1px 5px; color: var(--color-signal-text); }
 .rte__editor pre code { background: none; border: none; padding: 0; color: inherit; }
-.rte__editor a { color: var(--color-signal); text-decoration: underline; text-underline-offset: 2px; }
+.rte__editor a { color: var(--color-signal-text); text-decoration: underline; text-underline-offset: 2px; }
 
 .rte__slash-menu {
   position: fixed; z-index: 300; width: 220px; max-height: 320px; overflow-y: auto;
@@ -300,7 +313,7 @@ a { color: var(--color-signal); }
   background: none; border: none; padding: 0; margin-top: -8px;
   font-size: 12px; color: var(--color-text-faint); align-self: flex-end;
 }
-.link-btn:hover { color: var(--color-signal); text-decoration: underline; }
+.link-btn:hover { color: var(--color-signal-text); text-decoration: underline; }
 .field__error {
   font-size: 12.5px;
   color: var(--color-danger);
@@ -525,7 +538,7 @@ a { color: var(--color-signal); }
   background: transparent; border: none; color: var(--color-text-lo);
   font-size: 12.5px; font-weight: 500; padding: 6px 12px; border-radius: 6px;
 }
-.topbar__view-btn.is-active { background: var(--color-panel-raised); color: var(--color-signal); }
+.topbar__view-btn.is-active { background: var(--color-panel-raised); color: var(--color-signal-text); }
 .topbar__spacer { flex: 1; }
 
 .main-content { flex: 1; min-height: 0; overflow-y: auto; padding: 28px 32px; }
@@ -601,7 +614,7 @@ a { color: var(--color-signal); }
   color: var(--color-text-faint); padding: 4px 10px 4px 2px; border-radius: var(--radius-sm);
 }
 .list-table__col:hover { color: var(--color-text-lo); }
-.list-table__col.is-sorted { color: var(--color-signal); }
+.list-table__col.is-sorted { color: var(--color-signal-text); }
 .list-table__col-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .list-table__arrow { font-size: 10px; flex-shrink: 0; }
 
@@ -786,7 +799,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
   border: 1px solid var(--color-line); background: var(--color-void-raised); color: var(--color-text-lo);
   display: inline-flex; align-items: center; gap: 5px;
 }
-.chip.is-selected { border-color: var(--color-signal-dim); color: var(--color-signal); background: var(--color-signal-soft); }
+.chip.is-selected { border-color: var(--color-signal-dim); color: var(--color-signal-text); background: var(--color-signal-soft); }
 .chip__dot { width: 7px; height: 7px; border-radius: 50%; }
 
 .appearance-picker { display: flex; gap: 12px; align-items: flex-start; }
@@ -896,7 +909,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .cal-bar.is-complete { opacity: 0.35; }
 .cal-bar__label { font-size: 10px; font-weight: 600; color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-milestone { background: var(--color-signal-soft); }
-.cal-milestone .cal-bar__label { color: var(--color-signal); }
+.cal-milestone .cal-bar__label { color: var(--color-signal-text); }
 .cal-milestone__diamond { width: 8px; height: 8px; background: var(--color-signal); transform: rotate(45deg); border-radius: 1px; flex-shrink: 0; }
 
 .calendar-more {
@@ -933,7 +946,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
   padding: 2px 0;
 }
 .tl-daycol.is-weekend { background: var(--color-void-raised); }
-.tl-month { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-signal); }
+.tl-month { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-signal-text); }
 
 .tl-group-label, .tl-task-label {
   position: sticky; left: 0; z-index: 4;
@@ -947,7 +960,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .tl-group-label { font-weight: 700; background: var(--color-panel); }
 .tl-group-dot { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; }
 .tl-task-label { cursor: pointer; color: var(--color-text-hi); }
-.tl-task-label:hover { color: var(--color-signal); }
+.tl-task-label:hover { color: var(--color-signal-text); }
 
 .tl-group-band { background: var(--color-panel); border-bottom: 1px solid var(--color-line); }
 .tl-row-band { border-bottom: 1px solid var(--color-line); }
@@ -1029,7 +1042,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
   background: var(--color-panel); border: 1px solid var(--color-line); border-radius: var(--radius-sm);
 }
 .archive-row__name { flex: 1; font-size: 13.5px; cursor: pointer; }
-.archive-row__name:hover { color: var(--color-signal); }
+.archive-row__name:hover { color: var(--color-signal-text); }
 
 /* ==========================================================================
    Filter bar
@@ -1045,7 +1058,7 @@ body.is-col-resizing * { cursor: col-resize !important; }
   border-radius: 20px; transition: var(--transition-fast);
 }
 .filterbar__btn:hover { border-color: var(--color-line-bright); color: var(--color-text-hi); }
-.filterbar__btn.has-active { border-color: var(--color-signal-dim); color: var(--color-signal); background: var(--color-signal-soft); }
+.filterbar__btn.has-active { border-color: var(--color-signal-dim); color: var(--color-signal-text); background: var(--color-signal-soft); }
 .filterbar__count {
   font-family: var(--font-mono); font-size: 10px; background: var(--color-signal); color: var(--color-ink);
   border-radius: 20px; padding: 0 6px; font-weight: 700;

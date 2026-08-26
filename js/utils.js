@@ -191,6 +191,28 @@ export function el(html) {
   return template.content.firstElementChild;
 }
 
+/**
+ * Sustituye el contenido de `container` por `html` conservando la posición
+ * de scroll de su `.list-table-scroll` (Lista y Mis tareas). Sin esto, cada
+ * vez que se reconstruye la tabla —al completar una tarea, marcar/quitar de
+ * la selección múltiple, o cualquier actualización en tiempo real de
+ * Firestore, propia o de otra persona— ese div se crea de cero y el scroll
+ * vuelve arriba del todo, aunque estuvieras trabajando más abajo: un nodo
+ * nuevo no tiene el historial de scroll del que sustituye, aunque ocupe su
+ * mismo sitio. `container` en sí (`.main-content`) nunca se recrea —solo
+ * se le reasigna el innerHTML—, así que esto NO hace falta en las vistas
+ * que scrollean sobre `.main-content` directamente (Tablero, Calendario,
+ * Línea de tiempo, Archivo): ahí el scroll ya sobrevive solo.
+ */
+export function setListHtml(container, html) {
+  const old = container.querySelector(".list-table-scroll");
+  const scrollTop = old ? old.scrollTop : 0;
+  const scrollLeft = old ? old.scrollLeft : 0;
+  container.innerHTML = html;
+  const fresh = container.querySelector(".list-table-scroll");
+  if (fresh) { fresh.scrollTop = scrollTop; fresh.scrollLeft = scrollLeft; }
+}
+
 // ============================================================================
 // HTML del editor de descripción enriquecido (rich-text-editor.js). Van
 // aquí, junto a escapeHtml, porque son las mismas herramientas: convertir
