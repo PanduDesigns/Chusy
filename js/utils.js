@@ -281,3 +281,63 @@ export function toEditableHtml(text) {
     .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
     .join("");
 }
+
+// ============================================================================
+// Tareas en varios proyectos a la vez. Una tarea guarda su proyecto
+// PRINCIPAL en `projectId`/`sectionId` (igual que siempre) y cualquier
+// proyecto ADICIONAL en `extraProjectIds[]`/`extraSections{[projectId]:
+// sectionId}` — ver el modelo de datos en el README. Estos dos helpers son
+// el único sitio que sabe combinar ambos; el resto del código nunca lee
+// `extraProjectIds`/`extraSections` directamente, para no repetir esta
+// lógica en cada vista.
+// ============================================================================
+
+/**
+ * Todos los proyectos a los que pertenece una tarea: el principal primero,
+ * luego los adicionales. Un recordatorio sin ningún proyecto (personal, o
+ * compartido solo por responsables) devuelve un array vacío.
+ */
+export function getTaskProjectIds(task) {
+  const ids = [];
+  if (task.projectId) ids.push(task.projectId);
+  (task.extraProjectIds || []).forEach((id) => {
+    if (id && !ids.includes(id)) ids.push(id);
+  });
+  return ids;
+}
+
+/**
+ * La sección de una tarea DENTRO de un proyecto concreto: si ese proyecto
+ * es el principal, la sección es `sectionId`; si es uno adicional, se busca
+ * en `extraSections`. `null` si esa tarea no pertenece a ese proyecto, o si
+ * pertenece pero no tiene sección asignada ahí.
+ */
+export function getTaskSectionForProject(task, projectId) {
+  if (!projectId) return null;
+  if (task.projectId === projectId) return task.sectionId || null;
+  return (task.extraSections || {})[projectId] || null;
+}
+
+// ============================================================================
+// Buscador por texto de la barra de filtros (Lista/Tablero/Calendario/Línea
+// de tiempo/Mis tareas) — busca en el título y en el texto plano de la
+// descripción, sin mayúsculas ni acentos, para que "diseno" encuentre
+// "Diseño" sin tener que teclear la ñ.
+// ============================================================================
+
+/** Minúsculas y sin acentos, para comparar texto sin depender de cómo lo tecleó cada quien. */
+export function normalizeForSearch(str) {
+  return (str || "")
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+/** Texto plano a partir de la descripción en HTML del editor enriquecido, para buscar en su contenido sin las etiquetas. */
+export function stripHtmlToText(html) {
+  if (!html) return "";
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return template.content.textContent || "";
+}

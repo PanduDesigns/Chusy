@@ -2,7 +2,7 @@
 // Vista de Tablero (Kanban): columnas = secciones, arrastrar y soltar entre
 // columnas y para reordenar dentro de la misma columna.
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, getTaskSectionForProject } from "../utils.js";
 import { moveTask } from "../data/tasks.js";
 import { openTaskContextMenu } from "./list-view.js";
 
@@ -23,8 +23,13 @@ export function renderBoardView(container, { project, tasks, teamMembers, tagsRe
   const bySection = new Map(project.sections.map((s) => [s.id, []]));
   const noSectionTasks = [];
   tasks.forEach((t) => {
-    if (bySection.has(t.sectionId)) bySection.get(t.sectionId).push(t);
-    else noSectionTasks.push(t); // sectionId a null, o de una sección ya eliminada
+    // La sección de la tarea DENTRO de este proyecto en concreto: si este
+    // proyecto es su principal, es t.sectionId de siempre; si lo tiene
+    // como adicional (ver extraProjectIds), sale de t.extraSections — ver
+    // getTaskSectionForProject en utils.js.
+    const sid = getTaskSectionForProject(t, project.id);
+    if (bySection.has(sid)) bySection.get(sid).push(t);
+    else noSectionTasks.push(t); // sin sección, o de una sección ya eliminada
   });
   const sectionsSorted = [...project.sections].sort((a, b) => a.order - b.order);
   // "Sin sección" es una columna más para poder arrastrar tareas dentro y
@@ -102,7 +107,7 @@ export function renderBoardView(container, { project, tasks, teamMembers, tagsRe
         const beforeTask = beforeEl ? tasks.find((t) => t.id === beforeEl.dataset.taskId) : null;
         newOrder = beforeTask ? (beforeTask.order + afterTask.order) / 2 : afterTask.order - 1;
       }
-      moveTask(taskId, sectionId, newOrder);
+      moveTask(taskId, sectionId, newOrder, project.id, task.projectId !== project.id);
     });
   });
 }

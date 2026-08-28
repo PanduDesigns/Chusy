@@ -14,6 +14,17 @@
   --color-line: #3A3D40;
   --color-line-bright: #52565A;
 
+  /* Fondo de la barra lateral en concreto — separado de --color-panel
+     porque el modo "clásico" (ver más abajo) quiere una barra lateral
+     oscura con el resto de la interfaz clara, algo que ningún otro token
+     existente representa por sí solo. Al valer var(--color-panel) aquí Y
+     no redefinirse en el bloque de modo claro, seguirá igual que
+     --color-panel en los dos temas de siempre (una referencia CSS se
+     resuelve con el valor de la variable referenciada QUE ESTÉ activo en
+     ese mismo punto del árbol, no con el que tuviera al declararse esta
+     línea) — solo el bloque de modo clásico la fija a un color propio. */
+  --color-sidebar-bg: var(--color-panel);
+
   /* Para sombrear una celda como "fuera de lo normal" dentro de una
      cuadrícula — días de otro mes en Calendario, fines de semana en Línea
      de tiempo — sin depender de --color-void/-raised: esos dos son casi
@@ -104,6 +115,51 @@
   --color-dim: #E7E8EA;
 
   --color-signal-text: #96700A;
+
+  --color-text-hi: #1D2023;
+  --color-text-lo: #4E555C;
+  --color-text-faint: #7D848B;
+
+  --shadow-raised: 0 8px 30px rgba(20, 22, 26, 0.14);
+
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   Modo clásico — se activa con [data-theme="classic"] en <html>, igual
+   mecanismo que el modo claro de arriba. Un atributo [data-theme="X"] no
+   hereda nada de otro [data-theme="Y"] en el mismo elemento (son selectores
+   distintos, mutuamente excluyentes, no una cascada entre ellos) así que
+   este bloque repite explícitamente los tokens de superficie/texto del modo
+   claro (cuerpo de página claro, igual que él) y solo cambia lo que de
+   verdad distingue a "clásico": la barra lateral oscura y el acento coral
+   de Asana en vez del dorado — pedidos como tres colores exactos:
+   --color-sidebar-bg (#2a2c2e, la columna izquierda), --color-void
+   (#ffffff en vez del "casi blanco" #FCFCFB del modo claro — aquí sí se
+   pidió blanco puro) y --color-signal (#ff584a, "los botones y detalles
+   que aquí son amarillos"). --color-signal-dim y --color-signal-text usan
+   el mismo tono coral oscurecido al 80% (#CC463B, ~4,7:1 de contraste
+   sobre blanco) — mismo motivo que el dorado del modo claro se oscurece
+   para --color-signal-text (el coral de base da ~3,1:1 sobre blanco, poco
+   para texto suelto), reutilizando aquí ese mismo tono también para
+   -dim (bordes/hover) en vez de calcular un tercer valor sin que se haya
+   pedido. --color-signal-soft es la misma fórmula (14% de opacidad) que ya
+   usan oscuro y claro, con el RGB del coral en vez del dorado. */
+:root[data-theme="classic"] {
+  --color-void: #FFFFFF;
+  --color-void-raised: #FDFDFC;
+  --color-panel: #FFFFFF;
+  --color-panel-raised: #ECEEF1;
+  --color-line: #DBDFE3;
+  --color-line-bright: #C3C9CE;
+  --color-dim: #E7E8EA;
+
+  --color-sidebar-bg: #2A2C2E;
+
+  --color-signal: #FF584A;
+  --color-signal-dim: #CC463B;
+  --color-signal-soft: rgba(255, 88, 74, 0.14);
+  --color-signal-text: #CC463B;
 
   --color-text-hi: #1D2023;
   --color-text-lo: #4E555C;
@@ -373,7 +429,7 @@ a { color: var(--color-signal-text); }
   width: var(--sidebar-w);
   flex-shrink: 0;
   min-height: 0; /* junto con .app-shell{height}, permite que .sidebar__list scrollee sola en vez de estirar la barra lateral entera */
-  background: var(--color-panel);
+  background: var(--color-sidebar-bg);
   border-right: 1px solid var(--color-line);
   display: flex;
   flex-direction: column;
@@ -650,7 +706,15 @@ a { color: var(--color-signal-text); }
 .list-table-scroll .list-table { display: inline-block; min-width: 100%; }
 .col-resize-handle {
   position: absolute; top: 0; bottom: 0; right: -6px; width: 12px;
-  cursor: col-resize; z-index: 2;
+  /* Antes "cursor: col-resize" fijo aquí hacía que el ratón se volviera
+     una mano con solo posarse encima, sin llegar a arrastrar — confuso,
+     parecía indicar que ya se podía soltar la columna. Ese cursor ahora
+     solo aparece DURANTE el arrastre de verdad, vía "body.is-col-resizing
+     *" un poco más abajo (ya existía, puesto al hacer mousedown en
+     wireColumnResize() de table-columns.js). El aviso visual al pasar el
+     ratón por aquí (la rayita de :hover::after, justo debajo) se deja
+     igual, para que se note que hay algo que arrastrar sin cambiar el cursor. */
+  cursor: default; z-index: 2;
 }
 .col-resize-handle::after {
   content: ""; position: absolute; top: 2px; bottom: 2px; left: 5px; width: 2px;
@@ -863,6 +927,17 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .attachment-row__name { flex: 1; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-row__remove { background: none; border: none; color: var(--color-text-faint); }
 .attachment-row__remove:hover { color: var(--color-danger); }
+
+/* Selector de proyectos del modal de tarea (crear/editar) — una fila por
+   cada proyecto al que pertenece la tarea, con su sección DENTRO de ese
+   proyecto en concreto (ver extraSections en el modelo de datos). Mismo
+   patrón visual que .attachment-row, con hueco para el desplegable de
+   sección antes del botón de quitar (reutiliza .attachment-row__remove,
+   cero CSS nuevo para ese botón). */
+.project-assign-list { display: flex; flex-direction: column; gap: 6px; }
+.project-assign-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--color-void-raised); border: 1px solid var(--color-line); border-radius: var(--radius-sm); }
+.project-assign-row__name { flex: 1; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-assign-row__section { max-width: 150px; flex-shrink: 0; font-size: 12px; padding: 5px 8px; }
 
 .section-divider { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .section-divider__label { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; color: var(--color-text-faint); text-transform: uppercase; white-space: nowrap; }
@@ -1083,6 +1158,20 @@ body.is-col-resizing * { cursor: col-resize !important; }
 }
 .filterbar__clear { background: none; border: none; color: var(--color-text-faint); font-size: 12px; padding: 6px 4px; }
 .filterbar__clear:hover { color: var(--color-danger); }
+
+.filterbar__search-wrap {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--color-panel); border: 1px solid var(--color-line);
+  border-radius: 20px; padding: 0 12px; width: 220px; max-width: 40vw;
+  transition: border-color var(--transition-fast), width var(--transition-fast);
+}
+.filterbar__search-wrap:focus-within { border-color: var(--color-signal-dim); width: 280px; }
+.filterbar__search-icon { font-size: 12px; opacity: 0.6; flex-shrink: 0; }
+.filterbar__search {
+  background: none; border: none; color: var(--color-text-hi);
+  font-size: 12.5px; padding: 6px 0; width: 100%; min-width: 0;
+}
+.filterbar__search::placeholder { color: var(--color-text-faint); }
 
 .filter-popover {
   position: fixed; z-index: 300; min-width: 200px; max-height: 280px; overflow-y: auto;

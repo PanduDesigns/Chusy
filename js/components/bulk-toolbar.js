@@ -14,6 +14,7 @@ import { showToast, escapeHtml, initials, colorFromString, projectIcon } from ".
 import { openContextMenu } from "./context-menu.js";
 import {
   bulkUpdateTasks,
+  bulkMoveToSectionInProject,
   bulkSetComplete,
   bulkAddAssignees,
   bulkRemoveAssignees,
@@ -88,7 +89,10 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
       items: sections.map((s) => ({
         label: s.name,
         icon: "→",
-        onClick: () => runAction(bulkUpdateTasks(ids, { sectionId: s.id }), `Movidas a «${s.name}».`),
+        // Este proyecto puede ser el principal de unas tareas seleccionadas
+        // y un adicional de otras (ver extraProjectIds) — bulkMoveToSectionInProject
+        // ya distingue cuál toca por tarea, a diferencia de bulkUpdateTasks.
+        onClick: () => runAction(bulkMoveToSectionInProject(selectedTasks, project.id, s.id), `Movidas a «${s.name}».`),
       })),
     });
   });
@@ -104,8 +108,13 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
         icon: projectIcon(p),
         onClick: () => {
           const firstSection = [...(p.sections || [])].sort((a, b) => a.order - b.order)[0];
+          // "Cambiar de proyecto" es un traslado completo: deja a la tarea
+          // en ESE proyecto y en ninguno más, quitando cualquier proyecto
+          // adicional que tuviera (extraProjectIds/extraSections) — para
+          // AÑADIR un proyecto sin perder los que ya tenía, se usa el
+          // selector de proyectos del propio modal de la tarea.
           runAction(
-            bulkUpdateTasks(ids, { projectId: p.id, sectionId: firstSection ? firstSection.id : null }),
+            bulkUpdateTasks(ids, { projectId: p.id, sectionId: firstSection ? firstSection.id : null, extraProjectIds: [], extraSections: {} }),
             `Movidas a «${p.name}».`
           );
         },

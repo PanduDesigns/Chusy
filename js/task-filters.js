@@ -3,35 +3,61 @@
 // de un proyecto o de "mis tareas" ya están cargadas enteras. Los campos
 // personalizados usan la clave "cf:<id>" tanto en filtros como en orden.
 // ============================================================================
-export function applyTaskFilters(tasks, activeFilters) {
-  if (!activeFilters) return tasks;
-  const entries = Object.entries(activeFilters).filter(([, set]) => set && set.size > 0);
-  if (!entries.length) return tasks;
+import { getTaskProjectIds, normalizeForSearch, stripHtmlToText } from "./utils.js";
 
-  return tasks.filter((t) => {
-    for (const [key, set] of entries) {
-      if (key === "assignee") {
-        if (!t.assigneeIds || !t.assigneeIds.some((id) => set.has(id))) return false;
-      } else if (key === "priority") {
-        if (!set.has(t.priority)) return false;
-      } else if (key === "status") {
-        const statusKey = t.isComplete ? "completada" : "pendiente";
-        if (!set.has(statusKey)) return false;
-      } else if (key === "tags") {
-        const hasNoneSelected = set.has("__none__");
-        const matchesTag = t.tags && t.tags.some((tag) => set.has(tag));
-        const matchesNone = hasNoneSelected && (!t.tags || t.tags.length === 0);
-        if (!matchesTag && !matchesNone) return false;
-      } else if (key === "project") {
-        if (!set.has(t.projectId || "")) return false;
-      } else if (key.startsWith("cf:")) {
-        const fieldId = key.slice(3);
-        const val = t.customFields ? t.customFields[fieldId] : null;
-        if (val === null || val === undefined || val === "" || !set.has(String(val))) return false;
+/**
+ * `searchText` (opcional): cuadro de texto de la barra de filtros — filtra
+ * por título y por el texto plano de la descripción, sin mayúsculas ni
+ * acentos. Se aplica DESPUÉS de los filtros de chips (assignee/priority/…),
+ * como un paso más, independiente de si esos vienen o no vienen activos.
+ */
+export function applyTaskFilters(tasks, activeFilters, searchText) {
+  let result = tasks;
+
+  const entries = activeFilters ? Object.entries(activeFilters).filter(([, set]) => set && set.size > 0) : [];
+  if (entries.length) {
+    result = result.filter((t) => {
+      for (const [key, set] of entries) {
+        if (key === "assignee") {
+          if (!t.assigneeIds || !t.assigneeIds.some((id) => set.has(id))) return false;
+        } else if (key === "priority") {
+          if (!set.has(t.priority)) return false;
+        } else if (key === "status") {
+          const statusKey = t.isComplete ? "completada" : "pendiente";
+          if (!set.has(statusKey)) return false;
+        } else if (key === "tags") {
+          const hasNoneSelected = set.has("__none__");
+          const matchesTag = t.tags && t.tags.some((tag) => set.has(tag));
+          const matchesNone = hasNoneSelected && (!t.tags || t.tags.length === 0);
+          if (!matchesTag && !matchesNone) return false;
+        } else if (key === "project") {
+          // Una tarea puede estar en varios proyectos a la vez (ver
+          // getTaskProjectIds) — coincide con el filtro si CUALQUIERA de
+          // los suyos está entre los marcados. Un recordatorio sin ningún
+          // proyecto (array vacío) nunca coincide con ningún proyecto
+          // marcado, igual que ya pasaba antes de poder estar en varios.
+          if (!getTaskProjectIds(t).some((id) => set.has(id))) return false;
+        } else if (key.startsWith("cf:")) {
+          const fieldId = key.slice(3);
+          const val = t.customFields ? t.customFields[fieldId] : null;
+          if (val === null || val === undefined || val === "" || !set.has(String(val))) return false;
+        }
       }
-    }
-    return true;
-  });
+      return true;
+    });
+  }
+
+  const q = normalizeForSearch(searchText || "").trim();
+  if (q) {
+    result = result.filter((t) => {
+      const title = normalizeForSearch(t.title || "");
+      if (title.includes(q)) return true;
+      const description = normalizeForSearch(stripHtmlToText(t.description || ""));
+      return description.includes(q);
+    });
+  }
+
+  return result;
 }
 
 /** Construye las columnas de filtro disponibles para el contexto actual. */

@@ -19,7 +19,8 @@ export function openAccountModal({ userProfile }) {
   const roleBg = userProfile.role === "admin" ? "var(--color-signal)" : "var(--color-panel-raised)";
   const roleFg = userProfile.role === "admin" ? "var(--color-ink)" : "var(--color-text-hi)";
   const memberSince = userProfile.createdAt ? formatDateLong(userProfile.createdAt) : "";
-  const currentTheme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const themeAttr = document.documentElement.dataset.theme;
+  const currentTheme = themeAttr === "light" ? "light" : themeAttr === "classic" ? "classic" : "dark";
 
   const overlay = el(`
     <div class="modal-overlay">
@@ -52,6 +53,7 @@ export function openAccountModal({ userProfile }) {
           <div class="chip-select" id="acc-theme-toggle">
             <button type="button" class="chip${currentTheme === "dark" ? " is-selected" : ""}" data-theme-choice="dark">🌙 Oscuro</button>
             <button type="button" class="chip${currentTheme === "light" ? " is-selected" : ""}" data-theme-choice="light">☀️ Claro</button>
+            <button type="button" class="chip${currentTheme === "classic" ? " is-selected" : ""}" data-theme-choice="classic">🟧 Clásico</button>
           </div>
           <p class="field__hint">Se aplica al momento y se recuerda en tu cuenta, también si entras desde otro dispositivo.</p>
 

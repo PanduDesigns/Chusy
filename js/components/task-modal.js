@@ -6,6 +6,16 @@
 // ventana se reconstruyera sola mientras escribías (ya no hay ninguna
 // suscripción en tiempo real mientras el modal está abierto).
 //
+// Varios proyectos a la vez: `draft.projectIds` guarda TODOS los proyectos
+// de la tarea (el primero es el principal) y `draft.sectionByProject` su
+// sección dentro de CADA uno — es una representación unificada, solo para
+// dentro de este modal; al guardar se reparte entre `projectId`/
+// `sectionId` (el principal) y `extraProjectIds`/`extraSections` (el
+// resto), que es como vive de verdad en Firestore (ver el modelo de datos
+// en el README). Los responsables (`assigneeIds`) ya no dependen de si la
+// tarea es personal o no: se pueden asignar personas a un recordatorio sin
+// proyecto igual que a una tarea de equipo.
+//
 // Comentarios: solo se muestran editando una tarea ya existente (una
 // tarea nueva todavía no tiene id al que colgar comentarios), y esos sí
 // se envían al momento — no forman parte del "draft".
@@ -21,6 +31,7 @@ import {
   textColorFor,
   formatDateLong,
   toDateInputValue,
+  projectBadgeHtml,
   PRIORITY_LABELS,
 } from "../utils.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
@@ -29,12 +40,13 @@ import { createRichTextEditor } from "./rich-text-editor.js";
 const PRIORITIES = ["urgente", "alta", "media", "baja"];
 let lastPickedTagColor = TAG_COLOR_PALETTE[0];
 
-function emptyDraft({ defaultSectionId, presetDueDate }) {
+function emptyDraft({ project, isPersonal, defaultSectionId, presetDueDate, currentUserId }) {
   return {
     title: "",
     description: "",
-    sectionId: defaultSectionId || null,
-    assigneeIds: [],
+    projectIds: project ? [project.id] : [],
+    sectionByProject: project ? { [project.id]: defaultSectionId || null } : {},
+    assigneeIds: isPersonal && currentUserId ? [currentUserId] : [],
     startDate: null,
     dueDate: presetDueDate || null,
     priority: "media",
@@ -55,7 +67,7 @@ export function openTaskModal({
   defaultSectionId,
   presetDueDate,
   teamMembers,
-  allProjectTasks,
+  allProjects,
   tagsRegistry,
   currentUserProfile,
   onSaved,
@@ -63,7 +75,12 @@ export function openTaskModal({
 }) {
   const root = document.getElementById("modal-root");
   const isNew = !taskId;
-  let draft = emptyDraft({ defaultSectionId, presetDueDate });
+  const projects = allProjects || [];
+  let draft = emptyDraft({ project, isPersonal, defaultSectionId, presetDueDate, currentUserId: currentUserProfile?.uid });
+  // ownerId de la tarea tal como está en Firestore ahora mismo (null si
+  // nunca lo tuvo) — no es parte del draft porque no se elige a mano en
+  // ningún control del formulario, ver computeOwnerIdOnSave().
+  let loadedOwnerId = null;
   let dirty = false;
   let comments = [];
   let unsubComments = null;
@@ -79,8 +96,14 @@ export function openTaskModal({
   } else {
     getTask(taskId).then((t) => {
       if (!t) { showToastLike("Esta tarea ya no existe."); close(true); return; }
+      const projectIds = [t.projectId, ...(t.extraProjectIds || [])].filter(Boolean);
+      const sectionByProject = {};
+      if (t.projectId) sectionByProject[t.projectId] = t.sectionId || null;
+      Object.entries(t.extraSections || {}).forEach(([pid, sid]) => { sectionByProject[pid] = sid || null; });
+      loadedOwnerId = t.ownerId || null;
       draft = {
-        title: t.title, description: t.description, sectionId: t.sectionId,
+        title: t.title, description: t.description,
+        projectIds, sectionByProject,
         assigneeIds: t.assigneeIds || [], startDate: t.startDate, dueDate: t.dueDate,
         priority: t.priority, tags: t.tags || [], dependsOn: t.dependsOn || [],
         subtasks: t.subtasks || [], attachments: t.attachments || [],
@@ -102,6 +125,7 @@ export function openTaskModal({
   function close(skipCallback) {
     if (unsubComments) unsubComments();
     if (descriptionEditor) descriptionEditor.destroy();
+    document.querySelectorAll(".project-add-popover").forEach((p) => p.remove());
     document.removeEventListener("keydown", onKeydown);
     overlay.remove();
     if (!skipCallback) onClosed();
@@ -116,8 +140,6 @@ export function openTaskModal({
 
   // --------------------------------------------------------------------
   function buildForm() {
-    const sections = isPersonal ? [] : (project?.sections || []);
-
     overlay.innerHTML = `
       <div class="modal">
         <div class="modal__header">
@@ -127,24 +149,16 @@ export function openTaskModal({
         </div>
         <div class="modal__body">
 
-          ${!isPersonal ? `
-          <div class="modal-row">
-            <label class="field">
-              <span class="field__label">Sección</span>
-              <select class="field__select" id="t-section">
-                <option value="" ${!draft.sectionId ? "selected" : ""}>— Sin sección —</option>
-                ${sections.map((s) => `<option value="${s.id}" ${s.id === draft.sectionId ? "selected" : ""}>${escapeHtml(s.name)}</option>`).join("")}
-              </select>
-            </label>
-            <label class="field">
-              <span class="field__label">Prioridad</span>
-              <div class="chip-select" id="t-priority">${priorityChipsHtml()}</div>
-            </label>
-          </div>` : `
+          <div class="field">
+            <span class="field__label-row"><span class="field__label">Proyectos</span></span>
+            <div class="project-assign-list" id="t-projects"></div>
+            <button type="button" class="btn btn--ghost btn--sm" id="t-add-project" style="width:fit-content;">+ Añadir a un proyecto</button>
+          </div>
+
           <div class="field">
             <span class="field__label">Prioridad</span>
             <div class="chip-select" id="t-priority">${priorityChipsHtml()}</div>
-          </div>`}
+          </div>
 
           <div class="modal-row">
             <label class="field">
@@ -161,7 +175,6 @@ export function openTaskModal({
             🚩 ${draft.isMilestone ? "Marcada como hito" : "Marcar como hito"}
           </button>
 
-          ${!isPersonal ? `
           <div class="field">
             <span class="field__label">Responsables</span>
             <div class="chip-select" id="t-assignees">
@@ -174,7 +187,7 @@ export function openTaskModal({
                   ${escapeHtml(m.name)}${m.isImported ? ` <span style="color:var(--color-text-faint);">· Asana</span>` : ""}
                 </button>`).join("")}
             </div>
-          </div>` : ""}
+          </div>
 
           <div class="field">
             <span class="field__label">Etiquetas</span>
@@ -185,23 +198,7 @@ export function openTaskModal({
             </div>
           </div>
 
-          ${(() => {
-            const projectFieldDefs = (!isPersonal && project?.customFieldDefs) || [];
-            const personalFieldDefs = (currentUserProfile?.personalCustomFieldDefs || []).map((f) => ({ ...f, isPersonalField: true }));
-            const allFieldDefs = [...projectFieldDefs, ...personalFieldDefs];
-            return allFieldDefs.map((f) => `
-          <label class="field">
-            <span class="field__label">${escapeHtml(f.name)}${f.isPersonalField ? ` <span style="color:var(--color-text-faint);font-weight:400;">· personal</span>` : ""}</span>
-            ${f.type === "numero"
-              ? `<input class="field__input" type="number" data-custom-field="${f.id}" value="${draft.customFields[f.id] ?? ""}" placeholder="0">`
-              : f.type === "texto"
-              ? `<input class="field__input" type="text" data-custom-field="${f.id}" value="${escapeHtml(draft.customFields[f.id] ?? "")}" placeholder="Escribe…">`
-              : `<select class="field__select" data-custom-field="${f.id}">
-                  <option value="">— Sin definir —</option>
-                  ${f.options.map((opt) => `<option value="${escapeHtml(opt)}" ${draft.customFields[f.id] === opt ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("")}
-                </select>`}
-          </label>`).join("");
-          })()}
+          <div id="t-customfields"></div>
 
           <div class="field">
             <span class="field__label">Descripción</span>
@@ -243,6 +240,8 @@ export function openTaskModal({
     `;
 
     wireStaticListeners();
+    renderProjectRows();
+    renderCustomFields();
     renderTagChips();
     renderSubtasks();
     renderAttachments();
@@ -262,6 +261,149 @@ export function openTaskModal({
   }
 
   // --------------------------------------------------------------------
+  // Selector de proyectos: una fila por cada proyecto de la tarea (el
+  // primero de draft.projectIds es el principal, aunque aquí no se
+  // distinguen visualmente — Chusy los trata igual salvo por dentro, al
+  // guardar) con su propio desplegable de sección DENTRO de ese proyecto.
+  // --------------------------------------------------------------------
+  function renderProjectRows() {
+    const box = overlay.querySelector("#t-projects");
+    const validIds = draft.projectIds.filter((pid) => projects.some((p) => p.id === pid));
+    if (validIds.length !== draft.projectIds.length) draft.projectIds = validIds; // proyecto borrado entre tanto
+
+    if (!draft.projectIds.length) {
+      box.innerHTML = `<p class="field__hint" style="margin:0;">Sin proyecto — de momento solo la ven quien la creó y sus responsables, en Mis tareas.</p>`;
+      return;
+    }
+
+    box.innerHTML = draft.projectIds
+      .map((pid) => {
+        const proj = projects.find((p) => p.id === pid);
+        const sections = [...(proj.sections || [])].sort((a, b) => a.order - b.order);
+        const currentSection = draft.sectionByProject[pid] || "";
+        return `
+        <div class="project-assign-row" data-project="${pid}">
+          ${projectBadgeHtml(proj, "project-badge--sm")}
+          <span class="project-assign-row__name">${escapeHtml(proj.name)}</span>
+          <select class="field__select project-assign-row__section" data-section-for="${pid}">
+            <option value="">— Sin sección —</option>
+            ${sections.map((s) => `<option value="${s.id}" ${s.id === currentSection ? "selected" : ""}>${escapeHtml(s.name)}</option>`).join("")}
+          </select>
+          <button type="button" class="attachment-row__remove" data-remove-project="${pid}" title="Quitar de este proyecto">✕</button>
+        </div>`;
+      })
+      .join("");
+
+    box.querySelectorAll("[data-section-for]").forEach((sel) => {
+      sel.addEventListener("change", (e) => {
+        draft.sectionByProject = { ...draft.sectionByProject, [sel.dataset.sectionFor]: e.target.value || null };
+        markDirty();
+      });
+    });
+    box.querySelectorAll("[data-remove-project]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const pid = btn.dataset.removeProject;
+        draft.projectIds = draft.projectIds.filter((id) => id !== pid);
+        const rest = { ...draft.sectionByProject };
+        delete rest[pid];
+        draft.sectionByProject = rest;
+        markDirty();
+        renderProjectRows();
+        renderCustomFields();
+      });
+    });
+  }
+
+  function openAddProjectPopover(anchorBtn) {
+    document.querySelectorAll(".project-add-popover").forEach((p) => p.remove());
+    const available = projects.filter((p) => !draft.projectIds.includes(p.id)).sort((a, b) => a.name.localeCompare(b.name));
+
+    const rect = anchorBtn.getBoundingClientRect();
+    const pop = document.createElement("div");
+    pop.className = "project-add-popover filter-popover";
+    pop.innerHTML = available.length
+      ? `<div class="tag-suggest">${available
+          .map((p) => `<button type="button" class="tag-suggest__item" data-add-project="${p.id}">${projectBadgeHtml(p, "project-badge--sm")}${escapeHtml(p.name)}</button>`)
+          .join("")}</div>`
+      : `<p style="color:var(--color-text-faint);font-size:12px;padding:6px 8px;margin:0;">No hay más proyectos disponibles.</p>`;
+    document.body.appendChild(pop);
+
+    const left = Math.min(rect.left, window.innerWidth - pop.offsetWidth - 20);
+    pop.style.left = `${Math.max(8, left)}px`;
+    pop.style.top = `${rect.bottom + 6}px`;
+
+    pop.querySelectorAll("[data-add-project]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const pid = btn.dataset.addProject;
+        const proj = projects.find((p) => p.id === pid);
+        draft.projectIds = [...draft.projectIds, pid];
+        // Sin sección de entrada a propósito (igual que una tarea nueva sin
+        // botón "+ Añadir tarea" de una sección concreta): no hay ninguna
+        // sección de ESTE proyecto que sea más "la correcta" que otra solo
+        // por añadirse desde aquí.
+        draft.sectionByProject = { ...draft.sectionByProject, [pid]: null };
+        markDirty();
+        renderProjectRows();
+        renderCustomFields();
+        closePopover();
+      });
+    });
+
+    function onOutside(e) {
+      if (!pop.contains(e.target) && e.target !== anchorBtn) closePopover();
+    }
+    function onKeydown(e) { if (e.key === "Escape") closePopover(); }
+    function closePopover() {
+      pop.remove();
+      document.removeEventListener("click", onOutside);
+      document.removeEventListener("keydown", onKeydown);
+    }
+    setTimeout(() => {
+      document.addEventListener("click", onOutside);
+      document.addEventListener("keydown", onKeydown);
+    }, 0);
+  }
+
+  // Campos personalizados: unión de los de CADA proyecto al que pertenece
+  // ahora mismo la tarea (draft.projectIds) más los personales de quien
+  // edita — se vuelve a pintar cada vez que la lista de proyectos cambia,
+  // para que añadir/quitar un proyecto muestre/oculte sus campos al
+  // momento sin tener que cerrar y reabrir la tarea.
+  function renderCustomFields() {
+    const mount = overlay.querySelector("#t-customfields");
+    const projectFieldDefs = draft.projectIds
+      .map((pid) => projects.find((p) => p.id === pid))
+      .filter(Boolean)
+      .flatMap((p) => p.customFieldDefs || []);
+    const personalFieldDefs = (currentUserProfile?.personalCustomFieldDefs || []).map((f) => ({ ...f, isPersonalField: true }));
+    const allFieldDefs = [...projectFieldDefs, ...personalFieldDefs];
+
+    mount.innerHTML = allFieldDefs
+      .map(
+        (f) => `
+      <label class="field">
+        <span class="field__label">${escapeHtml(f.name)}${f.isPersonalField ? ` <span style="color:var(--color-text-faint);font-weight:400;">· personal</span>` : ""}</span>
+        ${f.type === "numero"
+          ? `<input class="field__input" type="number" data-custom-field="${f.id}" value="${draft.customFields[f.id] ?? ""}" placeholder="0">`
+          : f.type === "texto"
+          ? `<input class="field__input" type="text" data-custom-field="${f.id}" value="${escapeHtml(draft.customFields[f.id] ?? "")}" placeholder="Escribe…">`
+          : `<select class="field__select" data-custom-field="${f.id}">
+              <option value="">— Sin definir —</option>
+              ${f.options.map((opt) => `<option value="${escapeHtml(opt)}" ${draft.customFields[f.id] === opt ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("")}
+            </select>`}
+      </label>`
+      )
+      .join("");
+
+    mount.querySelectorAll("[data-custom-field]").forEach((elm) => {
+      elm.addEventListener("change", (e) => {
+        draft.customFields = { ...draft.customFields, [elm.dataset.customField]: e.target.value || null };
+        markDirty();
+      });
+    });
+  }
+
+  // --------------------------------------------------------------------
   function wireStaticListeners() {
     overlay.querySelector("#t-close").addEventListener("click", attemptClose);
     overlay.querySelector("#t-cancel").addEventListener("click", attemptClose);
@@ -276,18 +418,10 @@ export function openTaskModal({
 
     overlay.querySelector("#t-title").addEventListener("input", (e) => { draft.title = e.target.value; markDirty(); });
 
-    const sectionSelect = overlay.querySelector("#t-section");
-    if (sectionSelect) sectionSelect.addEventListener("change", (e) => { draft.sectionId = e.target.value || null; markDirty(); });
+    overlay.querySelector("#t-add-project").addEventListener("click", (e) => openAddProjectPopover(e.currentTarget));
 
     overlay.querySelector("#t-start").addEventListener("change", (e) => { draft.startDate = e.target.value || null; markDirty(); });
     overlay.querySelector("#t-due").addEventListener("change", (e) => { draft.dueDate = e.target.value || null; markDirty(); });
-
-    overlay.querySelectorAll("[data-custom-field]").forEach((sel) => {
-      sel.addEventListener("change", (e) => {
-        draft.customFields = { ...draft.customFields, [sel.dataset.customField]: e.target.value || null };
-        markDirty();
-      });
-    });
 
     const milestoneBtn = overlay.querySelector("#t-milestone");
     milestoneBtn.addEventListener("click", () => {
@@ -541,6 +675,33 @@ export function openTaskModal({
     await addComment(taskId, { authorId: currentUserProfile.uid, authorName: currentUserProfile.name, text });
   }
 
+  /**
+   * El ownerId de una tarea nunca se ELIGE a mano en ningún control — es un
+   * dato histórico de si (y cuándo) se creó como personal, que además sirve
+   * de respaldo de permisos (quien lo tenga puede seguir borrándola más
+   * adelante aunque ya esté en un proyecto, ver firestore.rules). Solo hay
+   * que tocarlo en dos casos:
+   *  - Tarea NUEVA: si se crea desde "Mis tareas" (isPersonal), su ownerId
+   *    es quien la crea, se le añadan o no proyectos en la misma sesión
+   *    antes de guardar. Si se crea desde un proyecto, no lleva ownerId —
+   *    salvo que ese mismo proyecto se quite antes de guardar (ver abajo).
+   *  - Tarea ya EXISTENTE que se queda sin ningún proyecto (se han quitado
+   *    todos desde el selector) Y nunca tuvo ownerId: sin este respaldo, se
+   *    quedaría sin dueño/a, sin proyecto y visible solo para quien esté en
+   *    assigneeIds (o nadie, si tampoco hay responsables) — invisible para
+   *    el resto del equipo y para quien la estaba editando en cuanto
+   *    cerrara el modal. Pasa a ser personal de quien la esté guardando en
+   *    ese momento, igual que ya hace "Mover a mis tareas" en las acciones
+   *    masivas.
+   */
+  function computeOwnerIdOnSave(primaryProjectId) {
+    if (isNew) {
+      return isPersonal ? currentUserProfile.uid : (primaryProjectId ? null : currentUserProfile.uid);
+    }
+    if (!primaryProjectId && !loadedOwnerId) return currentUserProfile.uid;
+    return loadedOwnerId;
+  }
+
   async function handleAccept() {
     const titleInput = overlay.querySelector("#t-title");
     if (!draft.title.trim()) { titleInput.focus(); return; }
@@ -548,17 +709,36 @@ export function openTaskModal({
     acceptBtn.disabled = true;
     acceptBtn.textContent = "Guardando…";
     try {
+      const [primaryId, ...extraIds] = draft.projectIds;
+      const extraSections = {};
+      extraIds.forEach((pid) => { extraSections[pid] = draft.sectionByProject[pid] || null; });
+      // projectIds/sectionByProject son solo la representación interna de
+      // este modal (ver cabecera del archivo) — nunca se guardan tal
+      // cual en Firestore, así que se excluyen explícitamente del resto
+      // de campos del draft en vez de mandarlos con un "...draft" suelto.
+      const { projectIds, sectionByProject, ...restDraft } = draft;
+      const ownerId = computeOwnerIdOnSave(primaryId || null);
+
       if (isNew) {
-        const newId = await createTask(isPersonal ? null : project.id, {
-          ...draft,
-          ownerId: isPersonal ? currentUserProfile.uid : null,
-          assigneeIds: isPersonal ? [currentUserProfile.uid] : draft.assigneeIds,
+        const newId = await createTask(primaryId || null, {
+          ...restDraft,
+          sectionId: primaryId ? (draft.sectionByProject[primaryId] || null) : null,
+          extraProjectIds: extraIds,
+          extraSections,
+          ownerId,
           createdBy: currentUserProfile.uid,
           order: Date.now(),
         });
         onSaved(newId);
       } else {
-        await updateTask(taskId, draft);
+        await updateTask(taskId, {
+          ...restDraft,
+          projectId: primaryId || null,
+          sectionId: primaryId ? (draft.sectionByProject[primaryId] || null) : null,
+          extraProjectIds: extraIds,
+          extraSections,
+          ownerId,
+        });
         onSaved(taskId);
       }
       dirty = false;

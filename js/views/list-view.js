@@ -9,7 +9,7 @@
 // esta tabla; el orden es único por persona y se comparte con Mis tareas y
 // el resto de proyectos (ver components/table-columns.js).
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml, getTaskSectionForProject } from "../utils.js";
 import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
 import { celebrateTask } from "../components/celebration.js";
 import { updateProject, saveProjectSections } from "../data/projects.js";
@@ -63,8 +63,13 @@ export function renderListView(container, opts) {
   const bySection = new Map(project.sections.map((s) => [s.id, []]));
   const noSectionTasks = [];
   tasks.forEach((t) => {
-    if (bySection.has(t.sectionId)) bySection.get(t.sectionId).push(t);
-    else noSectionTasks.push(t); // sectionId a null, o de una sección ya eliminada
+    // La sección de la tarea DENTRO de este proyecto en concreto: si este
+    // proyecto es su principal, es t.sectionId de siempre; si lo tiene
+    // como adicional (ver extraProjectIds), sale de t.extraSections — ver
+    // getTaskSectionForProject en utils.js.
+    const sid = getTaskSectionForProject(t, project.id);
+    if (bySection.has(sid)) bySection.get(sid).push(t);
+    else noSectionTasks.push(t); // sin sección, o de una sección ya eliminada
   });
   const sectionsSorted = [...project.sections].sort((a, b) => a.order - b.order);
   const orderedTaskIds = []; // orden real en pantalla, para Shift+clic (puede cruzar secciones)

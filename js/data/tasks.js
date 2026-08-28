@@ -1,15 +1,35 @@
 // ============================================================================
 // Acceso a datos: tareas.
 //
-// Tareas personales: si `projectId` es null, es una tarea privada de una
-// sola persona (recordatorio en "Mis tareas"), marcada con `ownerId`. Se
+// Tareas personales: si `projectId` es null y no hay ningún adicional
+// (`extraProjectIds` vacío), es un recordatorio sin proyecto — lo ve quien
+// conste en `ownerId` y cualquiera en `assigneeIds` (se puede asignar a
+// otras personas sin meterla en ningún proyecto, ver task-modal.js). Se
 // guarda en la misma colección para reutilizar toda la lógica de fechas,
 // prioridad, subtareas, etc. — las reglas de Firestore son las que hacen
-// que solo su dueña/o pueda verla.
+// que solo esas personas puedan verla.
+//
+// Varios proyectos a la vez: el proyecto PRINCIPAL sigue siendo
+// `projectId`/`sectionId` (igual que siempre — de ahí cuelga buena parte
+// del permiso de lectura/escritura abierto a todo el equipo, ver
+// firestore.rules). Cualquier proyecto ADICIONAL vive en
+// `extraProjectIds[]` + `extraSections{[projectId]: sectionId}` — un mapa,
+// porque cada proyecto tiene sus propias secciones y una tarea puede estar
+// en una sección distinta dentro de cada uno. `js/utils.js` tiene los dos
+// helpers (`getTaskProjectIds`, `getTaskSectionForProject`) que combinan
+// ambos; el resto del código nunca lee `extraProjectIds`/`extraSections`
+// directamente. Quitarle a una tarea su último proyecto sin que tenga
+// `ownerId` la dejaría invisible para todo el mundo salvo un admin — ver
+// el comentario de `computeOwnerIdOnSave` en task-modal.js para cómo se
+// evita.
 //
 // Nota sobre orden: no usamos orderBy() en la consulta de Firestore a
 // propósito, para no depender de un índice compuesto. El orden (por
 // sección/columna y por prioridad) se calcula en el cliente, en las vistas.
+// El campo `order` en sí es único y global por tarea, no por proyecto — una
+// tarea en dos proyectos a la vez comparte el mismo valor en los dos
+// tableros; con departamentos de este tamaño no se nota (ver apartado 7
+// del README).
 // ============================================================================
 import { db } from "../firebase-init.js";
 import {
@@ -35,6 +55,8 @@ export async function createTask(projectId, data) {
     projectId: projectId || null,
     ownerId: data.ownerId || null,
     sectionId: data.sectionId || null,
+    extraProjectIds: data.extraProjectIds || [],
+    extraSections: data.extraSections || {},
     title: data.title,
     description: data.description || "",
     assigneeIds: data.assigneeIds || [],
@@ -62,6 +84,8 @@ export async function duplicateTask(task) {
   return createTask(task.projectId, {
     ownerId: task.ownerId,
     sectionId: task.sectionId,
+    extraProjectIds: task.extraProjectIds,
+    extraSections: task.extraSections,
     title: `${task.title} (copia)`,
     description: task.description,
     assigneeIds: task.assigneeIds,
@@ -94,9 +118,19 @@ export function toggleTaskComplete(taskId, isComplete) {
   });
 }
 
-/** Cambia una tarea de sección/columna (drag & drop en el tablero). */
-export function moveTask(taskId, sectionId, order) {
-  return updateDoc(doc(db, "tasks", taskId), { sectionId, order, updatedAt: serverTimestamp() });
+/**
+ * Cambia una tarea de sección/columna (drag & drop en el tablero).
+ * `contextProjectId` es el proyecto del tablero donde se ha soltado, e
+ * `isExtraProject` dice si ese proyecto es el principal de la tarea o uno
+ * adicional (lo calcula quien llama, comparando `task.projectId` con el
+ * proyecto del tablero — ver board-view.js): si es el principal se
+ * actualiza `sectionId` como siempre; si es uno adicional, solo su entrada
+ * dentro de `extraSections`, sin tocar la sección que tenga en su proyecto
+ * principal ni en ningún otro adicional.
+ */
+export function moveTask(taskId, sectionId, order, contextProjectId, isExtraProject) {
+  const fields = isExtraProject ? { [`extraSections.${contextProjectId}`]: sectionId } : { sectionId };
+  return updateDoc(doc(db, "tasks", taskId), { ...fields, order, updatedAt: serverTimestamp() });
 }
 
 /** Lectura única (no en tiempo real) — usada al abrir el modal para editar. */
@@ -105,17 +139,59 @@ export async function getTask(taskId) {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
+/**
+ * Todas las tareas de un proyecto: las que lo tienen como principal, MÁS
+ * las que lo tienen como adicional (ver extraProjectIds en el modelo de
+ * datos) — dos consultas por debajo, combinadas y sin duplicados, mismo
+ * motivo y mismo patrón que subscribeToMyTasks un poco más abajo: la
+ * segunda consulta acota también por `projectId != null`, que para estos
+ * documentos siempre es verdad por construcción (un proyecto solo entra en
+ * `extraProjectIds` cuando ya hay uno principal, nunca antes — ver
+ * task-modal.js), pero hace falta escribirlo en la propia consulta para
+ * que Firestore pueda demostrar que cumple la regla de lectura sin tener
+ * que confiar en ese invariante a ciegas.
+ */
 export function subscribeToProjectTasks(projectId, callback) {
-  const q = query(collection(db, "tasks"), where("projectId", "==", projectId));
-  return onSnapshot(
-    q,
+  let primaryTasks = [];
+  let extraTasks = [];
+  let primaryLoaded = false;
+  let extraLoaded = false;
+  const emit = () => {
+    if (!primaryLoaded || !extraLoaded) return;
+    const byId = new Map();
+    [...primaryTasks, ...extraTasks].forEach((t) => byId.set(t.id, t));
+    callback([...byId.values()]);
+  };
+
+  const qPrimary = query(collection(db, "tasks"), where("projectId", "==", projectId));
+  const unsubPrimary = onSnapshot(
+    qPrimary,
     (snap) => {
-      const tasks = [];
-      snap.forEach((d) => tasks.push({ id: d.id, ...d.data() }));
-      callback(tasks);
+      primaryTasks = [];
+      snap.forEach((d) => primaryTasks.push({ id: d.id, ...d.data() }));
+      primaryLoaded = true;
+      emit();
     },
-    (err) => console.error("subscribeToProjectTasks:", err)
+    (err) => console.error("subscribeToProjectTasks (principal):", err)
   );
+
+  const qExtra = query(
+    collection(db, "tasks"),
+    where("extraProjectIds", "array-contains", projectId),
+    where("projectId", "!=", null)
+  );
+  const unsubExtra = onSnapshot(
+    qExtra,
+    (snap) => {
+      extraTasks = [];
+      snap.forEach((d) => extraTasks.push({ id: d.id, ...d.data() }));
+      extraLoaded = true;
+      emit();
+    },
+    (err) => console.error("subscribeToProjectTasks (adicional):", err)
+  );
+
+  return () => { unsubPrimary(); unsubExtra(); };
 }
 
 export function subscribeToTask(taskId, callback) {
@@ -125,63 +201,78 @@ export function subscribeToTask(taskId, callback) {
 }
 
 /**
- * Tareas asignadas a `uid` en cualquier proyecto, MÁS sus tareas
- * personales — de cara a quien la usa es un solo listener para toda la
- * vista "Mis tareas". Por dentro son DOS consultas separadas, a
- * propósito: la regla de lectura de `tasks` es "o es una tarea de
- * proyecto, o es tuya, o eres admin", y esa condición depende de
- * `projectId`/`ownerId` — campos que un único
- * `where("assigneeIds","array-contains",uid)` no acota para nada.
- * Firestore no puede demostrar que la consulta es segura sin esa
- * acotación y la rechaza entera para cualquiera que no sea admin (por
- * eso solo un admin veía sus tareas, y el resto del equipo no veía las
- * suyas). Acotando cada consulta al campo exacto que la regla necesita,
- * las dos quedan verificables para cualquier persona con sesión
- * iniciada, sea admin o no.
+ * Tareas asignadas a `uid` (de proyecto o personales, ver más abajo), MÁS
+ * las personales que haya creado aunque ya no conste como responsable de
+ * ellas — de cara a quien la usa es un solo listener para toda la vista
+ * "Mis tareas". Por dentro son DOS consultas separadas, a propósito: la
+ * regla de lectura de `tasks` es "tiene proyecto, o eres su dueño/a, o
+ * eres uno de sus responsables, o eres admin", y Firestore necesita poder
+ * demostrar que una consulta cumple la regla a partir de sus propios
+ * filtros, no basta con que los documentos que devuelva la cumplan de
+ * hecho.
  *
- * La primera vez que se ejecute, Firestore puede pedir crear un índice
- * compuesto para la consulta de proyecto (assigneeIds + projectId) — es
- * el mismo aviso con enlace de siempre, solo hay que pulsarlo una vez.
+ * `where("assigneeIds","array-contains",uid)` sola YA es una consulta
+ * verificable por sí misma: coincide exactamente con la rama "eres uno de
+ * sus responsables" de la regla (mismo campo, mismo valor — `uid` es
+ * siempre `request.auth.uid` de quien pregunta), así que ya no hace falta
+ * acotarla también por `projectId` como en versiones anteriores de este
+ * archivo — esa acotación extra solo hacía falta porque la regla de
+ * entonces no tenía una rama para "responsable de una tarea personal", así
+ * que había que demostrar la cosa por el lado de "tiene proyecto" en su
+ * lugar. Ahora esta única consulta trae de una vez tanto tareas de
+ * proyecto como personales en las que constes como responsable, sea quien
+ * sea quien las haya creado.
+ *
+ * La segunda consulta, `where("ownerId","==",uid)`, sigue haciendo falta
+ * aparte: cubre tareas personales tuyas en las que, por lo que sea, ya no
+ * estés en `assigneeIds` (te has quitado a ti mismo/a sin dejar de ser su
+ * dueño/a) — un caso raro, pero que de no cubrirse haría "desaparecer" una
+ * tarea de Mis tareas sin haberla borrado ni completado. Combinar las dos
+ * sin duplicados es solo por si una tarea cumple ambas condiciones a la
+ * vez (normal: la mayoría de tareas personales llevan a su propio dueño/a
+ * también en `assigneeIds`).
+ *
+ * La primera vez que se ejecute cada una, Firestore puede pedir crear un
+ * índice — es el mismo aviso con enlace de siempre, solo hay que
+ * pulsarlo una vez.
  */
 export function subscribeToMyTasks(uid, callback) {
-  let projectTasks = [];
-  let personalTasks = [];
-  let projectLoaded = false;
-  let personalLoaded = false;
+  let assignedTasks = [];
+  let ownedTasks = [];
+  let assignedLoaded = false;
+  let ownedLoaded = false;
   const emit = () => {
-    if (!projectLoaded || !personalLoaded) return; // esperar a tener las dos partes antes del primer aviso
-    callback([...projectTasks, ...personalTasks]);
+    if (!assignedLoaded || !ownedLoaded) return; // esperar a tener las dos partes antes del primer aviso
+    const byId = new Map();
+    [...assignedTasks, ...ownedTasks].forEach((t) => byId.set(t.id, t));
+    callback([...byId.values()]);
   };
 
-  const qProject = query(
-    collection(db, "tasks"),
-    where("assigneeIds", "array-contains", uid),
-    where("projectId", "!=", null)
-  );
-  const unsubProject = onSnapshot(
-    qProject,
+  const qAssigned = query(collection(db, "tasks"), where("assigneeIds", "array-contains", uid));
+  const unsubAssigned = onSnapshot(
+    qAssigned,
     (snap) => {
-      projectTasks = [];
-      snap.forEach((d) => projectTasks.push({ id: d.id, ...d.data() }));
-      projectLoaded = true;
+      assignedTasks = [];
+      snap.forEach((d) => assignedTasks.push({ id: d.id, ...d.data() }));
+      assignedLoaded = true;
       emit();
     },
-    (err) => console.error("subscribeToMyTasks (proyecto):", err)
+    (err) => console.error("subscribeToMyTasks (responsable):", err)
   );
 
-  const qPersonal = query(collection(db, "tasks"), where("ownerId", "==", uid));
-  const unsubPersonal = onSnapshot(
-    qPersonal,
+  const qOwned = query(collection(db, "tasks"), where("ownerId", "==", uid));
+  const unsubOwned = onSnapshot(
+    qOwned,
     (snap) => {
-      personalTasks = [];
-      snap.forEach((d) => personalTasks.push({ id: d.id, ...d.data() }));
-      personalLoaded = true;
+      ownedTasks = [];
+      snap.forEach((d) => ownedTasks.push({ id: d.id, ...d.data() }));
+      ownedLoaded = true;
       emit();
     },
-    (err) => console.error("subscribeToMyTasks (personal):", err)
+    (err) => console.error("subscribeToMyTasks (dueño/a):", err)
   );
 
-  return () => { unsubProject(); unsubPersonal(); };
+  return () => { unsubAssigned(); unsubOwned(); };
 }
 
 // ============================================================================
@@ -213,6 +304,22 @@ async function runBatchedUpdate(taskIds, buildFieldsFor) {
 /** Aplica los mismos campos (sección, proyecto, responsable, fechas, hito…) a todas las tareas indicadas. */
 export function bulkUpdateTasks(taskIds, data) {
   return runBatchedUpdate(taskIds, () => data);
+}
+
+/**
+ * Mueve varias tareas a una sección de UN proyecto concreto (acción "Mover
+ * a otra sección" de la barra de selección múltiple, solo en Lista). A
+ * diferencia de bulkUpdateTasks, aquí el campo que toca escribir depende
+ * de cada tarea: si ese proyecto es su principal, `sectionId`; si es uno
+ * adicional (ver extraProjectIds), su entrada dentro de `extraSections` —
+ * por eso recibe las tareas enteras (`tasks`), no solo sus ids, y no
+ * `bulkUpdateTasks` (que aplica el mismo campo a todas por igual).
+ */
+export function bulkMoveToSectionInProject(tasks, projectId, sectionId) {
+  return runBatchedUpdate(tasks.map((t) => t.id), (id) => {
+    const t = tasks.find((x) => x.id === id);
+    return t && t.projectId === projectId ? { sectionId } : { [`extraSections.${projectId}`]: sectionId };
+  });
 }
 
 /** Marca/desmarca como completadas todas las tareas indicadas de una vez. */
@@ -249,6 +356,8 @@ export function bulkMoveToMyTasks(taskIds, uid) {
     ownerId: uid,
     sectionId: null,
     assigneeIds: [uid],
+    extraProjectIds: [],
+    extraSections: {},
   }));
 }
 

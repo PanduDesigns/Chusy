@@ -25,7 +25,7 @@ import { openTeamAdminModal } from "./components/team-admin-modal.js";
 import { openAsanaImportModal } from "./components/asana-import-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { removeBulkToolbar } from "./components/bulk-toolbar.js";
-import { showToast } from "./utils.js";
+import { showToast, getTaskSectionForProject } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
 const authScreen = document.getElementById("auth-screen");
@@ -51,6 +51,7 @@ let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
 let timelineShowHolidays = false;
 let activeFilters = {}; // { [filterKey]: Set(valores) }
+let searchText = ""; // cuadro de búsqueda de la barra de filtros — transitorio, no se recuerda entre sesiones (se reinicia en cada selectProject/selectMyTasks/selectTimeline, igual que activeFilters salvo en Mis tareas)
 let sortState = { column: null, direction: "asc" };
 let globalTasksByProject = {}; // { [projectId]: tasks[] } — línea de tiempo global y buscador
 let unsubGlobalTasks = {}; // { [projectId]: unsubscribeFn }
@@ -169,7 +170,7 @@ function cleanup() {
   unsubGlobalTasks = {}; globalTasksByProject = {};
   projects = []; archivedProjects = []; teamMembers = []; myTasks = []; tagsRegistry = [];
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
-  activeFilters = {}; sortState = { column: null, direction: "asc" };
+  activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
   hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
   removeBulkToolbar();
 }
@@ -244,6 +245,7 @@ function selectProject(projectId) {
   if (projectId === currentProjectId) { renderShell(); return; }
   currentProjectId = projectId;
   activeFilters = {};
+  searchText = "";
   sortState = { column: null, direction: "asc" };
   if (unsubCurrentProject) unsubCurrentProject();
   if (unsubCurrentTasks) unsubCurrentTasks();
@@ -257,6 +259,7 @@ function selectMyTasks() {
   mode = "mytasks";
   saveLastLocation({ mode: "mytasks" });
   activeFilters = loadMyTasksFilters();
+  searchText = "";
   sortState = { column: null, direction: "asc" };
   renderShell();
 }
@@ -265,6 +268,7 @@ function selectTimeline() {
   mode = "timeline";
   saveLastLocation({ mode: "timeline" });
   activeFilters = {};
+  searchText = "";
   renderShell();
 }
 
@@ -291,6 +295,24 @@ function handleFilterChange(key, newSet) {
   if (mode === "mytasks") saveMyTasksFilters(activeFilters);
   if (mode === "project") renderMain();
   else renderShell();
+}
+
+/**
+ * El cuadro de búsqueda de la barra de filtros llama aquí en cada
+ * pulsación (con un pequeño retardo, ver filter-bar.js). A propósito NO
+ * pasa por renderShell()/renderMain() enteros — esos vuelven a construir
+ * la propia barra de filtros con innerHTML, lo que destruiría y
+ * recrearía el <input> en cada letra y le haría perder el foco a media
+ * escritura. En su lugar, cada modo tiene su propia función "…Content()"
+ * que solo toca la lista de tareas de debajo (y, en Mis tareas, el
+ * contador del topbar) — la barra de filtros ya no se vuelve a tocar
+ * hasta el siguiente cambio de chip, proyecto o sección.
+ */
+function handleSearchTextChange(text) {
+  searchText = text;
+  if (mode === "project") renderProjectContent();
+  else if (mode === "mytasks") renderMyTasksContent();
+  else if (mode === "timeline") renderTimelineContent();
 }
 
 function handleSortChange(column) {
@@ -353,21 +375,8 @@ function renderShell() {
 
   if (mode === "mytasks") {
     const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, projects, includeProject: true, customFieldDefs: currentUser.personalCustomFieldDefs, tasks: myTasks });
-    const filteredMyTasks = sortTasks(applyTaskFilters(myTasks, activeFilters), sortState, { teamMembers, projects });
-    const countLabel = filteredMyTasks.length === myTasks.length
-      ? `${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}`
-      : `${filteredMyTasks.length} de ${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}`;
-
-    topbarEl.innerHTML = `
-      <div>
-        <span class="topbar__title">Mis tareas</span>
-        <span class="topbar__count">${countLabel}</span>
-      </div>
-      <button class="btn btn--primary btn--sm" id="btn-new-personal-task" style="margin-left:auto;">+ Tarea personal</button>`;
-    topbarEl.querySelector("#btn-new-personal-task").addEventListener("click", openNewPersonalTask);
-
-    renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
-    renderMyTasksView(mainContentEl, { tasks: filteredMyTasks, teamMembers, projects, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, currentUser });
+    renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange, searchText, onSearchChange: handleSearchTextChange });
+    renderMyTasksContent();
     return;
   }
 
@@ -378,19 +387,8 @@ function renderShell() {
         <span class="topbar__count">todos los proyectos</span>
       </div>`;
     const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, includeStatus: false });
-    renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
-    const groups = projects.map((p) => ({
-      id: p.id,
-      label: p.name,
-      color: p.color,
-      icon: p.icon,
-      tasks: applyTaskFilters((globalTasksByProject[p.id] || []).filter((t) => !t.isComplete), activeFilters),
-    }));
-    renderTimelineView(mainContentEl, {
-      groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
-      showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
-      onOpenTask: openTask,
-    });
+    renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange, searchText, onSearchChange: handleSearchTextChange });
+    renderTimelineContent();
     return;
   }
 
@@ -408,6 +406,48 @@ function renderShell() {
 
   renderProjectTopbar();
   renderMain();
+}
+
+/**
+ * Contenido de "Mis tareas" (contador del topbar + la lista de debajo) —
+ * separado de la rama "mytasks" de renderShell() para que el buscador por
+ * texto (handleSearchTextChange) pueda refrescar SOLO esto sin volver a
+ * construir la barra de filtros de al lado (ver el comentario de esa
+ * función). Repintar el topbar entero aquí no tiene el mismo problema que
+ * la barra de filtros: no tiene ningún campo de texto que pueda perder el
+ * foco.
+ */
+function renderMyTasksContent() {
+  const filteredMyTasks = sortTasks(applyTaskFilters(myTasks, activeFilters, searchText), sortState, { teamMembers, projects });
+  const countLabel = filteredMyTasks.length === myTasks.length
+    ? `${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}`
+    : `${filteredMyTasks.length} de ${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}`;
+
+  topbarEl.innerHTML = `
+    <div>
+      <span class="topbar__title">Mis tareas</span>
+      <span class="topbar__count">${countLabel}</span>
+    </div>
+    <button class="btn btn--primary btn--sm" id="btn-new-personal-task" style="margin-left:auto;">+ Tarea personal</button>`;
+  topbarEl.querySelector("#btn-new-personal-task").addEventListener("click", openNewPersonalTask);
+
+  renderMyTasksView(mainContentEl, { tasks: filteredMyTasks, teamMembers, projects, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, currentUser });
+}
+
+/** Igual que renderMyTasksContent() pero para la línea de tiempo global — el topbar de este modo es estático, así que aquí solo hace falta la vista. */
+function renderTimelineContent() {
+  const groups = projects.map((p) => ({
+    id: p.id,
+    label: p.name,
+    color: p.color,
+    icon: p.icon,
+    tasks: applyTaskFilters((globalTasksByProject[p.id] || []).filter((t) => !t.isComplete), activeFilters, searchText),
+  }));
+  renderTimelineView(mainContentEl, {
+    groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
+    showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
+    onOpenTask: openTask,
+  });
 }
 
 /** Repinta solo el topbar del modo proyecto (título, contador, pestañas de
@@ -430,11 +470,24 @@ function renderProjectTopbar() {
 
 function renderMain() {
   if (mode !== "project" || !currentProject) return;
+  const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, customFieldDefs: currentProject.customFieldDefs, tasks: currentTasks });
+  renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange, searchText, onSearchChange: handleSearchTextChange });
+  renderProjectContent();
+}
+
+/**
+ * Solo el contenido de debajo de la barra de filtros (Lista/Tablero/
+ * Calendario/Línea de tiempo de este proyecto) — separado de renderMain()
+ * por el mismo motivo que renderMyTasksContent()/renderTimelineContent():
+ * que el buscador por texto pueda refrescar esto sin reconstruir también
+ * la barra de filtros de al lado (y con ella, perder el foco del cuadro
+ * de búsqueda a media escritura).
+ */
+function renderProjectContent() {
+  if (mode !== "project" || !currentProject) return;
   removeBulkToolbar(); // igual que en renderShell(): solo la vista de Lista la vuelve a mostrar
 
-  const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, customFieldDefs: currentProject.customFieldDefs, tasks: currentTasks });
-  renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
-  const filteredTasks = applyTaskFilters(currentTasks, activeFilters);
+  const filteredTasks = applyTaskFilters(currentTasks, activeFilters, searchText);
 
   if (currentView === "board") {
     renderBoardView(mainContentEl, { project: currentProject, tasks: filteredTasks, teamMembers, tagsRegistry, onOpenTask: openTask, onAddTask: openNewProjectTask });
@@ -452,7 +505,12 @@ function renderMain() {
       id: s.id,
       label: s.name,
       color: currentProject.color,
-      tasks: filteredTasks.filter((t) => t.sectionId === s.id),
+      // getTaskSectionForProject en vez de t.sectionId a secas: esta
+      // tarea puede tener a currentProject como proyecto ADICIONAL (ver
+      // extraProjectIds), en cuyo caso su sección aquí sale de
+      // extraSections, no de sectionId (que es la de su proyecto
+      // principal, uno distinto).
+      tasks: filteredTasks.filter((t) => getTaskSectionForProject(t, currentProject.id) === s.id),
     }));
     renderTimelineView(mainContentEl, {
       groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
@@ -474,7 +532,7 @@ function openNewProjectTask(sectionId, presetDueDate) {
     defaultSectionId: sectionId,
     presetDueDate,
     teamMembers,
-    allProjectTasks: currentTasks,
+    allProjects: projects,
     tagsRegistry,
     currentUserProfile: currentUser,
     onSaved: () => showToast("Tarea creada."),
@@ -487,7 +545,7 @@ function openNewPersonalTask() {
     taskId: null,
     isPersonal: true,
     teamMembers,
-    allProjectTasks: [],
+    allProjects: projects,
     tagsRegistry,
     currentUserProfile: currentUser,
     onSaved: () => showToast("Recordatorio creado."),
@@ -495,27 +553,19 @@ function openNewPersonalTask() {
   });
 }
 
+/**
+ * A diferencia de las dos funciones de arriba (crear), aquí no hace falta
+ * localizar de antemano en qué proyecto vive la tarea ni si es personal:
+ * el modal la carga él solo con getTask(taskId) y resuelve sus proyectos
+ * (principal y adicionales) contra `allProjects` — por eso puede abrirse
+ * igual desde Mis tareas, la línea de tiempo global, el buscador o la
+ * lista de un proyecto, sin importar de cuál.
+ */
 function openTask(taskId) {
-  // La tarea puede venir de "Mis tareas", de la línea de tiempo global o
-  // del buscador (de un proyecto distinto al seleccionado, o ser un
-  // recordatorio personal sin proyecto), así que buscamos su contexto
-  // real entre lo que ya tenemos cargado.
-  const everything = [...Object.values(globalTasksByProject).flat(), ...myTasks, ...currentTasks];
-  const task = everything.find((t) => t.id === taskId);
-  const isPersonal = task ? !task.projectId : false;
-  const taskProject = !isPersonal
-    ? (task && projects.find((p) => p.id === task.projectId)) || currentProject
-    : null;
-  const relatedTasks = taskProject
-    ? (globalTasksByProject[taskProject.id] || (taskProject.id === currentProjectId ? currentTasks : []))
-    : [];
-
   openTaskModal({
     taskId,
-    project: taskProject,
-    isPersonal,
+    allProjects: projects,
     teamMembers,
-    allProjectTasks: relatedTasks,
     tagsRegistry,
     currentUserProfile: currentUser,
     onSaved: () => {},
@@ -530,10 +580,15 @@ function goToPersonFilter(uid) {
 }
 
 function openSearch() {
-  const everyTask = [
-    ...Object.values(globalTasksByProject).flat(),
-    ...myTasks.filter((t) => !t.projectId),
-  ];
+  // Con una tarea en varios proyectos a la vez (ver extraProjectIds),
+  // globalTasksByProject la trae una vez POR CADA proyecto al que
+  // pertenece — de ahí el Map para quedarnos con una sola entrada por id
+  // antes de pasársela al buscador.
+  const seen = new Map();
+  Object.values(globalTasksByProject).flat().forEach((t) => seen.set(t.id, t));
+  myTasks.filter((t) => !t.projectId).forEach((t) => seen.set(t.id, t));
+  const everyTask = [...seen.values()];
+
   openSearchModal({
     tasks: everyTask,
     projects,

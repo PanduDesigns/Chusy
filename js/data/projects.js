@@ -17,6 +17,7 @@ import {
   serverTimestamp,
   arrayUnion,
   arrayRemove,
+  deleteField,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 
 const DEFAULT_SECTIONS = [
@@ -54,17 +55,27 @@ export function deleteProject(projectId) {
 }
 
 /**
- * Borra el proyecto Y todas sus tareas (con sus comentarios). Se hace en
- * lotes de como mucho 450 operaciones para no chocar con el límite de 500
- * escrituras por batch de Firestore — de sobra para el tamaño de un
- * departamento, pero así no revienta si algún proyecto acumula muchas
- * tareas con muchos comentarios.
+ * Borra el proyecto Y todas las tareas que lo tienen como PRINCIPAL (con
+ * sus comentarios) — se hace en lotes de como mucho 450 operaciones para
+ * no chocar con el límite de 500 escrituras por batch de Firestore, de
+ * sobra para el tamaño de un departamento, pero así no revienta si algún
+ * proyecto acumula muchas tareas con muchos comentarios.
+ *
+ * Las tareas que tienen este proyecto solo como ADICIONAL (ver
+ * extraProjectIds en el modelo de datos) no se borran — seguirían
+ * perteneciendo a su proyecto principal, o siendo un recordatorio de
+ * alguien — solo se les quita la referencia a este proyecto concreto de
+ * `extraProjectIds` y su entrada correspondiente dentro de
+ * `extraSections`.
  */
 export async function deleteProjectWithTasks(projectId) {
-  const tasksSnap = await getDocs(query(collection(db, "tasks"), where("projectId", "==", projectId)));
+  const primarySnap = await getDocs(query(collection(db, "tasks"), where("projectId", "==", projectId)));
+  const extraSnap = await getDocs(
+    query(collection(db, "tasks"), where("extraProjectIds", "array-contains", projectId), where("projectId", "!=", null))
+  );
 
   const deletions = [];
-  for (const taskDoc of tasksSnap.docs) {
+  for (const taskDoc of primarySnap.docs) {
     const commentsSnap = await getDocs(collection(db, "tasks", taskDoc.id, "comments"));
     commentsSnap.forEach((c) => deletions.push(c.ref));
     deletions.push(taskDoc.ref);
@@ -74,6 +85,19 @@ export async function deleteProjectWithTasks(projectId) {
   for (let i = 0; i < deletions.length; i += 450) {
     const batch = writeBatch(db);
     deletions.slice(i, i + 450).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+
+  const primaryIds = new Set(primarySnap.docs.map((d) => d.id));
+  const extraOnlyDocs = extraSnap.docs.filter((d) => !primaryIds.has(d.id)); // por si acaso; no debería solaparse nunca
+  for (let i = 0; i < extraOnlyDocs.length; i += 450) {
+    const batch = writeBatch(db);
+    extraOnlyDocs.slice(i, i + 450).forEach((d) => {
+      batch.update(d.ref, {
+        extraProjectIds: arrayRemove(projectId),
+        [`extraSections.${projectId}`]: deleteField(),
+      });
+    });
     await batch.commit();
   }
 }
@@ -95,19 +119,35 @@ export function setProjectSections(projectId, sections) {
  * Igual que setProjectSections, pero además se encarga de las tareas que
  * se quedan huérfanas cuando una sección desaparece de la lista: en vez
  * de dejarlas apuntando a un id de sección que ya no existe (con lo que
- * dejarían de verse en Lista/Tablero), las pasa a "sin sección"
- * (sectionId: null) — nunca se borran tareas por borrar una sección.
+ * dejarían de verse en Lista/Tablero), las pasa a "sin sección" — nunca se
+ * borran tareas por borrar una sección.
+ *
+ * Repara las dos formas en que una tarea puede pertenecer a este proyecto:
+ * si lo tiene como PRINCIPAL, poniendo `sectionId: null`; si lo tiene como
+ * ADICIONAL (ver extraProjectIds), limpiando solo su entrada dentro de
+ * `extraSections` — sin tocar la sección que tenga en su proyecto
+ * principal ni en ningún otro adicional.
  */
 export async function saveProjectSections(project, newSections) {
   const keptIds = new Set(newSections.map((s) => s.id));
   const removedIds = (project.sections || []).map((s) => s.id).filter((id) => !keptIds.has(id));
 
   if (removedIds.length) {
-    const tasksSnap = await getDocs(query(collection(db, "tasks"), where("projectId", "==", project.id)));
-    const orphaned = tasksSnap.docs.filter((d) => removedIds.includes(d.data().sectionId));
-    for (let i = 0; i < orphaned.length; i += 450) {
+    const primarySnap = await getDocs(query(collection(db, "tasks"), where("projectId", "==", project.id)));
+    const orphanedPrimary = primarySnap.docs.filter((d) => removedIds.includes(d.data().sectionId));
+    for (let i = 0; i < orphanedPrimary.length; i += 450) {
       const batch = writeBatch(db);
-      orphaned.slice(i, i + 450).forEach((d) => batch.update(d.ref, { sectionId: null }));
+      orphanedPrimary.slice(i, i + 450).forEach((d) => batch.update(d.ref, { sectionId: null }));
+      await batch.commit();
+    }
+
+    const extraSnap = await getDocs(
+      query(collection(db, "tasks"), where("extraProjectIds", "array-contains", project.id), where("projectId", "!=", null))
+    );
+    const orphanedExtra = extraSnap.docs.filter((d) => removedIds.includes((d.data().extraSections || {})[project.id]));
+    for (let i = 0; i < orphanedExtra.length; i += 450) {
+      const batch = writeBatch(db);
+      orphanedExtra.slice(i, i + 450).forEach((d) => batch.update(d.ref, { [`extraSections.${project.id}`]: null }));
       await batch.commit();
     }
   }

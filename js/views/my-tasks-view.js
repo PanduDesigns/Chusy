@@ -10,7 +10,7 @@
 // mostrar, también de forma personal — el orden es el mismo que en la
 // vista de Lista de cualquier proyecto (ver components/table-columns.js).
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon, setListHtml } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon, setListHtml, getTaskProjectIds } from "../utils.js";
 import { toggleTaskComplete } from "../data/tasks.js";
 import { celebrateTask } from "../components/celebration.js";
 import { openTaskContextMenu } from "./list-view.js";
@@ -139,7 +139,7 @@ export function renderMyTasksView(container, opts) {
     </div>`;
 
   const rowHtml = (task) => {
-    const project = projects.find((p) => p.id === task.projectId);
+    const taskProjectIds = getTaskProjectIds(task);
     const overdue = isOverdue(task.dueDate, task.isComplete);
     const assignees = task.assigneeIds.map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean);
     const cellsHtml = visible
@@ -167,11 +167,21 @@ export function renderMyTasksView(container, opts) {
             : `<span class="list-table__cell-text">—</span>`;
         }
         if (col.key === "project") {
-          return !task.projectId
-            ? `<span class="tag-pill" style="background:var(--color-signal-soft);color:var(--color-signal);">🔒 Personal</span>`
-            : project
-            ? `<span class="tag-pill" style="background:${project.color};color:${textColorFor(project.color)};">${escapeHtml(projectIcon(project))} ${escapeHtml(project.name)}</span>`
+          // Una tarea puede estar en varios proyectos a la vez (ver
+          // getTaskProjectIds) — se muestra el principal y, si hay más,
+          // un indicador "+N" con sus nombres al pasar el ratón, en vez
+          // de amontonar todas las insignias en una columna estrecha.
+          if (!taskProjectIds.length) {
+            return `<span class="tag-pill" style="background:var(--color-signal-soft);color:var(--color-signal);">🔒 Personal</span>`;
+          }
+          const primary = projects.find((p) => p.id === taskProjectIds[0]);
+          const primaryBadge = primary
+            ? `<span class="tag-pill" style="background:${primary.color};color:${textColorFor(primary.color)};">${escapeHtml(projectIcon(primary))} ${escapeHtml(primary.name)}</span>`
             : `<span class="list-table__cell-text">—</span>`;
+          const extraIds = taskProjectIds.slice(1);
+          if (!extraIds.length) return primaryBadge;
+          const extraNames = extraIds.map((id) => projects.find((p) => p.id === id)?.name).filter(Boolean).join(", ");
+          return `<span class="list-table__tags-cell">${primaryBadge}<span class="tag-pill" style="background:var(--color-panel-raised);color:var(--color-text-lo);" title="${escapeHtml(extraNames)}">+${extraIds.length}</span></span>`;
         }
         return `<span class="list-table__cell-text">${escapeHtml(task.customFields?.[col.fieldId] ?? "—")}</span>`;
       })

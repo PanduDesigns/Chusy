@@ -19,11 +19,16 @@ rules_version = '2';
 //  - projects/{id}: cualquier persona autenticada puede leer, crear y
 //    editar cualquier proyecto. Solo quien lo creó (o un admin) puede
 //    borrarlo.
-//  - tasks/{id}: igual que proyectos si tienen projectId (visibles y
-//    editables por cualquier persona autenticada del equipo). Si en cambio
-//    projectId es null, es una tarea PERSONAL (recordatorio privado en
-//    "Mis tareas") y solo la puede ver/editar quien conste como ownerId.
-//    Borrado reservado a quien la creó/es su dueño o a un admin.
+//  - tasks/{id}: igual que proyectos si tienen projectId (cualquier
+//    persona autenticada del equipo puede leerlas y editarlas — incluye
+//    también las que solo tienen ese proyecto como ADICIONAL, ver
+//    extraProjectIds en el modelo de datos, porque siguen teniendo
+//    projectId relleno con su proyecto principal). Si en cambio projectId
+//    es null, es una tarea PERSONAL (recordatorio sin proyecto) y solo la
+//    puede leer/editar quien conste como ownerId o esté en assigneeIds —
+//    se puede asignar a otras personas sin meterla en ningún proyecto,
+//    desde "Mis tareas". Borrado reservado a quien la creó/es su dueño/a
+//    o a un admin — estar solo en assigneeIds no basta para borrar.
 //  - tasks/{id}/comments/{id}: cualquier miembro del equipo puede comentar;
 //    solo el autor o un admin puede editar/borrar un comentario.
 // ============================================================================
@@ -98,14 +103,38 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
     }
 
-    // ---- Tareas (de proyecto: visibles para todo el equipo · personales: solo su dueño/a) ----
+    // ---- Tareas (de proyecto: visibles para todo el equipo · personales:
+    // su dueño/a y quien conste como responsable) ----
     match /tasks/{taskId} {
+      // La rama "eres uno de sus responsables" es la que permite compartir
+      // una tarea personal con otra persona (asignándosela desde "Mis
+      // tareas") sin meterla en ningún proyecto: esa persona pasa a poder
+      // leerla y editarla igual que su dueño/a, aunque no pueda borrarla
+      // (ver "allow delete" más abajo, sin cambios). Esta rama en
+      // concreto es la que hace que subscribeToMyTasks() (tasks.js) pueda
+      // usar un único where("assigneeIds","array-contains",uid) para
+      // TODA "Mis tareas" (de proyecto y personal a la vez) — antes hacía
+      // falta acotar esa consulta también por projectId porque esta rama
+      // todavía no existía, ver el comentario de esa función.
       allow read: if isSignedIn() &&
-        (resource.data.projectId != null || resource.data.ownerId == request.auth.uid || isAdmin());
+        (resource.data.projectId != null ||
+         resource.data.ownerId == request.auth.uid ||
+         (request.auth.uid in resource.data.assigneeIds) ||
+         isAdmin());
+      // Sin cambios respecto a antes: quien CREA una tarea siempre lo hace
+      // o bien con projectId relleno (tarea de proyecto, ya abierta a todo
+      // el equipo) o bien como su propia dueña/o (ownerId ==
+      // request.auth.uid, tarea personal) — nunca en nombre de un tercero
+      // — así que no hace falta una rama nueva aquí para poder asignar a
+      // otra persona ya desde la creación: esa asignación entra en
+      // assigneeIds, un campo sin restricción propia en esta regla.
       allow create: if isSignedIn() &&
         (request.resource.data.projectId != null || request.resource.data.ownerId == request.auth.uid || isAdmin());
       allow update: if isSignedIn() &&
-        (resource.data.projectId != null || resource.data.ownerId == request.auth.uid || isAdmin());
+        (resource.data.projectId != null ||
+         resource.data.ownerId == request.auth.uid ||
+         (request.auth.uid in resource.data.assigneeIds) ||
+         isAdmin());
       allow delete: if isSignedIn() &&
         (resource.data.ownerId == request.auth.uid ||
          resource.data.createdBy == request.auth.uid ||

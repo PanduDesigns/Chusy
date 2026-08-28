@@ -1,5 +1,5 @@
 // ============================================================================
-// Modo claro/oscuro.
+// Modo claro/oscuro/clásico.
 //
 // El valor "de verdad" vive en la cuenta (users/{uid}.theme, vía
 // updateUserProfile) para que la preferencia viaje entre dispositivos —
@@ -18,7 +18,9 @@
 const STORAGE_KEY = "chusy:theme";
 
 function normalize(theme) {
-  return theme === "light" ? "light" : "dark";
+  if (theme === "light") return "light";
+  if (theme === "classic") return "classic";
+  return "dark";
 }
 
 /** Tema cacheado en este navegador (o "dark" si no hay nada guardado todavía). */
