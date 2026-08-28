@@ -170,6 +170,38 @@
   color-scheme: light;
 }
 
+/* La barra lateral del modo clásico es oscura (--color-sidebar-bg de
+   arriba) mientras el resto de la interfaz es clara — así que los textos
+   y los fondos "elevados"/"hundidos" de DENTRO de la barra lateral no
+   pueden heredar los mismos --color-text-*/--color-panel-raised/
+   --color-void(-raised) que se acaban de fijar arriba para el resto del
+   tema: esos están pensados para leerse sobre blanco, e ilegibles sobre
+   #2A2C2E (justo lo que se reportó). La solución no es tocar cada regla
+   .sidebar__* una por una: como todas ellas YA usan var(--color-text-hi),
+   var(--color-panel-raised), etc. (sin cambiar ninguna aquí), basta con
+   volver a declarar esos MISMOS nombres de variable con ámbito ".sidebar"
+   en vez de ":root" — una variable CSS se resuelve con el valor que tenga
+   en el punto MÁS CERCANO del árbol donde se usa, así que cualquier
+   descendiente de .sidebar (y la propia .sidebar) ve estos valores de
+   aquí, y todo lo demás (modales, tablero, cabeceras...) sigue viendo los
+   de arriba, sin overlap entre ambos. El texto principal es blanco puro,
+   tal cual se pidió; el secundario/terciario reutiliza los mismos tonos
+   ya probados del modo oscuro (de sobra de contraste sobre un fondo casi
+   igual de oscuro que #2A2C2E — dark theme los diseñó para un
+   #212325/#17181A muy parecido). Los fondos "elevado" (hover/activo) y
+   "hundido" (buscador, insignia de "Mis tareas") y el borde interno son
+   variaciones nuevas de la propia base #2A2C2E, calculadas para
+   distinguirse con claridad sin desentonar con ella. */
+:root[data-theme="classic"] .sidebar {
+  --color-text-hi: #FFFFFF;
+  --color-text-lo: #B4BCC2;
+  --color-text-faint: #909AA0;
+  --color-panel-raised: #595A5C;
+  --color-void-raised: #212224;
+  --color-void: #212224;
+  --color-line: #838586;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;
@@ -706,15 +738,15 @@ a { color: var(--color-signal-text); }
 .list-table-scroll .list-table { display: inline-block; min-width: 100%; }
 .col-resize-handle {
   position: absolute; top: 0; bottom: 0; right: -6px; width: 12px;
-  /* Antes "cursor: col-resize" fijo aquí hacía que el ratón se volviera
-     una mano con solo posarse encima, sin llegar a arrastrar — confuso,
-     parecía indicar que ya se podía soltar la columna. Ese cursor ahora
-     solo aparece DURANTE el arrastre de verdad, vía "body.is-col-resizing
-     *" un poco más abajo (ya existía, puesto al hacer mousedown en
-     wireColumnResize() de table-columns.js). El aviso visual al pasar el
-     ratón por aquí (la rayita de :hover::after, justo debajo) se deja
-     igual, para que se note que hay algo que arrastrar sin cambiar el cursor. */
-  cursor: default; z-index: 2;
+  /* El cursor cambia al posar el ratón encima (no solo al arrastrar) a
+     propósito: es el aviso de que ahí se puede cambiar el ancho de la
+     columna, antes incluso de hacer clic — la v30 lo había quitado
+     (dejando el cambio de cursor solo para cuando ya se está
+     arrastrando, vía "body.is-col-resizing *" un poco más abajo), pero
+     sin ese aviso previo no había forma de saber que la columna era
+     redimensionable sin probar a arrastrar a ciegas. Se mantiene además
+     la rayita de :hover::after de aquí abajo como refuerzo visual. */
+  cursor: col-resize; z-index: 2;
 }
 .col-resize-handle::after {
   content: ""; position: absolute; top: 2px; bottom: 2px; left: 5px; width: 2px;
