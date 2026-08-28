@@ -172,7 +172,15 @@ export function subscribeToProjectTasks(projectId, callback) {
       primaryLoaded = true;
       emit();
     },
-    (err) => console.error("subscribeToProjectTasks (principal):", err)
+    (err) => {
+      console.error("subscribeToProjectTasks (principal):", err);
+      // Si esta consulta falla (índice que falta, red, permisos…), no dejar
+      // el proyecto entero sin mostrar NINGUNA tarea a la espera de una
+      // consulta que quizá nunca llegue a resolver — mejor enseñar lo que
+      // sí haya traído la otra que dejar la vista completamente vacía.
+      primaryLoaded = true;
+      emit();
+    }
   );
 
   const qExtra = query(
@@ -188,7 +196,11 @@ export function subscribeToProjectTasks(projectId, callback) {
       extraLoaded = true;
       emit();
     },
-    (err) => console.error("subscribeToProjectTasks (adicional):", err)
+    (err) => {
+      console.error("subscribeToProjectTasks (adicional):", err);
+      extraLoaded = true;
+      emit();
+    }
   );
 
   return () => { unsubPrimary(); unsubExtra(); };
@@ -257,7 +269,14 @@ export function subscribeToMyTasks(uid, callback) {
       assignedLoaded = true;
       emit();
     },
-    (err) => console.error("subscribeToMyTasks (responsable):", err)
+    (err) => {
+      console.error("subscribeToMyTasks (responsable):", err);
+      // Igual que en subscribeToProjectTasks: un fallo aquí no debe dejar
+      // Mis tareas en blanco a la espera de una consulta que quizá nunca
+      // resuelva — mejor mostrar lo que sí haya traído la otra consulta.
+      assignedLoaded = true;
+      emit();
+    }
   );
 
   const qOwned = query(collection(db, "tasks"), where("ownerId", "==", uid));
@@ -269,7 +288,11 @@ export function subscribeToMyTasks(uid, callback) {
       ownedLoaded = true;
       emit();
     },
-    (err) => console.error("subscribeToMyTasks (dueño/a):", err)
+    (err) => {
+      console.error("subscribeToMyTasks (dueño/a):", err);
+      ownedLoaded = true;
+      emit();
+    }
   );
 
   return () => { unsubAssigned(); unsubOwned(); };

@@ -321,10 +321,18 @@ export function openTaskModal({
     const rect = anchorBtn.getBoundingClientRect();
     const pop = document.createElement("div");
     pop.className = "project-add-popover filter-popover";
+    // Los botones van SUELTOS dentro de .filter-popover (que ya los coloca
+    // en flujo normal, con su propio padding/overflow), sin envolverlos en
+    // un <div class="tag-suggest"> — esa clase lleva position:absolute,
+    // pensada para colgar de .tag-picker (su padre relative de siempre);
+    // fuera de ese contexto posicionaba la lista entera fuera de la caja
+    // visible de este popover, recortada por su overflow-y — se veía como
+    // si no hubiera ningún proyecto. .tag-suggest__item en sí (cada fila)
+    // no tiene ese problema, solo el contenedor que ya no se usa aquí.
     pop.innerHTML = available.length
-      ? `<div class="tag-suggest">${available
+      ? available
           .map((p) => `<button type="button" class="tag-suggest__item" data-add-project="${p.id}">${projectBadgeHtml(p, "project-badge--sm")}${escapeHtml(p.name)}</button>`)
-          .join("")}</div>`
+          .join("")
       : `<p style="color:var(--color-text-faint);font-size:12px;padding:6px 8px;margin:0;">No hay más proyectos disponibles.</p>`;
     document.body.appendChild(pop);
 
