@@ -171,36 +171,38 @@
 }
 
 /* La barra lateral del modo clásico es oscura (--color-sidebar-bg de
-   arriba) mientras el resto de la interfaz es clara — así que los textos
-   y los fondos "elevados"/"hundidos" de DENTRO de la barra lateral no
-   pueden heredar los mismos --color-text-*/--color-panel-raised/
-   --color-void(-raised) que se acaban de fijar arriba para el resto del
-   tema: esos están pensados para leerse sobre blanco, e ilegibles sobre
-   #2A2C2E (justo lo que se reportó). La solución no es tocar cada regla
-   .sidebar__* una por una: como todas ellas YA usan var(--color-text-hi),
-   var(--color-panel-raised), etc. (sin cambiar ninguna aquí), basta con
-   volver a declarar esos MISMOS nombres de variable con ámbito ".sidebar"
-   en vez de ":root" — una variable CSS se resuelve con el valor que tenga
-   en el punto MÁS CERCANO del árbol donde se usa, así que cualquier
-   descendiente de .sidebar (y la propia .sidebar) ve estos valores de
-   aquí, y todo lo demás (modales, tablero, cabeceras...) sigue viendo los
-   de arriba, sin overlap entre ambos. El texto principal es blanco puro,
-   tal cual se pidió; el secundario/terciario reutiliza los mismos tonos
-   ya probados del modo oscuro (de sobra de contraste sobre un fondo casi
-   igual de oscuro que #2A2C2E — dark theme los diseñó para un
-   #212325/#17181A muy parecido). Los fondos "elevado" (hover/activo) y
-   "hundido" (buscador, insignia de "Mis tareas") y el borde interno son
-   variaciones nuevas de la propia base #2A2C2E, calculadas para
-   distinguirse con claridad sin desentonar con ella. */
-:root[data-theme="classic"] .sidebar {
-  --color-text-hi: #FFFFFF;
-  --color-text-lo: #B4BCC2;
-  --color-text-faint: #909AA0;
-  --color-panel-raised: #595A5C;
-  --color-void-raised: #212224;
-  --color-void: #212224;
-  --color-line: #838586;
-}
+   arriba) mientras el resto de la interfaz es clara. El primer intento de
+   arreglar esto (v32) volvía a declarar --color-text-hi/-lo/-faint y otras
+   variables con ámbito ".sidebar" en vez de ":root", esperando que la
+   herencia de variables CSS las propagara a los .sidebar__* de dentro —
+   en la práctica no se veía surtir efecto (con "Mis tareas" como única
+   excepción legible, por tener un fondo claro propio de por medio que la
+   hacía legible por otro motivo, nada que ver con este ajuste). En vez de
+   seguir dependiendo de esa herencia, aquí se fija el valor FINAL de cada
+   propiedad de color de forma directa, con un selector propio por cada
+   elemento de la barra lateral que lo necesita — más largo de escribir,
+   pero sin ningún mecanismo indirecto de por medio que pueda no llegar a
+   aplicarse. El texto principal es blanco puro, tal cual se pidió; el
+   resto reutiliza los mismos tonos ya probados del modo oscuro para texto
+   secundario/terciario, y variaciones nuevas de la propia #2A2C2E para
+   fondos "elevado"/"hundido" y bordes internos. */
+:root[data-theme="classic"] .sidebar { border-right-color: #3A3D40; }
+:root[data-theme="classic"] .sidebar__collapse-toggle { background: #595A5C; border-color: #9FA0A1; color: #B4BCC2; }
+:root[data-theme="classic"] .sidebar__search { background: #212224; border-color: #6A6B6D; color: #909AA0; }
+:root[data-theme="classic"] .sidebar__search:hover { border-color: #9FA0A1; color: #B4BCC2; }
+:root[data-theme="classic"] .sidebar__search-kbd { border-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__credit { color: #909AA0; }
+:root[data-theme="classic"] .sidebar__section-label { color: #909AA0; }
+:root[data-theme="classic"] .sidebar__item { color: #B4BCC2; }
+:root[data-theme="classic"] .sidebar__item:hover { background: #595A5C; color: #FFFFFF; }
+:root[data-theme="classic"] .sidebar__item.is-active { background: #595A5C; color: #FFFFFF; }
+:root[data-theme="classic"] .sidebar__item-count { color: #909AA0; background: #212224; border-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__new-project { color: #B4BCC2; border-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__footer { border-top-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__user:hover { background: #595A5C; }
+:root[data-theme="classic"] .sidebar__user-name { color: #FFFFFF; }
+:root[data-theme="classic"] .sidebar__user-role { color: #909AA0; }
+:root[data-theme="classic"] .sidebar__logout { color: #909AA0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1368,4 +1370,56 @@ body.is-col-resizing * { cursor: col-resize !important; }
   .bulk-toolbar-anchor { bottom: 14px; padding: 0 10px; }
   .bulk-toolbar { padding: 6px 8px 6px 14px; gap: 0; }
   .bulk-toolbar__btn { width: 30px; height: 30px; font-size: 14px; }
+}
+
+/* ==========================================================================
+   Panel de métricas (solo administradores) — apartado 6 del README hecho
+   realidad. Reutiliza los mismos tokens de color de siempre (--color-panel,
+   --color-line, --font-mono para etiquetas...), nada nuevo a nivel de tema.
+   ========================================================================== */
+.metrics { display: flex; flex-direction: column; gap: 28px; padding: 24px; max-width: 920px; margin: 0 auto; overflow-y: auto; }
+
+.metrics__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.metric-card {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--color-panel); border: 1px solid var(--color-line);
+  border-radius: var(--radius-md); padding: 16px 18px;
+}
+.metric-card__value { font-size: 28px; font-weight: 600; line-height: 1.1; }
+.metric-card__label { font-size: 12px; color: var(--color-text-lo); }
+
+.metrics__section {
+  background: var(--color-panel); border: 1px solid var(--color-line);
+  border-radius: var(--radius-md); padding: 18px 20px;
+}
+.metrics__section-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.metrics__section-count {
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-lo);
+  background: var(--color-panel-raised); border-radius: 20px; padding: 1px 8px;
+}
+.metrics__section-hint { font-size: 12.5px; color: var(--color-text-faint); margin: 4px 0 14px; }
+.metrics__empty { font-size: 13px; color: var(--color-text-faint); padding: 4px 0; }
+
+.metrics__bars { display: flex; flex-direction: column; gap: 10px; }
+.metric-bar-row { display: flex; align-items: center; gap: 10px; }
+.metric-bar-row__name { font-size: 13px; width: 140px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metric-bar-row__track { flex: 1; height: 8px; border-radius: 4px; background: var(--color-panel-raised); overflow: hidden; }
+.metric-bar-row__fill { height: 100%; border-radius: 4px; background: var(--color-signal); transition: var(--transition-med); }
+.metric-bar-row__count { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-lo); width: 20px; text-align: right; flex-shrink: 0; }
+
+.metrics__overdue-list { display: flex; flex-direction: column; gap: 6px; }
+.metrics-overdue-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: var(--color-void-raised); border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm); padding: 9px 12px; text-align: left;
+  transition: var(--transition-fast);
+}
+.metrics-overdue-row:hover { border-color: var(--color-line-bright); background: var(--color-panel-raised); }
+.metrics-overdue-row__title { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-overdue-row__days { font-family: var(--font-mono); font-size: 11px; color: var(--color-danger); flex-shrink: 0; }
+
+@media (max-width: 720px) {
+  .metrics { padding: 16px; gap: 20px; }
+  .metric-bar-row__name { width: 90px; }
+  .metrics-overdue-row { flex-wrap: wrap; }
 }

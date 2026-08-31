@@ -15,6 +15,7 @@ import { renderCalendarView } from "./views/calendar-view.js";
 import { renderTimelineView } from "./views/timeline-view.js";
 import { renderMyTasksView } from "./views/my-tasks-view.js";
 import { renderArchiveView } from "./views/archive-view.js";
+import { renderMetricsView } from "./views/metrics-view.js";
 import { openProjectModal } from "./components/project-modal.js";
 import { openTaskModal } from "./components/task-modal.js";
 import { renderFilterBar } from "./components/filter-bar.js";
@@ -46,7 +47,7 @@ let currentProjectId = null;
 let currentProject = null;
 let currentTasks = [];
 let currentView = "list";
-let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive'
+let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'metrics'
 let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
 let timelineShowHolidays = false;
@@ -125,6 +126,12 @@ function restoreLastLocation() {
     selectTimeline();
   } else if (saved && saved.mode === "archive") {
     selectArchive();
+  } else if (saved && saved.mode === "metrics") {
+    // selectMetrics() ya comprueba el rol antes de aplicar el modo — por
+    // si la cuenta dejó de ser admin desde la última vez que se guardó
+    // esta ubicación, cae a "Mis tareas" en vez de dejar a alguien sin
+    // permisos aterrizando en un panel que ya no le corresponde.
+    selectMetrics();
   } else {
     selectMyTasks();
   }
@@ -233,7 +240,11 @@ function syncGlobalTimelineSubscriptions() {
     if (!unsubGlobalTasks[p.id]) {
       unsubGlobalTasks[p.id] = subscribeToProjectTasks(p.id, (tasks) => {
         globalTasksByProject[p.id] = tasks;
-        if (mode === "timeline") renderShell();
+        // El panel de métricas usa esta misma bolsa de datos (ver
+        // getAllProjectTasksDeduped) — sin este mode, se quedaría
+        // desactualizado si alguien completa/crea una tarea mientras un
+        // admin tiene el panel abierto, hasta cambiar de sección y volver.
+        if (mode === "timeline" || mode === "metrics") renderShell();
       });
     }
   });
@@ -275,6 +286,19 @@ function selectTimeline() {
 function selectArchive() {
   mode = "archive";
   saveLastLocation({ mode: "archive" });
+  renderShell();
+}
+
+/**
+ * Único punto de entrada al modo "metrics" — restoreLastLocation() y el
+ * clic del botón de la barra lateral (que ya solo existe en el DOM para
+ * un admin, ver sidebar.js) pasan los dos por aquí, así que la
+ * comprobación de rol solo hace falta escribirla una vez.
+ */
+function selectMetrics() {
+  if (!currentUser || currentUser.role !== "admin") { selectMyTasks(); return; }
+  mode = "metrics";
+  saveLastLocation({ mode: "metrics" });
   renderShell();
 }
 
@@ -338,6 +362,7 @@ function renderShell() {
     isMyTasksActive: mode === "mytasks",
     isTimelineActive: mode === "timeline",
     isArchiveActive: mode === "archive",
+    isMetricsActive: mode === "metrics",
     myTasksCount: myTasks.filter((t) => !t.isComplete).length,
     userProfile: currentUser,
     isCollapsed: sidebarCollapsed,
@@ -346,6 +371,7 @@ function renderShell() {
     onSelectMyTasks: () => { selectMyTasks(); sidebarEl.classList.remove("is-open"); },
     onSelectTimeline: () => { selectTimeline(); sidebarEl.classList.remove("is-open"); },
     onSelectArchive: () => { selectArchive(); sidebarEl.classList.remove("is-open"); },
+    onSelectMetrics: () => { selectMetrics(); sidebarEl.classList.remove("is-open"); },
     onOpenSearch: () => openSearch(),
     onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
@@ -370,6 +396,20 @@ function renderShell() {
       onUnarchive: (id) => archiveProject(id, false).then(() => showToast("Proyecto restaurado.")),
       onDelete: (id) => deleteProjectWithTasks(id).then(() => showToast("Proyecto eliminado.")),
     });
+    return;
+  }
+
+  if (mode === "metrics") {
+    // selectMetrics() ya comprueba el rol antes de fijar este modo, pero
+    // se repite aquí (segunda comprobación, barata) por si esta cuenta
+    // dejó de ser admin en mitad de una sesión ya abierta — sidebarEl se
+    // repinta más arriba con userProfile.role actualizado en cuanto
+    // cambie, así que el botón habría desaparecido, pero el modo en sí
+    // podría seguir activo un instante más sin este segundo aviso.
+    if (currentUser.role !== "admin") { selectMyTasks(); return; }
+    topbarEl.innerHTML = `<span class="topbar__title">Métricas</span><span class="topbar__count">todos los proyectos</span>`;
+    filterbarEl.innerHTML = ""; // resumen global, no una lista que filtrar
+    renderMetricsView(mainContentEl, { tasks: getAllProjectTasksDeduped(), teamMembers, projects, onOpenTask: openTask });
     return;
   }
 
@@ -501,7 +541,7 @@ function renderProjectContent() {
     });
   } else if (currentView === "timeline") {
     const sectionsSorted = [...currentProject.sections].sort((a, b) => a.order - b.order);
-    const groups = sectionsSorted.map((s) => ({
+    const bySection = sectionsSorted.map((s) => ({
       id: s.id,
       label: s.name,
       color: currentProject.color,
@@ -512,6 +552,16 @@ function renderProjectContent() {
       // principal, uno distinto).
       tasks: filteredTasks.filter((t) => getTaskSectionForProject(t, currentProject.id) === s.id),
     }));
+    // Antes, una tarea sin sección (o de una sección ya eliminada, huérfana
+    // — ver saveProjectSections en projects.js) no encajaba en NINGÚN
+    // grupo de arriba y desaparecía sin más de esta vista, aunque siguiera
+    // apareciendo normal en Lista y Tablero. Mismo criterio que esas dos
+    // vistas ya usan (list-view.js / board-view.js): un grupo "Sin
+    // sección" aparte, solo si hay alguna tarea así.
+    const noSectionTasks = filteredTasks.filter((t) => !getTaskSectionForProject(t, currentProject.id));
+    const groups = noSectionTasks.length
+      ? [...bySection, { id: "", label: "Sin sección", color: currentProject.color, tasks: noSectionTasks }]
+      : bySection;
     renderTimelineView(mainContentEl, {
       groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
       showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
@@ -573,6 +623,21 @@ function openTask(taskId) {
   });
 }
 
+/**
+ * Todas las tareas de TODOS los proyectos, sin duplicados — una tarea en
+ * varios proyectos a la vez (ver extraProjectIds) sale una vez por cada
+ * uno dentro de globalTasksByProject, así que hace falta quedarse con una
+ * sola entrada por id antes de usarlas en conjunto. NO incluye tareas
+ * personales bajo ningún concepto (ver el aviso al principio de
+ * metrics-view.js) — quien necesite añadirlas aparte lo hace por su lado,
+ * como ya hacía openSearch().
+ */
+function getAllProjectTasksDeduped() {
+  const seen = new Map();
+  Object.values(globalTasksByProject).flat().forEach((t) => seen.set(t.id, t));
+  return [...seen.values()];
+}
+
 function goToPersonFilter(uid) {
   selectTimeline();
   activeFilters = { assignee: new Set([uid]) };
@@ -580,14 +645,7 @@ function goToPersonFilter(uid) {
 }
 
 function openSearch() {
-  // Con una tarea en varios proyectos a la vez (ver extraProjectIds),
-  // globalTasksByProject la trae una vez POR CADA proyecto al que
-  // pertenece — de ahí el Map para quedarnos con una sola entrada por id
-  // antes de pasársela al buscador.
-  const seen = new Map();
-  Object.values(globalTasksByProject).flat().forEach((t) => seen.set(t.id, t));
-  myTasks.filter((t) => !t.projectId).forEach((t) => seen.set(t.id, t));
-  const everyTask = [...seen.values()];
+  const everyTask = [...getAllProjectTasksDeduped(), ...myTasks.filter((t) => !t.projectId)];
 
   openSearchModal({
     tasks: everyTask,

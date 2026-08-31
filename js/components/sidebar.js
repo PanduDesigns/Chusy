@@ -10,7 +10,7 @@ import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/p
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 import { openEditProjectModal } from "./edit-project-modal.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenAsanaImport, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isMetricsActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenAsanaImport, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const items = projects.map((p) => `
@@ -49,6 +49,11 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       <span class="sidebar__item-icon">🗄️</span>
       <span class="sidebar__item-name sidebar__label">Archivo</span>
     </button>
+    ${userProfile.role === "admin" ? `
+    <button class="sidebar__item sidebar__item--pinned${isMetricsActive ? " is-active" : ""}" id="btn-metrics" title="Métricas">
+      <span class="sidebar__item-icon">📊</span>
+      <span class="sidebar__item-name sidebar__label">Métricas</span>
+    </button>` : ""}
 
     <span class="sidebar__section-label sidebar__label">Proyectos</span>
     <div class="sidebar__list">
@@ -109,6 +114,8 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   container.querySelector("#btn-my-tasks").addEventListener("click", onSelectMyTasks);
   container.querySelector("#btn-timeline").addEventListener("click", onSelectTimeline);
   container.querySelector("#btn-archive").addEventListener("click", onSelectArchive);
+  const metricsBtn = container.querySelector("#btn-metrics");
+  if (metricsBtn) metricsBtn.addEventListener("click", onSelectMetrics);
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
   container.querySelector("#btn-toggle-collapse").addEventListener("click", onToggleCollapse);
