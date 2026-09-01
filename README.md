@@ -99,6 +99,9 @@ Igual que en la línea de tiempo, una tarea con inicio y fin se dibuja como una 
 ### Línea de tiempo: zoom por días, semanas o meses
 Botones "Días / Semanas / Meses" en la propia línea de tiempo (por proyecto y global). En semanas, cada columna muestra su número de semana ISO del año (S29, S30…).
 
+### Exportar la línea de tiempo a Excel o PDF
+Botón "⬇ Exportar" en la barra de herramientas de cualquier línea de tiempo (por proyecto y global), con dos opciones. Exporta exactamente lo que hay filtrado/visible en pantalla en ese momento — no una consulta aparte. El Excel es una fila por tarea (sección/proyecto, responsables, prioridad, fechas, días, estado) con una columna de "cronograma" en texto a escala del rango completo, para tener también un vistazo visual sin salir de la hoja; el PDF es un Gantt de verdad, apaisado, con barras de color por prioridad y paginación automática si hay muchas tareas. Las dos librerías que hacen falta (para el Excel y para el PDF) se cargan solas la primera vez que se usa cada una — no alargan la carga de la app para quien no exporta nunca nada.
+
 ### Filtros, incluidas etiquetas y campos personalizados
 Barra de filtros encima de Lista/Tablero/Calendario/Línea de tiempo/Mis tareas: Responsable, Prioridad, Estado, Etiquetas y cualquier campo personalizado del proyecto. Se combinan entre sí y se aplican al momento, sin botón de confirmar.
 
@@ -184,7 +187,7 @@ Al marcar una tarea sale un chispazo discreto de confeti desde el propio círcul
 ### Panel de métricas (solo administradores)
 Nuevo botón "📊 Métricas" en la barra lateral, fijo junto a Mis tareas/Línea de tiempo/Archivo, visible solo para cuentas con rol admin. Muestra, de todos los proyectos a la vez: tarjetas de resumen (total, completadas con su %, pendientes, vencidas), carga por persona (tareas activas asignadas a cada quien ahora mismo, como barras ordenadas de más a menos) y el listado de tareas vencidas (con proyecto, responsables y días de retraso, cada una clicable para abrirla directamente). Se actualiza solo, en tiempo real, igual que el resto de la app. A propósito no cuenta las tareas personales de "Mis tareas" de cada quien — son privadas por diseño, ni un admin las ve todas de golpe sin que se las asignen expresamente.
 
-### Historial de cambios: v18 → v33
+### Historial de cambios: v18 → v34
 
 Este proyecto se entrega como ZIPs numerados (`Chusy-18.zip`, `Chusy-19.zip`...); cada número es una entrega completa, no un parche — el ZIP más reciente es siempre la fuente de la verdad, no hay que combinar varios. Este apartado resume qué cambió en cada salto desde la v18, para quien retome el proyecto desde una conversación nueva y no tenga ese contexto. La v23 en concreto junta el trabajo de dos conversaciones distintas hechas en paralelo sobre la v18 — una con la v19→v22 de aquí abajo, otra con lo que se resume en la entrada v22→v23 — combinado a mano en una sola entrega. A partir de la v23 el proyecto volvió a bifurcarse en dos conversaciones distintas trabajando en paralelo, cada una con su propia numeración a partir de ahí — por eso hay dos entradas tituladas **v23 → v24**, una por cada rama; no es un error. La v29 es la fusión a mano de las dos: coge la v28 (que es donde llegó la rama que siguió numerando v25, v26, v27, v28) y le aplica encima, adaptados a lo que había cambiado mientras tanto, los cuatro cambios de la otra rama (la que se quedó en su propia v24, resumida en la primera de las dos entradas de abajo). Ver la entrada v28 → v29, al final de este historial, para el detalle de cómo se hizo esa fusión.
 
@@ -340,6 +343,21 @@ Antes de entregar: mismas dos comprobaciones de siempre, limpias. Solo CSS en lo
 
 Antes de entregar: mismas dos comprobaciones de siempre (sintaxis, imports), limpias — 40 archivos `.js` ahora, uno más que la v32.
 
+---
+
+**v33 → v34 — Las tareas sin sección pasan a salir arriba del todo (Lista, Tablero y Línea de tiempo), y nueva exportación de cualquier línea de tiempo/Gantt a Excel o PDF.**
+
+- *"Sin sección" arriba, no al fondo.* En Lista y Tablero ya existía ese grupo/columna aparte (solo cuando hacía falta), pero al final del todo — con listas largas, una tarea huérfana de sección quedaba fuera de la vista sin hacer scroll, fácil de olvidar. Mismo cambio en las tres vistas que agrupan por sección (list-view.js, board-view.js, y la rama de línea de tiempo por proyecto en app.js, con el mismo grupo que se le añadió en la v33): ahora es lo primero que se ve, antes que cualquier sección con nombre — así se nota nada más entrar, en vez de haber que buscarlo.
+
+- *Exportar la línea de tiempo a Excel o PDF.* Botón "⬇ Exportar" nuevo en la barra de herramientas de `timeline-view.js`, con un desplegable de dos opciones — funciona igual en la línea de tiempo de un proyecto (agrupada por sección) y en la global (agrupada por proyecto), porque las dos pasan por el mismo componente. Archivo nuevo, `js/components/gantt-export.js`:
+  - **Exporta justo lo que hay en pantalla.** La función recibe los mismos `groups` que ya está pintando `renderTimelineView` en ese momento — ya vienen filtrados y ordenados por quien llama (`app.js`), así que la exportación no relee nada de Firestore ni tiene su propia noción de qué mostrar: cualquier filtro de la barra (responsable, prioridad, etiquetas, el buscador de texto…) que esté activo en pantalla se refleja en el archivo tal cual.
+  - **Excel**, vía SheetJS: una fila por tarea (no filas separadoras entre secciones — así se puede ordenar o filtrar la propia hoja en Excel sin romper la agrupación, repitiendo la sección/proyecto en cada fila), con sección, tarea, responsables, prioridad, fechas, días de duración, estado y una columna de "cronograma" — una barra hecha con caracteres Unicode (█/◆) a escala del rango completo de fechas exportado, pensada para dar un vistazo visual sin depender de colorear celdas: esa parte de SheetJS es la que menos fiable resulta en su versión gratuita (la única que se puede cargar desde un CDN sin pagar licencia), así que se evitó por completo en vez de arriesgarse a un archivo que se vea distinto según qué programa lo abra.
+  - **PDF**, vía jsPDF: esta vez sí un Gantt visual de verdad, apaisado, con barras de color por prioridad (rombos para los hitos) posicionadas a escala del rango completo de fechas — no del zoom que se tenga puesto en pantalla, que solo cambia el ancho de columna del Gantt interactivo y no tiene sentido llevarlo a una página de tamaño fijo. Con muchas tareas, pagina sola verticalmente, repitiendo el eje de fechas arriba de cada página nueva (no repite todavía la etiqueta de la sección/proyecto si el salto de página cae en mitad de un grupo largo — limitación menor, anotada en el apartado 7).
+  - **Las dos librerías se cargan bajo demanda**, inyectando un `<script>` desde cdnjs.cloudflare.com la primera vez que se pulsa cada opción (no en cada carga de la app) — entre las dos rondan 1,3 MB, que no tiene sentido descargar quien no vaya a exportar nunca nada. Necesitan que quien las usa tenga conexión a internet en ese momento (para traer la librería la primera vez; las siguientes veces de la misma sesión ya no hace falta volver a descargarla).
+  - Aviso: esta pieza en concreto no se ha podido probar de principio a fin en un navegador real (el entorno donde se preparó esta entrega no tiene salida a internet para cargar librerías externas) — la lógica se ha revisado a fondo línea por línea y encaja con la documentación de las dos librerías, pero conviene probarla nada más publicar esta versión y avisar si algo no sale como se espera.
+
+Antes de entregar: mismas dos comprobaciones de siempre (sintaxis, imports), limpias — 41 archivos `.js` ahora.
+
 ## 4. Estructura del proyecto
 
 ```
@@ -370,8 +388,9 @@ js/
     rich-text-editor.js            Editor de texto enriquecido reutilizable (barra de herramientas + menú "/"), lo usa el campo Descripción del modal de tarea
     context-menu.js                Menú contextual reutilizable (clic derecho)
     filter-bar.js                   Barra de filtros reutilizable, con cuadro de búsqueda por texto
+    gantt-export.js                  Exportar una línea de tiempo/Gantt a Excel o PDF — lo usa timeline-view.js, carga sus librerías (SheetJS, jsPDF) bajo demanda desde un CDN
     search-modal.js                  Buscador global (⌘K / Ctrl+K)
-    account-modal.js                  "Mi cuenta": nombre, rol, apariencia (modo claro/oscuro) y cambio de contraseña
+    account-modal.js                  "Mi cuenta": nombre, rol, apariencia (claro/oscuro/clásico) y cambio de contraseña
     team-admin-modal.js                Panel de admin: roles del equipo y dominios permitidos
     asana-import-modal.js               Panel de admin: importar desde Asana y mapear personas
     reset-password-modal.js              "He olvidado mi contraseña" (pantalla de login)
@@ -385,7 +404,7 @@ js/
     list-view.js                  Vista de Lista: tabla ordenable (+ menú contextual, selección múltiple y su barra de acciones masivas)
     board-view.js                  Vista de Tablero (Kanban con drag & drop)
     calendar-view.js                Vista de Calendario (barras de duración + hitos)
-    timeline-view.js                 Línea de tiempo/Gantt (por proyecto o global, zoom, vacaciones)
+    timeline-view.js                 Línea de tiempo/Gantt (por proyecto o global, zoom, vacaciones, botón de exportar)
     my-tasks-view.js                  "Mis tareas": tabla ordenable (proyecto + personales), con selección múltiple y su barra de acciones masivas, igual que Lista
     archive-view.js                   Proyectos archivados
     metrics-view.js                   Panel de métricas (solo administradores) — resumen, carga por persona y vencidas, todo de tareas de proyecto
@@ -425,4 +444,5 @@ firestore.rules             Reglas de seguridad de Firestore
 - El editor de descripción usa `document.execCommand` por debajo para negrita, listas, citas, etc. — la documentación de los navegadores lo marca como obsoleto, pero lo siguen soportando todos los navegadores actuales; si algún día alguno deja de hacerlo, ahí está la pista de por dónde mirar.
 - Preferencias de cada persona que viven en Firestore (viajan entre dispositivos porque son de la cuenta, no de este navegador): el modo claro/oscuro (`users/{uid}.theme`) y las preferencias de columnas de las tablas — ancho y ocultas por ámbito, orden único y global (`columnPrefs` / `columnOrder`, ver apartados 3 y 5). Sobre esto último: `columnOrder` es un array de claves compartido entre Mis tareas y todos los proyectos; si más adelante se borra un campo personalizado que llegó a moverse alguna vez, su clave se queda huérfana ahí dentro — no causa ningún problema (`applyColumnOrder` simplemente la ignora, ya que no la encuentra entre las columnas de ningún contexto), pero tampoco se limpia sola.
 - Preferencias que en cambio son de este navegador, no de la cuenta (no viajan a otro dispositivo): la barra lateral minimizada, los filtros recordados de "Mis tareas" (con "Pendiente" aplicado de serie si no hay nada guardado todavía), la última sección visitada al entrar (con "Mis tareas" de serie si no hay nada guardado, o si la sección guardada ya no existe) y el contador de "tareas completadas hoy" para la recompensa grande por racha del día — completar tareas repartido entre el ordenador y el móvil el mismo día no las suma en un único contador: cada uno lleva el suyo, y el hito puede saltar en un dispositivo sin haber saltado todavía en el otro.
-- Desde la v33, `index.html` carga el CSS con un número de versión (`css/styles.css?v=33`), para que el navegador no se quede con una copia en caché de una entrega anterior sin darse cuenta de que hay una nueva — **subir ese número en cada entrega nueva** (`?v=34` en la próxima, y así sucesivamente) es ahora uno más de los pasos manuales de cada versión, junto con republicar `firestore.rules` cuando cambien y crear el índice compuesto si Firestore lo pide.
+- Desde la v33, `index.html` carga el CSS con un número de versión (`css/styles.css?v=N`), para que el navegador no se quede con una copia en caché de una entrega anterior sin darse cuenta de que hay una nueva — **subir ese número en cada entrega nueva** es ahora uno más de los pasos manuales de cada versión, junto con republicar `firestore.rules` cuando cambien y crear el índice compuesto si Firestore lo pide.
+- La exportación a PDF de una línea de tiempo (v34) pagina sola cuando hay muchas tareas, pero si el salto de página cae en mitad de una sección/proyecto largo, su etiqueta no se repite arriba de la página siguiente — las tareas de después de ese salto quedan sin la referencia visual de a qué grupo pertenecen hasta volver a la página anterior. El Excel no tiene este problema (la sección va repetida en cada fila).

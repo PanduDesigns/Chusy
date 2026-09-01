@@ -487,6 +487,7 @@ function renderTimelineContent() {
     groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
     showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
     onOpenTask: openTask,
+    exportTitle: "Chusy — Línea de tiempo global", groupLabel: "Proyecto", teamMembers,
   });
 }
 
@@ -560,12 +561,13 @@ function renderProjectContent() {
     // sección" aparte, solo si hay alguna tarea así.
     const noSectionTasks = filteredTasks.filter((t) => !getTaskSectionForProject(t, currentProject.id));
     const groups = noSectionTasks.length
-      ? [...bySection, { id: "", label: "Sin sección", color: currentProject.color, tasks: noSectionTasks }]
+      ? [{ id: "", label: "Sin sección", color: currentProject.color, tasks: noSectionTasks }, ...bySection]
       : bySection;
     renderTimelineView(mainContentEl, {
       groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
       showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
       onOpenTask: openTask,
+      exportTitle: `${currentProject.name} — Línea de tiempo`, groupLabel: "Sección", teamMembers,
     });
   } else {
     const sortedTasks = sortTasks(filteredTasks, sortState, { teamMembers, projects });

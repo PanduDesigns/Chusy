@@ -36,8 +36,11 @@ export function renderBoardView(container, { project, tasks, teamMembers, tagsRe
   // fuera de ella (con id "" — moveTask la guarda como sectionId: null,
   // ver más abajo), pero solo aparece si hace falta: no tiene sentido
   // mostrarla vacía todo el rato en un proyecto sin tareas huérfanas.
+  // Va PRIMERA, no al final: una columna huérfana al fondo del tablero es
+  // fácil de perder de vista (hay que hacer scroll horizontal para verla)
+  // y esas tareas acaban olvidadas sin clasificar.
   const columnsToRender = noSectionTasks.length
-    ? [...sectionsSorted, { id: "", name: "Sin sección" }]
+    ? [{ id: "", name: "Sin sección" }, ...sectionsSorted]
     : sectionsSorted;
 
   container.innerHTML = `<div class="board">

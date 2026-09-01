@@ -13,8 +13,9 @@
 // una columna en esa fecha. Los hitos siempre se dibujan como un rombo,
 // nunca como barra.
 // ============================================================================
-import { escapeHtml, toDate, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml } from "../utils.js";
+import { escapeHtml, toDate, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast } from "../utils.js";
 import { openTaskContextMenu } from "./list-view.js";
+import { exportTimelineToExcel, exportTimelineToPdf } from "../components/gantt-export.js";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -43,7 +44,7 @@ function isHolidayColumn(col) {
   return false;
 }
 
-export function renderTimelineView(container, { groups, zoom, onZoomChange, showHolidays, onToggleHolidays, onOpenTask }) {
+export function renderTimelineView(container, { groups, zoom, onZoomChange, showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers }) {
   const unit = zoom || "day";
   const allTasks = groups.flatMap((g) => g.tasks);
   const withDates = allTasks.filter((t) => t.startDate || t.dueDate);
@@ -144,6 +145,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
         <button class="btn btn--ghost btn--sm" id="tl-today-btn">Hoy</button>
         ${holidayBtnHtml}
         ${withoutDates > 0 ? `<span class="timeline__hint">${withoutDates} ${withoutDates === 1 ? "tarea sin fecha no se muestra" : "tareas sin fecha no se muestran"} aquí</span>` : ""}
+        <button class="btn btn--ghost btn--sm" id="tl-export-btn" style="margin-left:auto;">⬇ Exportar</button>
       </div>
       <div class="timeline__scroll" id="tl-scroll">
         <div class="timeline__grid" style="grid-template-columns:${gridTemplateColumns};grid-template-rows:40px repeat(${rows.length}, 34px);">
@@ -162,6 +164,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
   };
   container.querySelector("#tl-today-btn").addEventListener("click", scrollToToday);
   container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
+  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups, exportTitle, groupLabel, teamMembers }));
   if (todayIdx >= 0) requestAnimationFrame(scrollToToday);
 
   container.querySelectorAll("[data-open]").forEach((elx) => {
@@ -172,6 +175,48 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
       if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask);
     });
   });
+}
+
+function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMembers }) {
+  document.querySelectorAll(".export-popover").forEach((p) => p.remove());
+  const rect = anchorBtn.getBoundingClientRect();
+  const pop = document.createElement("div");
+  pop.className = "export-popover filter-popover";
+  pop.innerHTML = `
+    <button type="button" class="tag-suggest__item" data-export="excel">📊 Descargar Excel</button>
+    <button type="button" class="tag-suggest__item" data-export="pdf">📄 Descargar PDF</button>
+  `;
+  document.body.appendChild(pop);
+  const left = Math.min(rect.left, window.innerWidth - pop.offsetWidth - 20);
+  pop.style.left = `${Math.max(8, left)}px`;
+  pop.style.top = `${rect.bottom + 6}px`;
+
+  async function runExport(fn, btn, label) {
+    btn.disabled = true;
+    btn.textContent = `${label}…`;
+    try {
+      await fn({ groups, title: exportTitle, groupLabel, teamMembers });
+    } catch (err) {
+      console.error(err);
+      showToast("No se pudo generar el archivo. Comprueba tu conexión e inténtalo de nuevo.");
+    }
+    closePopover();
+  }
+
+  pop.querySelector('[data-export="excel"]').addEventListener("click", (e) => runExport(exportTimelineToExcel, e.currentTarget, "Generando Excel"));
+  pop.querySelector('[data-export="pdf"]').addEventListener("click", (e) => runExport(exportTimelineToPdf, e.currentTarget, "Generando PDF"));
+
+  function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchorBtn) closePopover(); }
+  function onKeydown(e) { if (e.key === "Escape") closePopover(); }
+  function closePopover() {
+    pop.remove();
+    document.removeEventListener("click", onOutside);
+    document.removeEventListener("keydown", onKeydown);
+  }
+  setTimeout(() => {
+    document.addEventListener("click", onOutside);
+    document.addEventListener("keydown", onKeydown);
+  }, 0);
 }
 
 // --------------------------------------------------------------------

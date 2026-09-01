@@ -136,9 +136,12 @@ export function renderListView(container, opts) {
     </div>`;
   }
 
+  // "Sin sección" va PRIMERO, no al final: una tarea sin sección al fondo
+  // de la lista es fácil de perder de vista y olvidar; arriba del todo, se
+  // nota nada más entrar y anima a clasificarla en su sitio.
   const sectionsHtml =
-    sectionsSorted.map((section) => sectionBlockHtml(section.id, section.name, bySection.get(section.id) || [])).join("") +
-    (noSectionTasks.length ? sectionBlockHtml(null, "Sin sección", noSectionTasks) : "");
+    (noSectionTasks.length ? sectionBlockHtml(null, "Sin sección", noSectionTasks) : "") +
+    sectionsSorted.map((section) => sectionBlockHtml(section.id, section.name, bySection.get(section.id) || [])).join("");
 
   setListHtml(container, `
     <div class="table-toolbar">
