@@ -3,7 +3,7 @@
 // de un proyecto o de "mis tareas" ya están cargadas enteras. Los campos
 // personalizados usan la clave "cf:<id>" tanto en filtros como en orden.
 // ============================================================================
-import { getTaskProjectIds, normalizeForSearch, stripHtmlToText } from "./utils.js";
+import { getTaskProjectIds, normalizeForSearch, stripHtmlToText, plainTitleText } from "./utils.js";
 
 /**
  * `searchText` (opcional): cuadro de texto de la barra de filtros — filtra
@@ -50,7 +50,7 @@ export function applyTaskFilters(tasks, activeFilters, searchText) {
   const q = normalizeForSearch(searchText || "").trim();
   if (q) {
     result = result.filter((t) => {
-      const title = normalizeForSearch(t.title || "");
+      const title = normalizeForSearch(plainTitleText(t.title || ""));
       if (title.includes(q)) return true;
       const description = normalizeForSearch(stripHtmlToText(t.description || ""));
       return description.includes(q);
@@ -150,7 +150,7 @@ export function sortTasks(tasks, sort, { teamMembers = [], projects = [] } = {})
   const valueOf = (t) => {
     switch (sort.column) {
       case "title":
-        return (t.title || "").toLowerCase();
+        return plainTitleText(t.title || "").toLowerCase();
       case "dueDate":
         return t.dueDate || null;
       case "priority":

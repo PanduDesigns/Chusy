@@ -9,7 +9,7 @@
 // esta tabla; el orden es único por persona y se comparte con Mis tareas y
 // el resto de proyectos (ver components/table-columns.js).
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml, getTaskSectionForProject } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml, getTaskSectionForProject, renderTitleHtml, plainTitleText } from "../utils.js";
 import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
 import { celebrateTask } from "../components/celebration.js";
 import { updateProject, saveProjectSections } from "../data/projects.js";
@@ -97,7 +97,7 @@ export function renderListView(container, opts) {
               <span class="list-row__title-cell">
                 <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
                 <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
-                <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
+                <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${renderTitleHtml(task.title)}</span>
               </span>`;
             }
             if (col.key === "dueDate") {
@@ -247,7 +247,7 @@ export function openTaskContextMenu(x, y, task, onOpenTask) {
       { label: "Abrir detalles", icon: "↗", onClick: () => onOpenTask(task.id) },
       { divider: true },
       { label: "Eliminar tarea", icon: "🗑", danger: true, onClick: () => {
-        if (confirm(`¿Eliminar "${task.title}"? No se puede deshacer.`)) { deleteTask(task.id); showToast("Tarea eliminada."); }
+        if (confirm(`¿Eliminar "${plainTitleText(task.title)}"? No se puede deshacer.`)) { deleteTask(task.id); showToast("Tarea eliminada."); }
       } },
     ],
   });

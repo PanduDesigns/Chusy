@@ -10,7 +10,7 @@
 // mostrar, también de forma personal — el orden es el mismo que en la
 // vista de Lista de cualquier proyecto (ver components/table-columns.js).
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon, setListHtml, getTaskProjectIds } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon, setListHtml, getTaskProjectIds, renderTitleHtml } from "../utils.js";
 import { toggleTaskComplete } from "../data/tasks.js";
 import { celebrateTask } from "../components/celebration.js";
 import { openTaskContextMenu } from "./list-view.js";
@@ -149,7 +149,7 @@ export function renderMyTasksView(container, opts) {
             <span class="list-row__title-cell">
               <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
               <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
-              <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</span>
+              <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${renderTitleHtml(task.title)}</span>
             </span>`;
         }
         if (col.key === "dueDate") {

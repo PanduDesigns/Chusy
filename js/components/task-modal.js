@@ -32,6 +32,8 @@ import {
   formatDateLong,
   toDateInputValue,
   projectBadgeHtml,
+  renderTitleHtml,
+  plainTitleText,
   PRIORITY_LABELS,
 } from "../utils.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
@@ -145,8 +147,10 @@ export function openTaskModal({
         <div class="modal__header">
           <button class="task-row__check${draft.isComplete ? " is-checked" : ""}" id="t-complete" title="Marcar como completada" style="width:22px;height:22px;">${draft.isComplete ? "✓" : ""}</button>
           <input class="modal__title-input" id="t-title" value="${escapeHtml(draft.title)}" placeholder="Título de la tarea">
+          <button type="button" class="modal__title-bold-btn" id="t-title-bold" title="Negrita: selecciona texto del título y pulsa (o Ctrl/Cmd+B)">B</button>
           <button class="modal__close" id="t-close">✕</button>
         </div>
+        <div class="modal__title-preview" id="t-title-preview"></div>
         <div class="modal__body">
 
           <div class="field">
@@ -179,12 +183,12 @@ export function openTaskModal({
             <span class="field__label">Responsables</span>
             <div class="chip-select" id="t-assignees">
               ${[...(teamMembers || [])]
-                .filter((m) => !m.isImported || draft.assigneeIds.includes(m.uid))
-                .sort((a, b) => (a.isImported ? 1 : 0) - (b.isImported ? 1 : 0))
+                .filter((m) => (!m.isImported && !m.deleted) || draft.assigneeIds.includes(m.uid))
+                .sort((a, b) => ((a.isImported || a.deleted) ? 1 : 0) - ((b.isImported || b.deleted) ? 1 : 0))
                 .map((m) => `
                 <button type="button" class="chip${draft.assigneeIds.includes(m.uid) ? " is-selected" : ""}" data-uid="${m.uid}">
                   <span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}">${initials(m.name)}</span>
-                  ${escapeHtml(m.name)}${m.isImported ? ` <span style="color:var(--color-text-faint);">· Asana</span>` : ""}
+                  ${escapeHtml(m.name)}${m.isImported ? ` <span style="color:var(--color-text-faint);">· Asana</span>` : m.deleted ? ` <span style="color:var(--color-text-faint);">· Eliminado</span>` : ""}
                 </button>`).join("")}
             </div>
           </div>
@@ -252,6 +256,58 @@ export function openTaskModal({
       placeholder: "Escribe «/» para ver el menú",
       onChange: (html) => { draft.description = html; markDirty(); },
     });
+    renderTitlePreview();
+  }
+
+  /**
+   * Vista previa de la negrita del título, justo debajo de la cabecera —
+   * el campo en sí es un `<input>` normal (no un editor de texto
+   * enriquecido: no hace falta para solo negrita, y así se comporta como
+   * cualquier campo de texto — Enter, pegar, móvil...) y no puede mostrar
+   * parte de su propio valor en negrita, así que esta línea es la única
+   * forma de ver el resultado mientras se escribe. Solo aparece si el
+   * título tiene alguna marca `**` — en el caso normal, sin negrita, no
+   * ocupa sitio.
+   */
+  function renderTitlePreview() {
+    const box = overlay.querySelector("#t-title-preview");
+    if (!box) return;
+    if (!draft.title.includes("**")) {
+      box.innerHTML = "";
+      box.classList.remove("is-visible");
+      return;
+    }
+    box.innerHTML = `Vista previa: ${renderTitleHtml(draft.title)}`;
+    box.classList.add("is-visible");
+  }
+
+  /**
+   * Envuelve (o desenvuelve, si ya lo estaba) la selección actual del
+   * campo de título entre `**dobles asteriscos**` — ver renderTitleHtml()
+   * en utils.js para cómo se interpretan al mostrarse. Sin nada
+   * seleccionado, inserta el par vacío con el cursor listo en medio para
+   * escribir directamente.
+   */
+  function toggleTitleBold() {
+    const input = overlay.querySelector("#t-title");
+    if (!input) return;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const value = input.value;
+    if (start === end) {
+      input.value = `${value.slice(0, start)}****${value.slice(end)}`;
+      input.setSelectionRange(start + 2, start + 2);
+    } else {
+      const selected = value.slice(start, end);
+      const alreadyBold = selected.length >= 4 && selected.startsWith("**") && selected.endsWith("**");
+      const replacement = alreadyBold ? selected.slice(2, -2) : `**${selected}**`;
+      input.value = value.slice(0, start) + replacement + value.slice(end);
+      input.setSelectionRange(start, start + replacement.length);
+    }
+    input.focus();
+    draft.title = input.value;
+    markDirty();
+    renderTitlePreview();
   }
 
   function priorityChipsHtml() {
@@ -424,7 +480,17 @@ export function openTaskModal({
       markDirty();
     });
 
-    overlay.querySelector("#t-title").addEventListener("input", (e) => { draft.title = e.target.value; markDirty(); });
+    const titleInput = overlay.querySelector("#t-title");
+    titleInput.addEventListener("input", (e) => { draft.title = e.target.value; markDirty(); renderTitlePreview(); });
+    titleInput.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") { e.preventDefault(); toggleTitleBold(); }
+    });
+    const titleBoldBtn = overlay.querySelector("#t-title-bold");
+    // mousedown (no click) + preventDefault: así el foco nunca sale del
+    // campo de título al pulsar este botón, y la selección de texto que
+    // tuviera hecha sigue intacta cuando toggleTitleBold() la lee.
+    titleBoldBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    titleBoldBtn.addEventListener("click", () => toggleTitleBold());
 
     overlay.querySelector("#t-add-project").addEventListener("click", (e) => openAddProjectPopover(e.currentTarget));
 
@@ -711,8 +777,12 @@ export function openTaskModal({
   }
 
   async function handleAccept() {
-    const titleInput = overlay.querySelector("#t-title");
-    if (!draft.title.trim()) { titleInput.focus(); return; }
+    const titleInputEl = overlay.querySelector("#t-title");
+    // Con el texto plano (marcas de negrita fuera), no con draft.title tal
+    // cual: un título que solo tuviera "****" sin nada escrito dentro
+    // pasaría la comprobación de "no está vacío" si se mirara la cadena
+    // en crudo, aunque en pantalla no se vería ningún texto.
+    if (!plainTitleText(draft.title).trim()) { titleInputEl.focus(); return; }
     const acceptBtn = overlay.querySelector("#t-accept");
     acceptBtn.disabled = true;
     acceptBtn.textContent = "Guardando…";

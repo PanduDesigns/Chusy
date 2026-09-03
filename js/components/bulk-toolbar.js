@@ -10,7 +10,7 @@
 // resueltos los objetos de tarea seleccionados; este módulo solo pinta la
 // barra y traduce cada botón en una llamada a data/tasks.js.
 // ============================================================================
-import { showToast, escapeHtml, initials, colorFromString, projectIcon } from "../utils.js";
+import { showToast, escapeHtml, initials, colorFromString, projectIcon, plainTitleText } from "../utils.js";
 import { openContextMenu } from "./context-menu.js";
 import {
   bulkUpdateTasks,
@@ -127,7 +127,7 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
     openContextMenu({
       x: rect.left, y: rect.top,
       items: sortedMembers(teamMembers).map((m) => ({
-        label: `${m.name}${m.isImported ? " · Asana" : ""}`,
+        label: m.name,
         icon: "👤",
         onClick: () => runAction(bulkUpdateTasks(ids, { assigneeIds: [m.uid] }), `Asignadas a ${m.name}.`),
       })),
@@ -143,12 +143,12 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
 }
 
 function sortedMembers(teamMembers) {
-  // Igual que en el modal de tarea: a la hora de asignar, los usuarios
-  // ficticios de Asana no se ofrecen como opción (si ya estaban
-  // asignados a una tarea concreta se siguen viendo ahí, pero esto es
-  // una acción masiva sobre varias tareas a la vez, así que no hay un
-  // "ya asignado" único que pueda hacer de excepción).
-  return (teamMembers || []).filter((m) => !m.isImported);
+  // Igual que en el modal de tarea: a la hora de asignar, ni los usuarios
+  // ficticios de Asana ni las cuentas eliminadas se ofrecen como opción
+  // (si ya estaban asignados a una tarea concreta se siguen viendo ahí,
+  // pero esto es una acción masiva sobre varias tareas a la vez, así que
+  // no hay un "ya asignado" único que pueda hacer de excepción).
+  return (teamMembers || []).filter((m) => !m.isImported && !m.deleted);
 }
 
 async function runAction(promise, successMsg) {
@@ -298,7 +298,7 @@ function openCollabPopover(anchorRect, { ids, teamMembers }) {
       <label class="filter-popover__item">
         <input type="checkbox" data-uid="${m.uid}">
         <span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}">${initials(m.name)}</span>
-        <span>${escapeHtml(m.name)}${m.isImported ? ` <span style="color:var(--color-text-faint);">· Asana</span>` : ""}</span>
+        <span>${escapeHtml(m.name)}</span>
       </label>`
       )
       .join("")}`;
@@ -342,7 +342,7 @@ function startMergeFlow(anchorRect, { selectedTasks }) {
   openContextMenu({
     x: anchorRect.left, y: anchorRect.top,
     items: selectedTasks.map((t) => ({
-      label: `Combinar en «${t.title}»`,
+      label: `Combinar en «${plainTitleText(t.title)}»`,
       icon: "⭐",
       onClick: () => confirmMerge(t, selectedTasks.filter((o) => o.id !== t.id)),
     })),
@@ -352,7 +352,7 @@ function startMergeFlow(anchorRect, { selectedTasks }) {
 async function confirmMerge(survivor, duplicates) {
   const total = duplicates.length + 1;
   const ok = confirm(
-    `¿Combinar estas ${total} tareas en «${survivor.title}»? Se juntarán responsables, etiquetas, subtareas, adjuntos y comentarios en esa tarea, y las otras ${duplicates.length} se eliminarán. No se puede deshacer.`
+    `¿Combinar estas ${total} tareas en «${plainTitleText(survivor.title)}»? Se juntarán responsables, etiquetas, subtareas, adjuntos y comentarios en esa tarea, y las otras ${duplicates.length} se eliminarán. No se puede deshacer.`
   );
   if (!ok) return;
   try {
@@ -360,7 +360,7 @@ async function confirmMerge(survivor, duplicates) {
     const skippedNote = result.skippedComments
       ? ` (${result.skippedComments} ${result.skippedComments === 1 ? "comentario no se pudo trasladar" : "comentarios no se pudieron trasladar"} por permisos.)`
       : "";
-    showToast(`${result.mergedCount} ${result.mergedCount === 1 ? "tarea combinada" : "tareas combinadas"} en «${survivor.title}».${skippedNote}`);
+    showToast(`${result.mergedCount} ${result.mergedCount === 1 ? "tarea combinada" : "tareas combinadas"} en «${plainTitleText(survivor.title)}».${skippedNote}`);
   } catch (err) {
     console.error(err);
     showToast("No se pudieron combinar las tareas. Inténtalo de nuevo.", "error");

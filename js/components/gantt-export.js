@@ -12,7 +12,7 @@
 // carga de la app, para no sumarle a quien nunca exporta nada los ~1,3 MB
 // de las dos juntas.
 // ============================================================================
-import { toDate, addDays, daysBetween, initials } from "../utils.js";
+import { toDate, addDays, daysBetween, initials, plainTitleText } from "../utils.js";
 
 const XLSX_CDN = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
 const JSPDF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
@@ -117,7 +117,7 @@ export async function exportTimelineToExcel({ groups, title, groupLabel, teamMem
       const days = t.startDate && t.dueDate ? daysBetween(toDate(t.startDate), toDate(t.dueDate)) + 1 : "";
       rows.push([
         g.label,
-        (t.isMilestone ? "🚩 " : "") + t.title,
+        (t.isMilestone ? "🚩 " : "") + plainTitleText(t.title),
         assigneeNames(t, teamMembers).join(", "),
         PRIORITY_LABELS[t.priority] || t.priority || "",
         fmtDate(t.startDate),
@@ -256,7 +256,7 @@ export async function exportTimelineToPdf({ groups, title, teamMembers }) {
       doc.setFontSize(8);
       doc.setTextColor(t.isComplete ? 170 : 30, t.isComplete ? 170 : 32, t.isComplete ? 170 : 36);
       const names = assigneeNames(t, teamMembers).map((n) => initials(n)).join(" ");
-      const label = `${t.isMilestone ? "◆ " : ""}${t.title}`;
+      const label = `${t.isMilestone ? "◆ " : ""}${plainTitleText(t.title)}`;
       doc.text(doc.splitTextToSize(label, LABEL_W - (names ? 14 : 2))[0] || "", MARGIN, y + 3.2);
       if (names) {
         doc.setFontSize(6.5);

@@ -5,7 +5,7 @@
 // abajo). Si solo tiene una de las dos fechas, se dibuja como un bloque de
 // un día. Los hitos siempre se marcan como un rombo en su fecha.
 // ============================================================================
-import { escapeHtml, toDate, toDateInputValue, daysBetween } from "../utils.js";
+import { escapeHtml, toDate, toDateInputValue, daysBetween, renderTitleHtml, plainTitleText } from "../utils.js";
 
 const DIAS_SEMANA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 const MESES_LARGOS = [
@@ -130,13 +130,13 @@ function buildWeek(weekDays, tasks, todayKey) {
     const t = item.task;
     const gridRow = item.lane + 2;
     if (t.isMilestone) {
-      cells += `<div class="cal-milestone" data-open="${t.id}" title="${escapeHtml(t.title)}" style="grid-column:${item.segE + 1};grid-row:${gridRow};">
-        <span class="cal-milestone__diamond"></span><span class="cal-bar__label">${escapeHtml(t.title)}</span>
+      cells += `<div class="cal-milestone" data-open="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:${item.segE + 1};grid-row:${gridRow};">
+        <span class="cal-milestone__diamond"></span><span class="cal-bar__label">${renderTitleHtml(t.title)}</span>
       </div>`;
     } else {
       const color = PRIORITY_COLORS[t.priority] || "var(--color-line-bright)";
-      cells += `<div class="cal-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" title="${escapeHtml(t.title)}" style="grid-column:${item.segS + 1} / ${item.segE + 2};grid-row:${gridRow};background:${color};">
-        <span class="cal-bar__label">${escapeHtml(t.title)}</span>
+      cells += `<div class="cal-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:${item.segS + 1} / ${item.segE + 2};grid-row:${gridRow};background:${color};">
+        <span class="cal-bar__label">${renderTitleHtml(t.title)}</span>
       </div>`;
     }
   });

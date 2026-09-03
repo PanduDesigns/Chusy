@@ -13,7 +13,7 @@
 // límite — quien llama a renderMetricsView() (app.js) ya se encarga de
 // pasar solo tareas de proyecto.
 // ============================================================================
-import { escapeHtml, toDate, initials, colorFromString, textColorFor, projectIcon, isOverdue } from "../utils.js";
+import { escapeHtml, toDate, initials, colorFromString, textColorFor, projectIcon, isOverdue, renderTitleHtml } from "../utils.js";
 
 export function renderMetricsView(container, { tasks, teamMembers, projects, onOpenTask }) {
   const total = tasks.length;
@@ -101,7 +101,7 @@ export function renderMetricsView(container, { tasks, teamMembers, projects, onO
         const daysLate = Math.max(1, Math.round((Date.now() - toDate(t.dueDate).getTime()) / 86400000));
         return `
         <button type="button" class="metrics-overdue-row" data-open="${t.id}">
-          <span class="metrics-overdue-row__title">${t.isMilestone ? "🚩 " : ""}${escapeHtml(t.title)}</span>
+          <span class="metrics-overdue-row__title">${t.isMilestone ? "🚩 " : ""}${renderTitleHtml(t.title)}</span>
           ${project ? `<span class="tag-pill" style="background:${project.color};color:${textColorFor(project.color)};">${escapeHtml(projectIcon(project))} ${escapeHtml(project.name)}</span>` : ""}
           <span class="avatar-stack">${assignees.map((m) => `<span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}" title="${escapeHtml(m.name)}">${initials(m.name)}</span>`).join("") || ""}</span>
           <span class="metrics-overdue-row__days">${daysLate} ${daysLate === 1 ? "día" : "días"} de retraso</span>

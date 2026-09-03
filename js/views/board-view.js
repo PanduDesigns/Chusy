@@ -2,7 +2,7 @@
 // Vista de Tablero (Kanban): columnas = secciones, arrastrar y soltar entre
 // columnas y para reordenar dentro de la misma columna.
 // ============================================================================
-import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, getTaskSectionForProject } from "../utils.js";
+import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, getTaskSectionForProject, renderTitleHtml } from "../utils.js";
 import { moveTask } from "../data/tasks.js";
 import { openTaskContextMenu } from "./list-view.js";
 
@@ -133,7 +133,7 @@ function cardHtml(task, teamMembers, tagsRegistry) {
   const assignees = task.assigneeIds.map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean);
   return `
     <div class="task-card" draggable="true" data-task-id="${task.id}" style="border-left-color:${PRIORITY_COLORS[task.priority] || "var(--color-line-bright)"}">
-      <div class="task-card__title" style="${task.isComplete ? "text-decoration:line-through;color:var(--color-text-faint);" : ""}">${task.isMilestone ? "🚩 " : ""}${escapeHtml(task.title)}</div>
+      <div class="task-card__title" style="${task.isComplete ? "text-decoration:line-through;color:var(--color-text-faint);" : ""}">${task.isMilestone ? "🚩 " : ""}${renderTitleHtml(task.title)}</div>
       ${task.tags.length ? `<div class="task-card__tags">${task.tags.slice(0, 3).map((t) => tagPill(t, tagsRegistry)).join("")}</div>` : ""}
       <div class="task-card__footer">
         ${task.dueDate ? `<span class="task-card__due${overdue ? " is-overdue" : ""}">${formatDate(task.dueDate)}</span>` : ""}

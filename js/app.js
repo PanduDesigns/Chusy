@@ -7,6 +7,7 @@ import { applyTheme, getCachedTheme } from "./theme.js";
 import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks } from "./data/projects.js";
 import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
+import { setSortPref } from "./data/users.js";
 import { renderSidebar } from "./components/sidebar.js";
 import { renderTopbar } from "./components/topbar.js";
 import { renderListView } from "./views/list-view.js";
@@ -95,6 +96,19 @@ function saveMyTasksFilters(filters) {
   } catch (e) { /* localStorage no disponible */ }
 }
 
+// El orden de columna de una tabla (Lista de un proyecto, o Mis tareas) se
+// recuerda por cuenta (no por navegador, a diferencia de sidebarCollapsed
+// y los filtros de Mis tareas de arriba): vive en el mismo sitio que el
+// ancho y las columnas ocultas de esa tabla (`columnPrefs.<scopeKey>.sort`
+// en el perfil, ver users.js), así que viaja también entre dispositivos.
+// Sin nada guardado todavía para ese ámbito, el estado inicial es el de
+// siempre (sin columna elegida: fecha límite ascendente y prioridad, ver
+// sortTasks() en task-filters.js).
+function loadSortState(scopeKey) {
+  const prefs = currentUser && currentUser.columnPrefs && currentUser.columnPrefs[scopeKey];
+  return prefs && prefs.sort && prefs.sort.column ? prefs.sort : { column: null, direction: "asc" };
+}
+
 // La última sección visitada (un proyecto concreto —con la vista que
 // tenía abierta, Lista/Tablero/Calendario/Línea de tiempo—, Mis tareas,
 // Línea de tiempo global o Archivo) se recuerda con el mismo criterio que
@@ -155,7 +169,7 @@ function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.
 // sesión, más abajo, se reconcilia con lo que diga la cuenta de verdad.
 applyTheme(getCachedTheme());
 
-onAuthChange((profile) => {
+onAuthChange((profile, message) => {
   currentUser = profile;
   // La cuenta manda en cuanto se conoce (puede diferir de la caché de
   // este navegador si la persona cambió el tema desde otro dispositivo);
@@ -164,6 +178,7 @@ onAuthChange((profile) => {
   if (!profile) {
     cleanup();
     showAuth();
+    if (message) showToast(message, "error"); // p.ej. cuenta eliminada por un admin — ver auth.js
     return;
   }
   showApp();
@@ -257,7 +272,7 @@ function selectProject(projectId) {
   currentProjectId = projectId;
   activeFilters = {};
   searchText = "";
-  sortState = { column: null, direction: "asc" };
+  sortState = loadSortState(`project:${projectId}`);
   if (unsubCurrentProject) unsubCurrentProject();
   if (unsubCurrentTasks) unsubCurrentTasks();
 
@@ -271,7 +286,7 @@ function selectMyTasks() {
   saveLastLocation({ mode: "mytasks" });
   activeFilters = loadMyTasksFilters();
   searchText = "";
-  sortState = { column: null, direction: "asc" };
+  sortState = loadSortState("mytasks");
   renderShell();
 }
 
@@ -343,6 +358,14 @@ function handleSortChange(column) {
   sortState = column === sortState.column
     ? { column, direction: sortState.direction === "asc" ? "desc" : "asc" }
     : { column, direction: "asc" };
+  // Se guarda en la cuenta para la próxima vez (por ámbito: este proyecto,
+  // o Mis tareas) — sin esperar a que termine, igual que ya hace el ancho
+  // de columna al arrastrar (ver wireColumnResize en table-columns.js). Solo
+  // se llama aquí estando en "project" o "mytasks" (los únicos dos modos
+  // con tabla ordenable), así que currentProjectId ya está relleno cuando
+  // hace falta.
+  const scopeKey = mode === "mytasks" ? "mytasks" : `project:${currentProjectId}`;
+  setSortPref(currentUser.uid, scopeKey, sortState);
   if (mode === "project") renderMain();
   else renderShell();
 }

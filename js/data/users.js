@@ -68,3 +68,36 @@ export function setColumnHidden(uid, scopeKey, colKey, hidden) {
 export function setColumnOrder(uid, order) {
   return updateDoc(doc(db, "users", uid), { columnOrder: order });
 }
+
+/**
+ * Orden de una tabla de tareas (columna + dirección) — mismo bucket que el
+ * ancho y las columnas ocultas de esa tabla (`columnPrefs.<scopeKey>`, ver
+ * arriba), así que cada persona recupera el orden que dejó la última vez
+ * que pulsó una columna en Mis tareas o en un proyecto, sin tener que
+ * volver a aplicarlo cada vez que entra.
+ */
+export function setSortPref(uid, scopeKey, sort) {
+  return updateDoc(doc(db, "users", uid), {
+    [`columnPrefs.${scopeKey}.sort`]: sort,
+  });
+}
+
+/**
+ * Elimina (o reactiva) una cuenta desde el panel de administración: no
+ * borra su documento ni su cuenta de Firebase Auth (borrar la cuenta de
+ * Auth de otra persona exige el SDK de administración, con un backend que
+ * este proyecto no tiene — ver el apartado 6 del README), marca `deleted`.
+ * Mientras esté a `true`, `firestore.rules` (función `isActiveUser()`) le
+ * corta el acceso a todo salvo su propio documento (que tampoco puede
+ * tocar ni para dejarlo igual) y, en cuanto lo note, la propia app le
+ * cierra la sesión (ver `onAuthChange` en auth.js) — de inmediato si tenía
+ * una sesión abierta en ese momento. El documento se conserva a propósito:
+ * sus tareas y comentarios pasados se siguen viendo con normalidad (con
+ * «· Eliminado» en los selectores de responsable, igual que ya pasa con
+ * las cuentas ficticias del importador de Asana), y "Reactivar" (guardar
+ * `deleted: false`) es instantáneo si se elimina a quien no tocaba por
+ * error — no hace falta recrear nada de verdad.
+ */
+export function setUserDeleted(uid, deleted) {
+  return updateDoc(doc(db, "users", uid), { deleted });
+}

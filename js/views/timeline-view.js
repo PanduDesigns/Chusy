@@ -13,7 +13,7 @@
 // una columna en esa fecha. Los hitos siempre se dibujan como un rombo,
 // nunca como barra.
 // ============================================================================
-import { escapeHtml, toDate, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast } from "../utils.js";
+import { escapeHtml, toDate, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast, renderTitleHtml, plainTitleText } from "../utils.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { exportTimelineToExcel, exportTimelineToPdf } from "../components/gantt-export.js";
 
@@ -113,16 +113,16 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
       return;
     }
     const t = row.task;
-    cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${escapeHtml(t.title)}" style="grid-column:1;grid-row:${gridRow};${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${escapeHtml(t.title)}</div>`;
+    cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:1;grid-row:${gridRow};${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${renderTitleHtml(t.title)}</div>`;
     cells += `<div class="tl-row-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
 
     const span = taskSpan(t, columns);
     if (!span) return;
     if (t.isMilestone) {
-      cells += `<div class="tl-milestone" data-open="${t.id}" data-task-id="${t.id}" title="${escapeHtml(t.title)}" style="grid-column:${span.e + 2};grid-row:${gridRow};"><span class="tl-milestone__diamond"></span></div>`;
+      cells += `<div class="tl-milestone" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:${span.e + 2};grid-row:${gridRow};"><span class="tl-milestone__diamond"></span></div>`;
     } else {
       const color = PRIORITY_COLORS[t.priority] || "var(--color-line-bright)";
-      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" data-task-id="${t.id}" title="${escapeHtml(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};"></div>`;
+      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};"></div>`;
     }
   });
 

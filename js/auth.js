@@ -160,8 +160,11 @@ async function checkAllowedDomain(email) {
 
 /**
  * Se suscribe al estado de sesión. `callback` recibe:
- *  - null si no hay nadie autenticado
- *  - { uid, email, name, role, ... } con el perfil de Firestore si hay sesión
+ *  - (null) si no hay nadie autenticado
+ *  - (null, mensaje) si había sesión pero se ha cerrado sola por algo que
+ *    conviene explicar (cuenta eliminada, o un error leyendo el perfil)
+ *  - ({ uid, email, name, role, ... }) con el perfil de Firestore si hay
+ *    sesión válida
  * Devuelve una función para cancelar la suscripción.
  */
 export function onAuthChange(callback) {
@@ -172,13 +175,34 @@ export function onAuthChange(callback) {
       callback(null);
       return;
     }
-    unsubProfile = onSnapshot(doc(db, "users", user.uid), (snap) => {
-      if (!snap.exists()) {
-        callback({ uid: user.uid, email: user.email, name: user.displayName || user.email, role: "miembro" });
-        return;
+    unsubProfile = onSnapshot(
+      doc(db, "users", user.uid),
+      (snap) => {
+        if (!snap.exists()) {
+          callback({ uid: user.uid, email: user.email, name: user.displayName || user.email, role: "miembro" });
+          return;
+        }
+        const profile = snap.data();
+        if (profile.deleted) {
+          // Un admin te ha eliminado (ver "Eliminar usuario" en el panel de
+          // administración): se cierra la sesión al momento, tanto si esto
+          // se nota por este camino (la propia app ve el campo) como por
+          // el de abajo (las reglas de Firestore ya bloquean la lectura
+          // para quien tuviera una sesión abierta desde antes).
+          signOut(auth);
+          callback(null, "Esta cuenta ha sido desactivada por un administrador.");
+          return;
+        }
+        callback({ uid: user.uid, ...profile });
+      },
+      () => {
+        // Lectura denegada (p.ej. las reglas ya bloquean a esta cuenta por
+        // estar eliminada) o cualquier otro error: mejor cerrar la sesión
+        // sin más que dejar la app colgada en la pantalla de carga.
+        signOut(auth);
+        callback(null, "No se pudo cargar tu perfil. Vuelve a iniciar sesión.");
       }
-      callback({ uid: user.uid, ...snap.data() });
-    });
+    );
   });
   return () => { unsubAuth(); if (unsubProfile) unsubProfile(); };
 }

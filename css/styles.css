@@ -806,6 +806,16 @@ body.is-col-resizing * { cursor: col-resize !important; }
   width: max-content; justify-self: start;
 }
 
+/* ---------- panel de administración de equipo: eliminar / reactivar cuenta ---------- */
+.acc-delete-btn, .acc-reactivate-btn {
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--color-line); border-radius: var(--radius-sm);
+  color: var(--color-text-faint); font-size: 13px; transition: var(--transition-fast); justify-self: center;
+}
+.acc-delete-btn:hover { color: var(--color-danger); background: var(--color-danger-soft); border-color: var(--color-danger); }
+.acc-delete-btn:disabled, .acc-reactivate-btn:disabled { opacity: 0.5; pointer-events: none; }
+.acc-reactivate-btn:hover { color: var(--color-success); background: var(--color-success-soft); border-color: var(--color-success); }
+
 /* ---------- tag picker (autocompletar + color) ---------- */
 .tag-picker { position: relative; }
 .tag-suggest {
@@ -901,6 +911,20 @@ body.is-col-resizing * { cursor: col-resize !important; }
 }
 .modal__close { background: none; border: none; color: var(--color-text-faint); font-size: 18px; padding: 4px 8px; border-radius: var(--radius-sm); }
 .modal__close:hover { color: var(--color-text-hi); background: var(--color-panel-raised); }
+.modal__title-bold-btn {
+  flex-shrink: 0; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--color-line); border-radius: var(--radius-sm);
+  color: var(--color-text-lo); font-family: var(--font-display); font-weight: 700; font-size: 12.5px;
+  transition: var(--transition-fast);
+}
+.modal__title-bold-btn:hover { color: var(--color-text-hi); background: var(--color-panel-raised); border-color: var(--color-line-bright); }
+/* Solo ocupa sitio si el título tiene alguna marca `**` (ver renderTitlePreview en task-modal.js) — en el caso normal, sin negrita, no añade ni una línea de alto bajo la cabecera. */
+.modal__title-preview {
+  display: none; padding: 0 24px 14px; margin-top: -6px;
+  font-size: 12px; color: var(--color-text-faint); border-bottom: 1px solid var(--color-line);
+}
+.modal__title-preview.is-visible { display: block; }
+.modal__title-preview b { color: var(--color-text-hi); font-weight: 700; }
 .modal__body { padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; max-height: 66vh; overflow-y: auto; }
 .modal__footer { display: flex; align-items: center; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--color-line); }
 

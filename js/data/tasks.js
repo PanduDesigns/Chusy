@@ -48,7 +48,7 @@ import {
   arrayUnion,
   arrayRemove,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
-import { toEditableHtml, escapeHtml } from "../utils.js";
+import { toEditableHtml, escapeHtml, renderTitleHtml } from "../utils.js";
 
 export async function createTask(projectId, data) {
   const ref = await addDoc(collection(db, "tasks"), {
@@ -436,7 +436,7 @@ export async function mergeTasks(survivorId, duplicateIds) {
     if (t.description && t.description.trim()) {
       const dupHtml = toEditableHtml(t.description);
       if (dupHtml && dupHtml !== description) {
-        description += `<p>— Combinado desde «${escapeHtml(t.title)}» —</p>${dupHtml}`;
+        description += `<p>— Combinado desde «${renderTitleHtml(t.title)}» —</p>${dupHtml}`;
       }
     }
   });

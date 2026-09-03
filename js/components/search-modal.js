@@ -4,7 +4,7 @@
 // Firestore por cada tecleo. Incluye unas cuantas "búsquedas guardadas"
 // (atajos habituales) cuando el campo está vacío.
 // ============================================================================
-import { el, escapeHtml, initials, colorFromString, formatDate, toDate, projectBadgeHtml } from "../utils.js";
+import { el, escapeHtml, initials, colorFromString, formatDate, toDate, projectBadgeHtml, renderTitleHtml, plainTitleText } from "../utils.js";
 
 const CATEGORIES = [
   { key: "tasks", label: "Tareas" },
@@ -70,7 +70,7 @@ export function openSearchModal({ tasks, projects, teamMembers, currentUser, onO
       <button type="button" class="search-result" data-open-task="${t.id}">
         <span class="search-result__check${t.isComplete ? " is-checked" : ""}">${t.isComplete ? "✓" : ""}</span>
         <div class="search-result__body">
-          <div class="search-result__title">${t.isMilestone ? "🚩 " : ""}${escapeHtml(t.title)}</div>
+          <div class="search-result__title">${t.isMilestone ? "🚩 " : ""}${renderTitleHtml(t.title)}</div>
           ${tag ? `<div class="search-result__meta">${escapeHtml(tag)}</div>` : ""}
         </div>
         ${t.dueDate ? `<span class="search-result__date">${formatDate(t.dueDate)}</span>` : ""}
@@ -86,10 +86,15 @@ export function openSearchModal({ tasks, projects, teamMembers, currentUser, onO
   }
 
   function personRowHtml(m) {
+    // Se siguen pudiendo encontrar aquí (para llegar rápido a sus tareas
+    // pendientes desde el filtro de "Línea de tiempo" por persona), pero
+    // etiquetadas — igual que en los selectores de responsable — para que
+    // quede claro que no son una cuenta activa del equipo.
+    const tag = m.isImported ? " · Asana" : m.deleted ? " · Eliminado" : "";
     return `
       <button type="button" class="search-result" data-open-person="${m.uid}">
         <span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}">${initials(m.name)}</span>
-        <div class="search-result__body"><div class="search-result__title">${escapeHtml(m.name)}</div></div>
+        <div class="search-result__body"><div class="search-result__title">${escapeHtml(m.name)}${tag ? `<span style="color:var(--color-text-faint);">${tag}</span>` : ""}</div></div>
       </button>`;
   }
 
@@ -140,7 +145,7 @@ export function openSearchModal({ tasks, projects, teamMembers, currentUser, onO
     const q = query.toLowerCase();
     let html = "";
     if (activeCats.has("tasks")) {
-      const matches = tasks.filter((t) => t.title.toLowerCase().includes(q)).slice(0, 8);
+      const matches = tasks.filter((t) => plainTitleText(t.title).toLowerCase().includes(q)).slice(0, 8);
       html += section("Tareas", matches.map(taskRowHtml).join(""));
     }
     if (activeCats.has("projects")) {

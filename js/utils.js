@@ -341,3 +341,39 @@ export function stripHtmlToText(html) {
   template.innerHTML = html;
   return template.content.textContent || "";
 }
+
+// ============================================================================
+// Negrita en el título de una tarea. A diferencia de la descripción, el
+// título NO se guarda como HTML de verdad — sigue siendo el texto plano de
+// siempre, y las partes entre `**así**` (dobles asteriscos) se muestran en
+// negrita. El botón "B" del propio campo de título (o Ctrl/Cmd+B) escribe
+// estas marcas solo — no hace falta teclearlas a mano, aunque se puede.
+//
+// Guardarlo como texto plano con marcas, en vez de HTML de verdad, evita
+// tener que sanear el título en cada uno de los muchos sitios donde se usa
+// (ordenar, el buscador de la barra de filtros, el buscador global,
+// exportar a Excel/PDF...): con HTML de verdad, CUALQUIERA de esos sitios
+// que se olvidara de sanear antes de insertar el título en la página sería
+// una vía de inyección, porque cualquiera del equipo puede poner título a
+// cualquier tarea. Con texto siempre escapado primero y estas marcas
+// siendo lo ÚNICO que interpreta este código (nunca una etiqueta que
+// venga ya hecha de fuera), no hay ningún HTML ajeno que pueda colarse.
+// ============================================================================
+
+/** Texto plano de un título, sin las marcas de negrita — para ordenar, buscar, exportar a Excel/PDF y cualquier otro sitio que necesite el texto tal cual, sin nada de formato. */
+export function plainTitleText(title) {
+  return (title || "").replace(/\*\*/g, "");
+}
+
+/**
+ * HTML seguro de un título, con las partes entre `**así**` convertidas a
+ * `<b>`. Escapa TODO el texto primero (por si alguien ha escrito un `<` o
+ * un `&` de verdad en el título) y solo después busca los pares de
+ * asteriscos sobre ese texto ya escapado — así nunca interpreta como
+ * etiqueta nada que no haya escrito este código él mismo. Un `**` suelto
+ * sin su pareja de cierre se queda tal cual, como asteriscos normales.
+ */
+export function renderTitleHtml(title) {
+  const escaped = escapeHtml(title || "");
+  return escaped.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+}

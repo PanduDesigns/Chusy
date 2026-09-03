@@ -13,24 +13,38 @@ rules_version = '2';
 //    lo crea y se convierte en "admin"; el resto queda como "miembro".
 //  - meta/config: ajustes del equipo (p.ej. dominios de correo permitidos).
 //    Solo lectura para todos, escritura solo para admins.
-//  - users/{uid}: perfil de cada persona. Cualquiera autenticado puede leer
-//    la lista (para asignar tareas); solo un admin puede cambiar el rol de
-//    otra persona.
-//  - projects/{id}: cualquier persona autenticada puede leer, crear y
-//    editar cualquier proyecto. Solo quien lo creó (o un admin) puede
-//    borrarlo.
-//  - tasks/{id}: igual que proyectos si tienen projectId (cualquier
-//    persona autenticada del equipo puede leerlas y editarlas — incluye
-//    también las que solo tienen ese proyecto como ADICIONAL, ver
-//    extraProjectIds en el modelo de datos, porque siguen teniendo
-//    projectId relleno con su proyecto principal). Si en cambio projectId
-//    es null, es una tarea PERSONAL (recordatorio sin proyecto) y solo la
-//    puede leer/editar quien conste como ownerId o esté en assigneeIds —
-//    se puede asignar a otras personas sin meterla en ningún proyecto,
-//    desde "Mis tareas". Borrado reservado a quien la creó/es su dueño/a
-//    o a un admin — estar solo en assigneeIds no basta para borrar.
-//  - tasks/{id}/comments/{id}: cualquier miembro del equipo puede comentar;
-//    solo el autor o un admin puede editar/borrar un comentario.
+//  - users/{uid}: perfil de cada persona. Cualquier cuenta ACTIVA (ver
+//    isActiveUser() más abajo) puede leer la lista entera (para asignar
+//    tareas); solo un admin puede cambiar el rol de otra persona, o
+//    eliminarla (campo `deleted`, ver "Eliminar usuario" del panel de
+//    administración) — ni el rol ni `deleted` se pueden tocar en el
+//    documento propio, ni siquiera dejándolos igual que ya estaban.
+//  - projects/{id}: cualquier cuenta activa puede leer, crear y editar
+//    cualquier proyecto. Solo quien lo creó (o un admin) puede borrarlo.
+//  - tasks/{id}: igual que proyectos si tienen projectId (cualquier cuenta
+//    activa del equipo puede leerlas y editarlas — incluye también las que
+//    solo tienen ese proyecto como ADICIONAL, ver extraProjectIds en el
+//    modelo de datos, porque siguen teniendo projectId relleno con su
+//    proyecto principal). Si en cambio projectId es null, es una tarea
+//    PERSONAL (recordatorio sin proyecto) y solo la puede leer/editar quien
+//    conste como ownerId o esté en assigneeIds — se puede asignar a otras
+//    personas sin meterla en ningún proyecto, desde "Mis tareas". Borrado
+//    reservado a quien la creó/es su dueño/a o a un admin — estar solo en
+//    assigneeIds no basta para borrar.
+//  - tasks/{id}/comments/{id}: cualquier cuenta activa del equipo puede
+//    comentar; solo el autor o un admin puede editar/borrar un comentario.
+//
+// Cuentas eliminadas: "Eliminar usuario" (panel de administración) NO
+// borra el documento de Firestore ni la cuenta de Firebase Auth (borrar la
+// cuenta de Auth de otra persona exige el SDK de administración, con un
+// backend que este proyecto no tiene) — le marca `deleted: true` a su
+// perfil. isActiveUser() sustituye a un simple isSignedIn() en el resto de
+// colecciones para que esa persona pierda el acceso de verdad (lectura Y
+// escritura de todo salvo su propio perfil, que tampoco puede tocar), no
+// solo que la propia app decida cerrarle la sesión por su cuenta — así
+// tampoco le sirve de nada seguir con una sesión ya abierta desde antes de
+// que se le elimine, ni usar el SDK de Firestore directamente saltándose
+// la interfaz.
 // ============================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -39,9 +53,21 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
+    // Cuenta con sesión Y con perfil en `users` Y no marcada como
+    // eliminada. `.get('deleted', false)` en vez de `.deleted` a secas:
+    // ningún perfil anterior a esta función tiene el campo `deleted`
+    // siquiera creado, y compararlo directamente haría fallar la regla
+    // entera para cualquiera al que nunca le hayan tocado ese campo — con
+    // el valor por defecto, "el campo no existe" se trata igual que
+    // "existe y vale false" (cuenta activa).
+    function isActiveUser() {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('deleted', false) != true;
+    }
+
+    function isAdmin() {
+      return isActiveUser() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
@@ -62,8 +88,10 @@ service cloud.firestore {
 
     // ---- Usuarios ----
     match /users/{userId} {
-      allow read: if isSignedIn();
-      // Alta normal: cada quien crea SU PROPIO documento al registrarse. La
+      allow read: if isActiveUser();
+      // Alta normal: cada quien crea SU PROPIO documento al registrarse
+      // (isSignedIn() a secas a propósito: en este mismo paso su perfil
+      // todavía no existe, así que isActiveUser() sería siempre falso). La
       // segunda rama deja que un admin cree perfiles "ficticios" para
       // personas importadas de Asana que todavía no tienen cuenta real en
       // Chusy (id propio, no un UID de Auth) — exige el flag isImported y
@@ -77,30 +105,42 @@ service cloud.firestore {
          (isAdmin() &&
           request.resource.data.role == 'miembro' &&
           request.resource.data.isImported == true));
-      allow update: if isSignedIn() &&
-        (isAdmin() || (request.auth.uid == userId && request.resource.data.role == resource.data.role));
+      // El rol y `deleted` de un documento AJENO solo los toca un admin
+      // (cubre tanto "Administrar equipo" como "Eliminar usuario"/
+      // "Reactivar"). Sobre el documento PROPIO: cualquier cuenta activa
+      // puede actualizar el resto de campos (nombre, tema, columnas...)
+      // libremente, pero ni su propio rol ni su propio `deleted` — ni
+      // siquiera dejándolos igual que ya estaban, de ahí comparar contra
+      // el valor anterior en vez de solo prohibir escribir esas claves; y
+      // una cuenta YA eliminada no puede escribir nada en absoluto, ni
+      // siquiera un cambio que no toque ninguna de las dos.
+      allow update: if isAdmin() ||
+        (isActiveUser() && request.auth.uid == userId &&
+         request.resource.data.role == resource.data.role &&
+         request.resource.data.get('deleted', false) == resource.data.get('deleted', false));
       allow delete: if isAdmin();
     }
 
     // ---- Importador de Asana: mapa de equivalencias e índice de lo ya
     // importado (para que una segunda importación no duplique nada). Solo
-    // lo toca el panel de administración; lectura abierta al equipo por si
-    // alguna vista quiere mostrar "importado de Asana" en algo.
+    // lo toca el panel de administración; lectura abierta a cualquier
+    // cuenta activa por si alguna vista quiere mostrar "importado de
+    // Asana" en algo.
     match /meta/asanaUserMap {
-      allow read: if isSignedIn();
+      allow read: if isActiveUser();
       allow write: if isAdmin();
     }
     match /meta/asanaImportIndex {
-      allow read: if isSignedIn();
+      allow read: if isActiveUser();
       allow write: if isAdmin();
     }
 
     // ---- Proyectos (visibles para todo el equipo) ----
     match /projects/{projectId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if isActiveUser();
+      allow delete: if isActiveUser() && (resource.data.createdBy == request.auth.uid || isAdmin());
     }
 
     // ---- Tareas (de proyecto: visibles para todo el equipo · personales:
@@ -116,7 +156,7 @@ service cloud.firestore {
       // TODA "Mis tareas" (de proyecto y personal a la vez) — antes hacía
       // falta acotar esa consulta también por projectId porque esta rama
       // todavía no existía, ver el comentario de esa función.
-      allow read: if isSignedIn() &&
+      allow read: if isActiveUser() &&
         (resource.data.projectId != null ||
          resource.data.ownerId == request.auth.uid ||
          (request.auth.uid in resource.data.assigneeIds) ||
@@ -128,14 +168,14 @@ service cloud.firestore {
       // — así que no hace falta una rama nueva aquí para poder asignar a
       // otra persona ya desde la creación: esa asignación entra en
       // assigneeIds, un campo sin restricción propia en esta regla.
-      allow create: if isSignedIn() &&
+      allow create: if isActiveUser() &&
         (request.resource.data.projectId != null || request.resource.data.ownerId == request.auth.uid || isAdmin());
-      allow update: if isSignedIn() &&
+      allow update: if isActiveUser() &&
         (resource.data.projectId != null ||
          resource.data.ownerId == request.auth.uid ||
          (request.auth.uid in resource.data.assigneeIds) ||
          isAdmin());
-      allow delete: if isSignedIn() &&
+      allow delete: if isActiveUser() &&
         (resource.data.ownerId == request.auth.uid ||
          resource.data.createdBy == request.auth.uid ||
          isAdmin() ||
@@ -143,26 +183,26 @@ service cloud.firestore {
           get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.createdBy == request.auth.uid));
 
       match /comments/{commentId} {
-        allow read: if isSignedIn();
+        allow read: if isActiveUser();
         // Un admin puede crear un comentario a nombre de otra persona SOLO
         // para reimportar comentarios históricos de Asana con su autor
         // real; en el uso normal de la app siempre se crea con el propio
         // uid (así lo hace addComment()).
-        allow create: if isSignedIn() && (request.resource.data.authorId == request.auth.uid || isAdmin());
-        allow update, delete: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin());
+        allow create: if isActiveUser() && (request.resource.data.authorId == request.auth.uid || isAdmin());
+        allow update, delete: if isActiveUser() && (resource.data.authorId == request.auth.uid || isAdmin());
       }
     }
 
     // ---- Etiquetas (vocabulario compartido: nombre + color) ----
     match /tags/{tagId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow read: if isActiveUser();
+      allow write: if isActiveUser();
     }
 
     // ---- Notificaciones (reservado para la fase 2) ----
     match /notifications/{notifId} {
-      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn();
+      allow read, update, delete: if isActiveUser() && resource.data.userId == request.auth.uid;
+      allow create: if isActiveUser();
     }
   }
 }
