@@ -44,7 +44,7 @@ function isHolidayColumn(col) {
   return false;
 }
 
-export function renderTimelineView(container, { groups, zoom, onZoomChange, showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers }) {
+export function renderTimelineView(container, { groups, zoom, onZoomChange, showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project }) {
   const unit = zoom || "day";
   const allTasks = groups.flatMap((g) => g.tasks);
   const withDates = allTasks.filter((t) => t.startDate || t.dueDate);
@@ -164,7 +164,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
   };
   container.querySelector("#tl-today-btn").addEventListener("click", scrollToToday);
   container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
-  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups, exportTitle, groupLabel, teamMembers }));
+  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups, exportTitle, groupLabel, teamMembers, project }));
   if (todayIdx >= 0) requestAnimationFrame(scrollToToday);
 
   container.querySelectorAll("[data-open]").forEach((elx) => {
@@ -177,7 +177,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
   });
 }
 
-function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMembers }) {
+function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMembers, project }) {
   document.querySelectorAll(".export-popover").forEach((p) => p.remove());
   const rect = anchorBtn.getBoundingClientRect();
   const pop = document.createElement("div");
@@ -195,7 +195,7 @@ function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMem
     btn.disabled = true;
     btn.textContent = `${label}…`;
     try {
-      await fn({ groups, title: exportTitle, groupLabel, teamMembers });
+      await fn({ groups, title: exportTitle, groupLabel, teamMembers, project });
     } catch (err) {
       console.error(err);
       showToast("No se pudo generar el archivo. Comprueba tu conexión e inténtalo de nuevo.");

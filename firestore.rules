@@ -33,6 +33,10 @@ rules_version = '2';
 //    assigneeIds no basta para borrar.
 //  - tasks/{id}/comments/{id}: cualquier cuenta activa del equipo puede
 //    comentar; solo el autor o un admin puede editar/borrar un comentario.
+//  - notifications/{id}: privada — solo la lee/gestiona quien conste en
+//    `userId`. Cualquier cuenta activa puede CREAR una para otra persona
+//    (así avisa "te han asignado una tarea"), identificándose a sí misma
+//    como `fromUserId` — no puede crear un aviso a nombre de otra.
 //
 // Cuentas eliminadas: "Eliminar usuario" (panel de administración) NO
 // borra el documento de Firestore ni la cuenta de Firebase Auth (borrar la
@@ -193,16 +197,22 @@ service cloud.firestore {
       }
     }
 
+    // ---- Notificaciones (aviso al asignar una tarea) — privadas: solo
+    // las lee/gestiona quien conste como destinataria (userId). Cualquier
+    // cuenta activa puede CREAR una notificación para otra (así funciona
+    // "te asignaron una tarea": quien asigna escribe el aviso para quien
+    // recibe la tarea, no para sí misma) — la única condición es que se
+    // identifique a sí misma como remitente (fromUserId), para que nadie
+    // pueda suplantar de quién viene un aviso.
+    match /notifications/{notifId} {
+      allow read, update, delete: if isActiveUser() && resource.data.userId == request.auth.uid;
+      allow create: if isActiveUser() && request.resource.data.fromUserId == request.auth.uid;
+    }
+
     // ---- Etiquetas (vocabulario compartido: nombre + color) ----
     match /tags/{tagId} {
       allow read: if isActiveUser();
       allow write: if isActiveUser();
-    }
-
-    // ---- Notificaciones (reservado para la fase 2) ----
-    match /notifications/{notifId} {
-      allow read, update, delete: if isActiveUser() && resource.data.userId == request.auth.uid;
-      allow create: if isActiveUser();
     }
   }
 }

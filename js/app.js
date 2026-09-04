@@ -8,6 +8,8 @@ import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, sub
 import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
+import { subscribeToNotifications } from "./data/notifications.js";
+import { updateNotifBell, openNotifPanel } from "./components/notification-bell.js";
 import { renderSidebar } from "./components/sidebar.js";
 import { renderTopbar } from "./components/topbar.js";
 import { renderListView } from "./views/list-view.js";
@@ -36,6 +38,8 @@ const sidebarEl = document.getElementById("sidebar");
 const topbarEl = document.getElementById("topbar");
 const filterbarEl = document.getElementById("filterbar");
 const mainContentEl = document.getElementById("main-content");
+const notifBellEl = document.getElementById("notif-bell");
+const notifDotEl = document.getElementById("notif-bell-dot");
 
 // ---- estado en memoria ----
 let currentUser = null;
@@ -56,6 +60,7 @@ let activeFilters = {}; // { [filterKey]: Set(valores) }
 let searchText = ""; // cuadro de búsqueda de la barra de filtros — transitorio, no se recuerda entre sesiones (se reinicia en cada selectProject/selectMyTasks/selectTimeline, igual que activeFilters salvo en Mis tareas)
 let sortState = { column: null, direction: "asc" };
 let globalTasksByProject = {}; // { [projectId]: tasks[] } — línea de tiempo global y buscador
+let notifications = [];
 let unsubGlobalTasks = {}; // { [projectId]: unsubscribeFn }
 
 // Minimizar la barra lateral es una preferencia de este navegador (no de la
@@ -158,10 +163,15 @@ let unsubMyTasks = null;
 let unsubTags = null;
 let unsubCurrentProject = null;
 let unsubCurrentTasks = null;
+let unsubNotifications = null;
 let hasRestoredLocation = false; // solo se restaura la sección al arrancar una vez por sesión — ver restoreLastLocation()
 
 function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
 function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.add("hidden"); authScreen.classList.remove("hidden"); }
+
+// La campana es un elemento fijo (ver index.html) que nunca se repinta por
+// modo, así que su clic se conecta una sola vez aquí — no en renderShell().
+notifBellEl.addEventListener("click", () => openNotifPanel(notifBellEl, { notifications, onOpenTask: openTask }));
 
 // El script embebido al principio de index.html ya pinta el tema cacheado
 // de este navegador antes del primer fotograma (para no dar un parpadeo);
@@ -186,20 +196,28 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications].forEach((fn) => fn && fn());
   Object.values(unsubGlobalTasks).forEach((fn) => fn && fn());
-  unsubProjects = unsubArchivedProjects = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = null;
+  unsubProjects = unsubArchivedProjects = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = null;
   unsubGlobalTasks = {}; globalTasksByProject = {};
-  projects = []; archivedProjects = []; teamMembers = []; myTasks = []; tagsRegistry = [];
+  projects = []; archivedProjects = []; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
   activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
   hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
   removeBulkToolbar();
+  notifBellEl.hidden = true;
 }
 
 function bootstrap() {
   if (unsubUsers) unsubUsers();
   unsubUsers = subscribeToAllUsers((users) => { teamMembers = users; renderShell(); });
+
+  if (unsubNotifications) unsubNotifications();
+  notifBellEl.hidden = false;
+  unsubNotifications = subscribeToNotifications(currentUser.uid, (list) => {
+    notifications = list;
+    updateNotifBell(notifDotEl, notifications);
+  });
 
   if (unsubTags) unsubTags();
   unsubTags = subscribeToAllTags((tags) => { tagsRegistry = tags; renderShell(); });
@@ -590,7 +608,7 @@ function renderProjectContent() {
       groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
       showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
       onOpenTask: openTask,
-      exportTitle: `${currentProject.name} — Línea de tiempo`, groupLabel: "Sección", teamMembers,
+      exportTitle: `${currentProject.name} — Línea de tiempo`, groupLabel: "Sección", teamMembers, project: currentProject,
     });
   } else {
     const sortedTasks = sortTasks(filteredTasks, sortState, { teamMembers, projects });

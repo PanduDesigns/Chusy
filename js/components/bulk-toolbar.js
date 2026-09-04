@@ -23,6 +23,7 @@ import {
   mergeTasks,
 } from "../data/tasks.js";
 import { celebrateBulk } from "./celebration.js";
+import { notifyNewAssignees } from "../data/notifications.js";
 
 export function removeBulkToolbar() {
   document.querySelectorAll(".bulk-toolbar-anchor").forEach((a) => a.remove());
@@ -129,7 +130,29 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
       items: sortedMembers(teamMembers).map((m) => ({
         label: m.name,
         icon: "👤",
-        onClick: () => runAction(bulkUpdateTasks(ids, { assigneeIds: [m.uid] }), `Asignadas a ${m.name}.`),
+        onClick: async () => {
+          // Qué tareas de las seleccionadas NO tenían ya a esta persona
+          // como responsable — son las únicas que de verdad suponen una
+          // asignación nueva y merecen un aviso; el resto simplemente
+          // "seguía siendo suyas", reafirmarlo no es información nueva.
+          const newlyAssignedTasks = selectedTasks.filter((t) => !(t.assigneeIds || []).includes(m.uid));
+          try {
+            await bulkUpdateTasks(ids, { assigneeIds: [m.uid] });
+            showToast(`Asignadas a ${m.name}.`);
+            newlyAssignedTasks.forEach((t) => {
+              notifyNewAssignees({
+                newAssigneeUids: [m.uid],
+                taskId: t.id,
+                taskTitle: t.title,
+                projectId: t.projectId || null,
+                fromUser: currentUser,
+              }).catch((err) => console.error("notifyNewAssignees:", err));
+            });
+          } catch (err) {
+            console.error(err);
+            showToast("No se pudo aplicar el cambio. Inténtalo de nuevo.", "error");
+          }
+        },
       })),
     });
   });
@@ -189,7 +212,7 @@ function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser 
         celebrateBulk(ids.length); // la recompensa "grande" — varias de golpe
       } },
       { label: "Marcar como sin finalizar", icon: "↺", onClick: () => runAction(bulkSetComplete(ids, false), "Marcadas como sin finalizar.") },
-      { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers }) },
+      { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers, selectedTasks, currentUser }) },
       { label: "Combinar tareas duplicadas…", icon: "⧉", onClick: () => startMergeFlow(rect, { selectedTasks }) },
       { label: "Convertir en hitos", icon: "🚩", onClick: () => runAction(bulkUpdateTasks(ids, { isMilestone: true }), "Convertidas en hitos.") },
       { divider: true },
@@ -285,7 +308,7 @@ function openDatesPopover(anchorBtn, ids) {
 // el popover de filtros), así que se puede marcar a varias personas
 // seguidas sin cerrar y reabrir. Desmarcar quita a esa persona otra vez.
 // ----------------------------------------------------------------------
-function openCollabPopover(anchorRect, { ids, teamMembers }) {
+function openCollabPopover(anchorRect, { ids, teamMembers, selectedTasks, currentUser }) {
   document.querySelectorAll(".bulk-collab-popover").forEach((p) => p.remove());
 
   const pop = document.createElement("div");
@@ -310,9 +333,28 @@ function openCollabPopover(anchorRect, { ids, teamMembers }) {
   pop.style.top = `${top}px`;
 
   pop.querySelectorAll("[data-uid]").forEach((cb) => {
-    cb.addEventListener("change", () => {
+    cb.addEventListener("change", async () => {
       const uid = cb.dataset.uid;
-      runAction(cb.checked ? bulkAddAssignees(ids, [uid]) : bulkRemoveAssignees(ids, [uid]));
+      if (cb.checked) {
+        const newlyAssignedTasks = selectedTasks.filter((t) => !(t.assigneeIds || []).includes(uid));
+        try {
+          await bulkAddAssignees(ids, [uid]);
+          newlyAssignedTasks.forEach((t) => {
+            notifyNewAssignees({
+              newAssigneeUids: [uid],
+              taskId: t.id,
+              taskTitle: t.title,
+              projectId: t.projectId || null,
+              fromUser: currentUser,
+            }).catch((err) => console.error("notifyNewAssignees:", err));
+          });
+        } catch (err) {
+          console.error(err);
+          showToast("No se pudo aplicar el cambio. Inténtalo de nuevo.", "error");
+        }
+      } else {
+        runAction(bulkRemoveAssignees(ids, [uid]));
+      }
     });
   });
 

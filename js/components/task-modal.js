@@ -21,6 +21,7 @@
 // se envían al momento — no forman parte del "draft".
 // ============================================================================
 import { createTask, updateTask, getTask } from "../data/tasks.js";
+import { notifyNewAssignees } from "../data/notifications.js";
 import { addComment, subscribeToComments } from "../data/comments.js";
 import {
   el,
@@ -83,6 +84,10 @@ export function openTaskModal({
   // nunca lo tuvo) — no es parte del draft porque no se elige a mano en
   // ningún control del formulario, ver computeOwnerIdOnSave().
   let loadedOwnerId = null;
+  // Responsables que tenía la tarea al abrirla — para, al guardar, avisar
+  // SOLO a quien se haya añadido de nuevo (ver notifyNewAssignees en
+  // handleAccept), no a quien ya estaba antes de este cambio.
+  let loadedAssigneeIds = [];
   let dirty = false;
   let comments = [];
   let unsubComments = null;
@@ -103,6 +108,7 @@ export function openTaskModal({
       if (t.projectId) sectionByProject[t.projectId] = t.sectionId || null;
       Object.entries(t.extraSections || {}).forEach(([pid, sid]) => { sectionByProject[pid] = sid || null; });
       loadedOwnerId = t.ownerId || null;
+      loadedAssigneeIds = t.assigneeIds || [];
       draft = {
         title: t.title, description: t.description,
         projectIds, sectionByProject,
@@ -808,6 +814,15 @@ export function openTaskModal({
           order: Date.now(),
         });
         onSaved(newId);
+        // Tarea nueva: cualquier responsable puesto ya de entrada es
+        // "nuevo" (no había nada antes que comparar).
+        notifyNewAssignees({
+          newAssigneeUids: draft.assigneeIds,
+          taskId: newId,
+          taskTitle: draft.title,
+          projectId: primaryId || null,
+          fromUser: currentUserProfile,
+        }).catch((err) => console.error("notifyNewAssignees:", err));
       } else {
         await updateTask(taskId, {
           ...restDraft,
@@ -818,6 +833,18 @@ export function openTaskModal({
           ownerId,
         });
         onSaved(taskId);
+        // Tarea existente: solo avisa a quien esté en la lista nueva pero
+        // NO estuviera ya antes de abrir el modal (loadedAssigneeIds) —
+        // quien ya era responsable no recibe un aviso de "asignación" por
+        // simplemente guardar la tarea de nuevo sin haber cambiado nada.
+        const newlyAdded = draft.assigneeIds.filter((uid) => !loadedAssigneeIds.includes(uid));
+        notifyNewAssignees({
+          newAssigneeUids: newlyAdded,
+          taskId,
+          taskTitle: draft.title,
+          projectId: primaryId || null,
+          fromUser: currentUserProfile,
+        }).catch((err) => console.error("notifyNewAssignees:", err));
       }
       dirty = false;
       close();
