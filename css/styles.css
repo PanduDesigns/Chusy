@@ -618,7 +618,7 @@ a { color: var(--color-signal-text); }
   min-height: var(--topbar-h);
   border-bottom: 1px solid var(--color-line);
   display: flex; align-items: center; gap: 16px;
-  padding: 0 24px;
+  padding: 0 74px 0 24px; /* el hueco extra a la derecha (24 + 34 de ancho + 16 de aire) es el sitio reservado para #notif-bell — sin esto, su contenido (el botón "+ Nueva tarea", pegado al mismo borde) queda debajo de la campana en vez de al lado */
   position: relative;
   flex-shrink: 0;
 }
@@ -1451,17 +1451,25 @@ body.is-col-resizing * { cursor: col-resize !important; }
 /* ==========================================================================
    Campana de notificaciones — vive como hermana de #topbar (ver
    index.html), posicionada encima por CSS, para no desaparecer cada vez
-   que un modo repinta topbarEl.innerHTML.
+   que un modo repinta topbarEl.innerHTML. El icono es un SVG con
+   stroke="currentColor" (v37 — antes un emoji 🔔, que no se puede
+   recolorear con temas: salía siempre con su amarillo de serie sin
+   distinguir claro/oscuro/clásico, ni el estado normal del :hover) —
+   toma el color del propio botón, así que cambia con el tema exactamente
+   igual que cualquier otro icono de la interfaz. `.topbar` le reserva el
+   hueco a la derecha con su propio padding (ver ese mismo bloque, más
+   arriba) — antes no había ningún hueco reservado y la campana quedaba
+   encima del botón "+ Nueva tarea", que ocupaba ese mismo borde.
    ========================================================================== */
 .notif-bell {
   position: absolute; top: 0; right: 24px; height: var(--topbar-h);
   display: flex; align-items: center; justify-content: center;
-  width: 34px; background: none; border: none; font-size: 17px;
+  width: 34px; background: none; border: none;
   color: var(--color-text-lo); z-index: 5;
 }
 .notif-bell:hover { color: var(--color-text-hi); }
 .notif-bell__dot {
-  position: absolute; top: 13px; right: 4px; width: 8px; height: 8px;
+  position: absolute; top: 18px; right: 5px; width: 8px; height: 8px;
   border-radius: 50%; background: var(--color-signal);
   box-shadow: 0 0 0 2px var(--color-panel), 0 0 6px 1px var(--color-signal);
 }
