@@ -8,7 +8,7 @@
 // se está pintando en el propio Gantt, no una consulta aparte a Firestore).
 //
 // El Excel tiene DOS caminos posibles:
-//  - Plantilla Martech (assets/gantt-template-martech.xlsx): reproduce el
+//  - Plantilla Martech (assets/gantt-template-martech.xlsm): reproduce el
 //    cronograma tal cual lo usa la empresa — colores de barra por
 //    sección, cabecera CLIENTE/PROYECTO/FECHA, el mismo formato condicional
 //    de siempre. Solo para la línea de tiempo de UN proyecto (la plantilla
@@ -28,7 +28,7 @@ import { toDate, addDays, daysBetween, isoWeekNumber, initials, showToast, plain
 const XLSX_CDN = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
 const JSPDF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
 const JSZIP_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-const MARTECH_TEMPLATE_URL = "assets/gantt-template-martech.xlsx";
+const MARTECH_TEMPLATE_URL = "assets/gantt-template-martech.xlsm";
 
 function loadScriptOnce(src, isReady) {
   return new Promise((resolve, reject) => {
@@ -67,8 +67,16 @@ const MARTECH_COLOR_CODES = [
   "6-Morado", "7-Amarillo", "8-GrisOscuro", "9-Rosa", "10-Marron",
 ];
 const MARTECH_FIRST_TASK_ROW = 13;
-const MARTECH_LAST_TASK_ROW = 62; // 50 filas de tarea en la plantilla ampliada
-const MARTECH_MAX_TASKS = MARTECH_LAST_TASK_ROW - MARTECH_FIRST_TASK_ROW + 1;
+// Filas de tarea que la plantilla YA trae listas (estilo + formato
+// condicional): 13-23, 25 y 27-33 — se saltan la 24 ("OBSERVACIONES") y
+// la 26 (hueco fijo). A partir de la tarea 20ª, buildMartechExcel clona
+// filas nuevas — ver el bloque de comentarios de más abajo.
+const MARTECH_EXCLUDED_ROWS = new Set([24, 26]);
+const MARTECH_NATIVE_SLOTS = 19;
+const MARTECH_LAST_NATIVE_ROW = 33; // última fila que YA existe como <row> en el XML de la plantilla
+const MARTECH_CF_LAST_NATIVE_ROW = 34; // hasta aquí ya cubren el formato condicional/validación sin tocar sus rangos
+const MARTECH_CLONE_SOURCE_ROW = 27; // fila que se clona para las tareas que no caben en las nativas
+const MARTECH_MAX_TASKS = 50; // techo razonable — no es un límite físico de la plantilla, ver buildMartechExcel
 const MARTECH_MAX_WEEKS = 40; // columnas F..AS de la plantilla
 
 function fmtDate(value) {
@@ -188,24 +196,67 @@ async function buildGenericExcel({ groups, title, groupLabel, teamMembers }) {
 // Excel con la plantilla Martech — en vez de construir un libro desde
 // cero (con el que solo se pueden reproducir formatos MUY básicos en la
 // versión gratuita de SheetJS: nada de relleno de celda ni del formato
-// condicional que colorea las barras), se parte del .xlsx real de la
-// plantilla ampliada (bundled en assets/) y se le inyectan los valores
-// directamente en el XML de la hoja, celda a celda, dejando TODO lo demás
-// intacto (estilos, formato condicional, logo, fórmulas de fecha) — así
-// es Excel quien colorea las barras al abrir el archivo, con la MISMA
-// lógica de siempre, no algo que haya que recalcular aquí.
+// condicional que colorea las barras), se parte del .xlsm real de la
+// empresa (bundled en assets/, el propio CRONOGRAMA.xlsm vaciado de sus
+// datos de ejemplo) y se le inyectan los valores directamente en el XML
+// de la hoja, celda a celda — dejando TODO lo demás intacto (estilos,
+// formato condicional, validaciones, botones, macros, logo, fórmulas de
+// fecha) para que sea Excel quien pinte las barras al abrir el archivo,
+// con la MISMA lógica de siempre, no algo que haya que recalcular aquí.
 //
-// La plantilla original (CRONOGRAMA.xlsm, la que se pasó de referencia)
-// traía 10 filas de tarea ya formateadas (13-22) y un formato condicional
-// pensado para 40 columnas de semana (F..AS) — de ahí MARTECH_MAX_TASKS y
-// MARTECH_MAX_WEEKS. Se amplió una copia a 50 filas (13-62) con
-// openpyxl, replicando el estilo y el formato condicional de la fila 22
-// a las 40 nuevas — ver el apartado 3 del README para el porqué y el
-// cómo. Ampliar también las 40 columnas de semana sería la manera de no
-// tener ningún límite, pero esa cirugía (reescribir a mano la cadena de
-// fórmulas de fecha de la cabecera para más columnas, y el formato
-// condicional que depende de ellas) no se ha llegado a hacer todavía —
-// ver la limitación correspondiente en el apartado 7.
+// Cómo rellena la plantilla la empresa (así se explicó y así funciona
+// CRONOGRAMA.xlsm, el ejemplo real que sirvió de referencia): D9 = año,
+// D10 = semana de inicio del cronograma; y por cada tarea, a partir de
+// la fila 13, columna B = nombre, C = duración en semanas, D = semana
+// de inicio de ESA tarea, y E = un código de color exacto de una lista
+// cerrada de 10 (tiene que decir "1-Verde", "2-AzulClaro"... LETRA POR
+// LETRA, o esa fila no se colorea). El propio Excel, con su formato
+// condicional, es quien lee C/D/E de cada fila y pinta las semanas
+// correspondientes — este código NUNCA pinta una celda de semana
+// directamente, solo rellena esas 4 columnas de entrada.
+//
+// LA PLANTILLA ANTERIOR (la que traía este mismo archivo hasta ahora)
+// se generó con openpyxl SIN keep_vba=True para "ampliarla" a 50 filas
+// de tarea — y openpyxl, sin ese parámetro, descarta las macros y los
+// botones EN SILENCIO (sin ningún error), y además el CF de esa copia
+// se quedó solo con las 2 reglas de bandeado, perdiendo por el camino
+// las 10 reglas que pintan cada color. Resultado: ninguna tarea se
+// coloreaba jamás, fuera cual fuera el color elegido, y el archivo
+// tampoco traía ya los botones ni las macros de "Preparar para envío" /
+// "Modo edición". Encima, esa plantilla tenía HORNEADAS de fábrica las
+// 10 primeras filas con las tareas de ejemplo del cliente real de
+// CRONOGRAMA.xlsm: si un proyecto exportado tenía menos de 10 tareas,
+// las filas sobrantes se quedaban con el texto de ese cliente en vez de
+// vaciarse.
+//
+// LA PLANTILLA NUEVA (gantt-template-martech.xlsm) se generó vaciando
+// CRONOGRAMA.xlsm celda a celda por su XML directamente — SIN pasar por
+// ninguna librería de Excel — así se garantiza que las 10 reglas de
+// color, las 2 de bandeado, las validaciones, el logo y los botones (con
+// sus macros intactas, verificado byte a byte contra el vbaProject.bin
+// original) llegan exactamente iguales que en el archivo real. También
+// se añadió fullCalcOnLoad="1" al libro (no lo traía) para que Excel
+// recalcule la cabecera de fechas al abrir el archivo — si no, con
+// calculo automático pero SIN ese flag, Excel confía en el valor de
+// fórmula que quedó cacheado en el XML (el del último cálculo real en
+// Excel) en vez de recalcularlo con el D9/D10 que acabamos de escribir.
+//
+// FILAS: la plantilla trae de fábrica sitio para 19 tareas ya
+// formateadas y con su formato condicional listo (filas 13-23, 25 y
+// 27-33 — MARTECH_NATIVE_SLOTS; se saltan la 24, que es la fila
+// "OBSERVACIONES", y la 26, que es un hueco fijo de la plantilla). Si
+// hacen falta más de 19 (hasta MARTECH_MAX_TASKS), este código clona la
+// fila 27 tal cual para cada fila nueva y extiende el formato
+// condicional, la validación de la columna E, el `dimension` y el área
+// de impresión hasta la última fila que se use — así no hace falta
+// tocar el Excel a mano cada vez que un cronograma tenga más tareas de
+// las que trae la plantilla en blanco.
+//
+// COLUMNAS: el formato condicional de fecha en la cabecera SÍ sigue
+// limitado a 40 semanas (columnas F..AS, de ahí MARTECH_MAX_WEEKS) —
+// ampliarlo significaría reescribir a mano la cadena de fórmulas de
+// fecha de la cabecera, algo que no se ha hecho (ver la limitación
+// correspondiente en el apartado 7 del README).
 // ============================================================================
 
 function checkMartechTemplateFit(groups) {
@@ -233,22 +284,126 @@ function checkMartechTemplateFit(groups) {
   return { fits: true, dated, year: minDate.getFullYear(), startWeek };
 }
 
+/** Número de columna (1 = A) -> letra de columna ("F", "AS", "BH"...). */
+function colLetter(n) {
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+/**
+ * Recalcula a mano el valor de las fórmulas de la cabecera (filas 6/7/11/12,
+ * columnas F..AS) para un año/semana concretos — replicando EXACTAMENTE las
+ * fórmulas de la plantilla, no algo aproximado. Hace falta porque, aunque la
+ * plantilla lleva fullCalcOnLoad="1", no todos los programas que puedan
+ * abrir el archivo recalculan solos al abrirlo (comprobado con la
+ * conversión en línea de comandos de LibreOffice: sin esto, se ve la
+ * cabecera con el año/semana de ejemplo con la que se generó la plantilla,
+ * no con el que se acaba de escribir en D9/D10).
+ */
+function computeMartechHeaderValues(year, startWeek) {
+  const weeks = [];
+  for (let i = 0; i < MARTECH_MAX_WEEKS; i++) {
+    weeks.push(i === 0 ? startWeek : (weeks[i - 1] >= 53 ? 1 : weeks[i - 1] + 1));
+  }
+  // DATE($D$9,1,4) - WEEKDAY(DATE($D$9,1,4),2) + 4 = jueves de la semana ISO 1.
+  const jan4 = new Date(year, 0, 4);
+  const weekday2 = ((jan4.getDay() + 6) % 7) + 1; // 1=lunes .. 7=domingo, como WEEKDAY(...,2)
+  const months = [];
+  for (let i = 0; i < MARTECH_MAX_WEEKS; i++) {
+    const d = new Date(year, 0, 4 - weekday2 + 4 + (startWeek - 1) * 7 + i * 7);
+    months.push(d.getMonth() + 1);
+  }
+  const NOMBRES_MES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const monthLabels = months.map((m, i) => (i === 0 || m !== months[i - 1] ? NOMBRES_MES[m - 1] : ""));
+  return { weeks, months, monthLabels };
+}
+
+/** Dentro de la celda `ref` (que ya tiene una fórmula `<f>`), sustituye SOLO su valor cacheado `<v>`, sin tocar la fórmula ni el estilo. */
+function setFormulaCachedValue(xml, ref, value) {
+  const cellPattern = new RegExp(`<c r="${ref}"([^>]*)>([\\s\\S]*?)</c>`);
+  const m = xml.match(cellPattern);
+  if (!m) throw new Error(`La plantilla no tiene la fórmula ${ref} esperada.`);
+  const fMatch = m[2].match(/<f[^>]*(?:\/>|>[\s\S]*?<\/f>)/);
+  if (!fMatch) throw new Error(`La celda ${ref} no tiene fórmula.`);
+  const valueXml = `<v>${typeof value === "number" ? value : escapeXmlText(value)}</v>`;
+  // OJO: el reemplazo va en una función, NUNCA en un string — las fórmulas
+  // originales de esta plantilla contienen "$D$9"/"$D$10" tal cual, y con
+  // un string de reemplazo, String.replace() interpreta "$1", "$9"... como
+  // referencias a grupos capturados (aquí, el propio estilo de la celda),
+  // dejando la fórmula corrompida en vez de intacta.
+  return xml.replace(cellPattern, () => `<c r="${ref}"${m[1]}>${fMatch[0]}${valueXml}</c>`);
+}
+
+/** Índice de tarea (0-based) -> número de fila real en la hoja, saltando las filas reservadas (ver MARTECH_EXCLUDED_ROWS). */
+function martechRowForIndex(i) {
+  let row = MARTECH_FIRST_TASK_ROW - 1;
+  let count = -1;
+  while (count < i) {
+    row += 1;
+    if (!MARTECH_EXCLUDED_ROWS.has(row)) count += 1;
+  }
+  return row;
+}
+
 function escapeXmlText(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** Sustituye la celda `ref` entera (self-closing o con contenido, tanto da) por una de tipo texto, sin tocar su estilo `s`. */
-function setInlineStringCell(xml, ref, style, text) {
-  const pattern = new RegExp(`<c r="${ref}"[^>]*(?:/>|>[\\s\\S]*?</c>)`);
-  if (!pattern.test(xml)) throw new Error(`La plantilla no tiene la celda ${ref} esperada.`);
-  return xml.replace(pattern, `<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(text)}</t></is></c>`);
+/**
+ * Sustituye el VALOR de la celda `ref` por texto, conservando tal cual el
+ * estilo `s` que ya tenga en la plantilla. El reemplazo va en una función
+ * (no un string) por si el propio texto trajera un "$" — un título de
+ * tarea como "Revisión $2.400" corrompería la celda igual que le pasaba a
+ * setFormulaCachedValue si se pasara como string (ver su comentario).
+ */
+function setInlineStringCell(xml, ref, text) {
+  const pattern = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+  const m = xml.match(pattern);
+  if (!m) throw new Error(`La plantilla no tiene la celda ${ref} esperada.`);
+  const styleMatch = m[1].match(/\bs="(\d+)"/);
+  const style = styleMatch ? ` s="${styleMatch[1]}"` : "";
+  return xml.replace(pattern, () => `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(text)}</t></is></c>`);
 }
 
-/** Igual que setInlineStringCell pero para un valor numérico. */
-function setNumberCell(xml, ref, style, num) {
-  const pattern = new RegExp(`<c r="${ref}"[^>]*(?:/>|>[\\s\\S]*?</c>)`);
-  if (!pattern.test(xml)) throw new Error(`La plantilla no tiene la celda ${ref} esperada.`);
-  return xml.replace(pattern, `<c r="${ref}" s="${style}"><v>${num}</v></c>`);
+/** Igual que setInlineStringCell pero con un valor numérico. */
+function setNumberCell(xml, ref, num) {
+  const pattern = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+  const m = xml.match(pattern);
+  if (!m) throw new Error(`La plantilla no tiene la celda ${ref} esperada.`);
+  const styleMatch = m[1].match(/\bs="(\d+)"/);
+  const style = styleMatch ? ` s="${styleMatch[1]}"` : "";
+  return xml.replace(pattern, () => `<c r="${ref}"${style}><v>${num}</v></c>`);
+}
+
+/** Deja la celda `ref` vacía, conservando su estilo — para las filas de tarea que no se usan en este export. */
+function clearCell(xml, ref) {
+  const pattern = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+  const m = xml.match(pattern);
+  if (!m) throw new Error(`La plantilla no tiene la celda ${ref} esperada.`);
+  const styleMatch = m[1].match(/\bs="(\d+)"/);
+  const style = styleMatch ? ` s="${styleMatch[1]}"` : "";
+  return xml.replace(pattern, () => `<c r="${ref}"${style}/>`);
+}
+
+/** Añade la fila `rowNum` (clonando blankRowTemplate) si todavía no existe en la hoja. */
+function ensureMartechRow(xml, rowNum, blankRowTemplate) {
+  if (xml.includes(`<row r="${rowNum}" `)) return xml; // ya está (de la plantilla o de una vuelta anterior de este mismo bucle)
+  const clone = blankRowTemplate.replace(/27/g, String(rowNum));
+  return xml.replace("</sheetData>", () => `${clone}</sheetData>`);
+}
+
+/** Extiende el formato condicional, la validación de E y el `dimension` de la hoja hasta `finalRow`, si hace falta. */
+function extendMartechSheetRanges(xml, finalRow) {
+  if (finalRow <= MARTECH_CF_LAST_NATIVE_ROW) return xml;
+  xml = xml.replace('sqref="F13:AS23 F25:AS25 F27:AS34"', () => `sqref="F13:AS23 F25:AS25 F27:AS${finalRow}"`);
+  xml = xml.replace('sqref="E27:E34 E13:E25"', () => `sqref="E27:E${finalRow} E13:E25"`);
+  xml = xml.replace(/<dimension ref="B1:BH\d+"\/>/, () => `<dimension ref="B1:BH${finalRow}"/>`);
+  return xml;
 }
 
 async function buildMartechExcel({ project, groups, fit }) {
@@ -262,12 +417,32 @@ async function buildMartechExcel({ project, groups, fit }) {
   if (!sheetFile) throw new Error("La plantilla de Excel no tiene la hoja esperada.");
   let xml = await sheetFile.async("string");
 
-  xml = setInlineStringCell(xml, "F2", 46, `CLIENTE: ${project.name || ""}`);
-  xml = setInlineStringCell(xml, "F3", 46, `PROYECTO: ${project.description || project.name || ""}`);
-  xml = setInlineStringCell(xml, "F4", 46, "PEDIDO CLIENTE Nº: —");
-  xml = setInlineStringCell(xml, "F5", 46, `FECHA: ${fmtDate(new Date())}`);
-  xml = setNumberCell(xml, "D9", 30, fit.year);
-  xml = setNumberCell(xml, "D10", 30, fit.startWeek);
+  // Fila "en blanco" de referencia para clonar si hicieran falta más de
+  // MARTECH_NATIVE_SLOTS tareas — se captura ANTES de escribir ningún
+  // dato, para no arrastrar nunca texto de una tarea real en el clon.
+  const cloneMatch = xml.match(new RegExp(`<row r="${MARTECH_CLONE_SOURCE_ROW}"[^>]*>[\\s\\S]*?</row>`));
+  if (!cloneMatch) throw new Error("La plantilla no tiene la fila de referencia esperada.");
+  const blankRowTemplate = cloneMatch[0];
+
+  xml = setInlineStringCell(xml, "F2", `CLIENTE: ${project.name || ""}`);
+  xml = setInlineStringCell(xml, "F3", `PROYECTO: ${project.description || project.name || ""}`);
+  xml = setInlineStringCell(xml, "F4", "PEDIDO CLIENTE Nº: —");
+  xml = setInlineStringCell(xml, "F5", `FECHA: ${fmtDate(new Date())}`);
+  xml = setNumberCell(xml, "D9", fit.year);
+  xml = setNumberCell(xml, "D10", fit.startWeek);
+  xml = setInlineStringCell(xml, "F10", `AÑO ${fit.year}`); // la plantilla lo trae como texto fijo (no como fórmula), hay que sincronizarlo a mano con D9
+
+  // Ver el comentario de computeMartechHeaderValues: se deja recalculada a
+  // mano la cabecera (semanas/meses) para no depender de que el programa
+  // que abra el archivo recalcule solo las fórmulas.
+  const header = computeMartechHeaderValues(fit.year, fit.startWeek);
+  for (let i = 0; i < MARTECH_MAX_WEEKS; i++) {
+    const col = colLetter(6 + i);
+    xml = setFormulaCachedValue(xml, `${col}6`, header.weeks[i]);
+    xml = setFormulaCachedValue(xml, `${col}7`, header.months[i]);
+    xml = setFormulaCachedValue(xml, `${col}11`, header.monthLabels[i]);
+    xml = setFormulaCachedValue(xml, `${col}12`, header.weeks[i]);
+  }
 
   // Un color del ciclo de 10 por sección, por orden de primera aparición
   // entre las tareas ya ordenadas cronológicamente — así todas las
@@ -280,20 +455,56 @@ async function buildMartechExcel({ project, groups, fit }) {
   }
 
   const sorted = [...fit.dated].sort((a, b) => toDate(a.task.startDate || a.task.dueDate) - toDate(b.task.startDate || b.task.dueDate));
-  sorted.forEach(({ task: t, sectionLabel }, i) => {
-    const row = MARTECH_FIRST_TASK_ROW + i;
-    const start = toDate(t.startDate || t.dueDate);
-    const end = toDate(t.dueDate || t.startDate);
-    const weeks = Math.max(1, Math.round(daysBetween(start, end) / 7) + 1);
-    xml = setInlineStringCell(xml, `B${row}`, 18, (t.isMilestone ? "🚩 " : "") + plainTitleText(t.title));
-    xml = setNumberCell(xml, `C${row}`, 7, weeks);
-    xml = setNumberCell(xml, `D${row}`, 3, isoWeekNumber(start));
-    xml = setInlineStringCell(xml, `E${row}`, 3, colorFor(sectionLabel));
-  });
+
+  // Si hacen falta más de las MARTECH_NATIVE_SLOTS filas nativas, se
+  // crean las que falten y se extienden los rangos de una sola vez,
+  // ANTES de escribir ninguna tarea.
+  const lastRowNeeded = martechRowForIndex(sorted.length - 1);
+  if (lastRowNeeded > MARTECH_LAST_NATIVE_ROW) {
+    for (let r = MARTECH_LAST_NATIVE_ROW + 1; r <= lastRowNeeded; r++) {
+      xml = ensureMartechRow(xml, r, blankRowTemplate);
+    }
+    xml = extendMartechSheetRanges(xml, lastRowNeeded);
+  }
+
+  // Se recorren TODAS las filas nativas (no solo las que hagan falta): la
+  // que no se usa para ninguna tarea de este export se deja en blanco a
+  // propósito, para que no se cuele nunca ningún resto de un export
+  // anterior ni del ejemplo original de la plantilla.
+  const totalSlotsToWrite = Math.max(MARTECH_NATIVE_SLOTS, sorted.length);
+  for (let i = 0; i < totalSlotsToWrite; i++) {
+    const row = martechRowForIndex(i);
+    if (i < sorted.length) {
+      const { task: t, sectionLabel } = sorted[i];
+      const start = toDate(t.startDate || t.dueDate);
+      const end = toDate(t.dueDate || t.startDate);
+      const weeks = Math.max(1, Math.round(daysBetween(start, end) / 7) + 1);
+      xml = setInlineStringCell(xml, `B${row}`, (t.isMilestone ? "🚩 " : "") + plainTitleText(t.title));
+      xml = setNumberCell(xml, `C${row}`, weeks);
+      xml = setNumberCell(xml, `D${row}`, isoWeekNumber(start));
+      xml = setInlineStringCell(xml, `E${row}`, colorFor(sectionLabel));
+    } else {
+      xml = clearCell(xml, `B${row}`);
+      xml = clearCell(xml, `C${row}`);
+      xml = clearCell(xml, `D${row}`);
+      xml = clearCell(xml, `E${row}`);
+    }
+  }
 
   zip.file(sheetPath, xml);
-  const blob = await zip.generateAsync({ type: "blob" });
-  triggerDownload(blob, `${sanitizeFilename(project.name)}-cronograma.xlsx`);
+
+  // El área de impresión de la plantilla original solo llega a la fila
+  // 29 (la propia empresa la recorta ahí) — si se ha escrito más abajo,
+  // se extiende para que no se quede ninguna tarea fuera al imprimir.
+  if (lastRowNeeded > 29) {
+    const workbookPath = "xl/workbook.xml";
+    let workbookXml = await zip.file(workbookPath).async("string");
+    workbookXml = workbookXml.replace("Cronograma_Martech!$B$1:$AS$29", () => `Cronograma_Martech!$B$1:$AS$${lastRowNeeded}`);
+    zip.file(workbookPath, workbookXml);
+  }
+
+  const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.ms-excel.sheet.macroEnabled.12" });
+  triggerDownload(blob, `${sanitizeFilename(project.name)}-cronograma.xlsm`);
 }
 
 /**
