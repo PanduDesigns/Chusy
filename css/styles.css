@@ -1497,9 +1497,17 @@ body.is-col-resizing * { cursor: col-resize !important; }
 }
 .notif-row:last-child { border-bottom: none; }
 .notif-row:hover { background: var(--color-panel); }
+/* Sin leer: fondo teñido (misma variable que ya usan los botones activos
+   de la barra de formato, --color-signal-soft) + punto encendido + texto
+   a contraste alto. Leída: sin teñido, punto apagado y texto atenuado —
+   así se distinguen de un vistazo, no solo por el punto. */
+.notif-row--unread { background: var(--color-signal-soft); }
+.notif-row--unread:hover { background: var(--color-signal-soft); }
+.notif-row--read .notif-row__text { color: var(--color-text-faint); }
 .notif-row__unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-signal); margin-top: 5px; flex-shrink: 0; }
 .notif-row__unread-dot--hidden { background: transparent; }
 .notif-row__body { flex: 1; min-width: 0; }
 .notif-row__text { font-size: 12.5px; color: var(--color-text-hi); line-height: 1.4; }
 .notif-row__text b { font-weight: 600; }
+.notif-row__project { color: var(--color-text-faint); font-weight: 400; }
 .notif-row__time { font-size: 11px; color: var(--color-text-faint); margin-top: 2px; }

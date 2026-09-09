@@ -145,7 +145,9 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
                 taskId: t.id,
                 taskTitle: t.title,
                 projectId: t.projectId || null,
+                projectName: t.projectId ? (projects.find((p) => p.id === t.projectId)?.name || null) : null,
                 fromUser: currentUser,
+                teamMembers,
               }).catch((err) => console.error("notifyNewAssignees:", err));
             });
           } catch (err) {
@@ -160,7 +162,7 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
   anchor.querySelector('[data-action="dates"]').addEventListener("click", (e) => openDatesPopover(e.currentTarget, ids));
   anchor.querySelector('[data-action="delete"]').addEventListener("click", () => handleDelete(ids));
   anchor.querySelector('[data-action="more"]').addEventListener("click", (e) =>
-    openMoreMenu(e.currentTarget, { ids, selectedTasks, teamMembers, currentUser })
+    openMoreMenu(e.currentTarget, { ids, selectedTasks, teamMembers, currentUser, projects })
   );
   anchor.querySelector('[data-action="clear"]').addEventListener("click", () => onClearSelection());
 }
@@ -202,7 +204,7 @@ async function handleDelete(ids) {
   }
 }
 
-function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser }) {
+function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser, projects }) {
   const rect = anchorBtn.getBoundingClientRect();
   openContextMenu({
     x: rect.left, y: rect.top,
@@ -212,7 +214,7 @@ function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser 
         celebrateBulk(ids.length); // la recompensa "grande" — varias de golpe
       } },
       { label: "Marcar como sin finalizar", icon: "↺", onClick: () => runAction(bulkSetComplete(ids, false), "Marcadas como sin finalizar.") },
-      { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers, selectedTasks, currentUser }) },
+      { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers, selectedTasks, currentUser, projects }) },
       { label: "Combinar tareas duplicadas…", icon: "⧉", onClick: () => startMergeFlow(rect, { selectedTasks }) },
       { label: "Convertir en hitos", icon: "🚩", onClick: () => runAction(bulkUpdateTasks(ids, { isMilestone: true }), "Convertidas en hitos.") },
       { divider: true },
@@ -308,7 +310,7 @@ function openDatesPopover(anchorBtn, ids) {
 // el popover de filtros), así que se puede marcar a varias personas
 // seguidas sin cerrar y reabrir. Desmarcar quita a esa persona otra vez.
 // ----------------------------------------------------------------------
-function openCollabPopover(anchorRect, { ids, teamMembers, selectedTasks, currentUser }) {
+function openCollabPopover(anchorRect, { ids, teamMembers, selectedTasks, currentUser, projects }) {
   document.querySelectorAll(".bulk-collab-popover").forEach((p) => p.remove());
 
   const pop = document.createElement("div");
@@ -345,7 +347,9 @@ function openCollabPopover(anchorRect, { ids, teamMembers, selectedTasks, curren
               taskId: t.id,
               taskTitle: t.title,
               projectId: t.projectId || null,
+              projectName: t.projectId ? (projects.find((p) => p.id === t.projectId)?.name || null) : null,
               fromUser: currentUser,
+              teamMembers,
             }).catch((err) => console.error("notifyNewAssignees:", err));
           });
         } catch (err) {

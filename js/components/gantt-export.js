@@ -447,7 +447,10 @@ async function buildMartechExcel({ project, groups, fit }) {
   // Un color del ciclo de 10 por sección, por orden de primera aparición
   // entre las tareas ya ordenadas cronológicamente — así todas las
   // tareas de una misma sección comparten color, igual que en el
-  // ejemplo de la propia empresa (una fase = un color).
+  // ejemplo de la propia empresa (una fase = un color). (Se probó a
+  // asignar un color distinto por FILA en vez de por sección, pero tras
+  // probarlo con datos reales se prefirió volver a este — ver el
+  // historial de la v39.)
   const sectionColor = new Map();
   function colorFor(label) {
     if (!sectionColor.has(label)) sectionColor.set(label, MARTECH_COLOR_CODES[sectionColor.size % MARTECH_COLOR_CODES.length]);

@@ -821,7 +821,9 @@ export function openTaskModal({
           taskId: newId,
           taskTitle: draft.title,
           projectId: primaryId || null,
+          projectName: primaryId ? (projects.find((p) => p.id === primaryId)?.name || null) : null,
           fromUser: currentUserProfile,
+          teamMembers,
         }).catch((err) => console.error("notifyNewAssignees:", err));
       } else {
         await updateTask(taskId, {
@@ -843,7 +845,9 @@ export function openTaskModal({
           taskId,
           taskTitle: draft.title,
           projectId: primaryId || null,
+          projectName: primaryId ? (projects.find((p) => p.id === primaryId)?.name || null) : null,
           fromUser: currentUserProfile,
+          teamMembers,
         }).catch((err) => console.error("notifyNewAssignees:", err));
       }
       dirty = false;

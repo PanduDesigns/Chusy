@@ -5,7 +5,7 @@
 // quedan por leer.
 // ============================================================================
 import { escapeHtml, renderTitleHtml } from "../utils.js";
-import { markNotificationRead, markAllNotificationsRead } from "../data/notifications.js";
+import { markNotificationRead, markAllNotificationsRead, NOTIF_VISIBLE_LIMIT } from "../data/notifications.js";
 
 function relativeTime(date) {
   if (!date) return "";
@@ -31,7 +31,11 @@ export function openNotifPanel(anchorBtn, { notifications, onOpenTask }) {
   const panel = document.createElement("div");
   panel.className = "notif-panel";
   const hasUnread = notifications.some((n) => !n.read);
-  const recent = notifications.slice(0, 30);
+  // Ver NOTIF_VISIBLE_LIMIT en notifications.js: el propio dato ya se
+  // autolimpia para no acumularse por encima de este número, así que
+  // cortar aquí en 20 no deja fuera nada que se pudiera leer de otra
+  // manera.
+  const recent = notifications.slice(0, NOTIF_VISIBLE_LIMIT);
 
   function rowHtml(n) {
     const when = n.createdAt && typeof n.createdAt.toDate === "function" ? n.createdAt.toDate() : null;
@@ -40,11 +44,12 @@ export function openNotifPanel(anchorBtn, { notifications, onOpenTask }) {
     // (apartado 3 del README), así que se pinta con renderTitleHtml() en
     // vez de escapeHtml() a secas, igual que en cualquier otro sitio
     // donde se muestra el título de una tarea.
+    const projectBit = n.projectName ? ` <span class="notif-row__project">· ${escapeHtml(n.projectName)}</span>` : "";
     return `
-      <button type="button" class="notif-row" data-id="${n.id}" data-task="${n.taskId}">
+      <button type="button" class="notif-row ${n.read ? "notif-row--read" : "notif-row--unread"}" data-id="${n.id}" data-task="${n.taskId}">
         <span class="notif-row__unread-dot${n.read ? " notif-row__unread-dot--hidden" : ""}"></span>
         <span class="notif-row__body">
-          <span class="notif-row__text"><b>${escapeHtml(n.fromName || "Alguien")}</b> te asignó «${renderTitleHtml(n.taskTitle || "una tarea")}»</span>
+          <span class="notif-row__text"><b>${escapeHtml(n.fromName || "Alguien")}</b> te asignó «${renderTitleHtml(n.taskTitle || "una tarea")}»${projectBit}</span>
           <span class="notif-row__time">${relativeTime(when)}</span>
         </span>
       </button>`;
