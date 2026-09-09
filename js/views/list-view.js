@@ -246,8 +246,15 @@ export function openTaskContextMenu(x, y, task, onOpenTask) {
       { label: task.isMilestone ? "Quitar de hitos" : "Convertir en hito", icon: "🚩", onClick: () => updateTask(task.id, { isMilestone: !task.isMilestone }) },
       { label: "Abrir detalles", icon: "↗", onClick: () => onOpenTask(task.id) },
       { divider: true },
-      { label: "Eliminar tarea", icon: "🗑", danger: true, onClick: () => {
-        if (confirm(`¿Eliminar "${plainTitleText(task.title)}"? No se puede deshacer.`)) { deleteTask(task.id); showToast("Tarea eliminada."); }
+      { label: "Eliminar tarea", icon: "🗑", danger: true, onClick: async () => {
+        if (!confirm(`¿Eliminar "${plainTitleText(task.title)}"? No se puede deshacer.`)) return;
+        try {
+          await deleteTask(task.id);
+          showToast("Tarea eliminada.");
+        } catch (err) {
+          console.error(err);
+          showToast("No se pudo eliminar (sin permiso).", "error");
+        }
       } },
     ],
   });

@@ -20,6 +20,59 @@ function relativeTime(date) {
   return date.toLocaleDateString("es-ES", { day: "numeric", month: "short" });
 }
 
+/**
+ * Aviso emergente para cuando llega una tarea nueva CON LA APP YA
+ * ABIERTA — más llamativo que el toast normal de confirmaciones
+ * (icono, dos líneas, más tiempo en pantalla) y clicable: lleva
+ * directamente a la tarea (o al panel si han llegado varias de golpe,
+ * por ejemplo una asignación masiva). Se llama desde app.js con lo que
+ * vaya devolviendo el `onNewNotifications` de subscribeToNotifications
+ * — nunca con las que ya hubiera al abrir la app, ver su comentario.
+ */
+export function showAssignedTaskToast(newNotifications, { onOpenTask, onOpenPanel }) {
+  const root = document.getElementById("toast-root");
+  if (!root || !newNotifications.length) return;
+
+  const el = document.createElement("button");
+  el.type = "button";
+  el.className = "toast toast--notify";
+
+  if (newNotifications.length === 1) {
+    const n = newNotifications[0];
+    const projectBit = n.projectName ? ` · ${escapeHtml(n.projectName)}` : "";
+    el.innerHTML = `
+      <span class="toast--notify__icon">🔔</span>
+      <span class="toast--notify__body">
+        <span class="toast--notify__title"><b>${escapeHtml(n.fromName || "Alguien")}</b> te ha asignado una tarea</span>
+        <span class="toast--notify__task">«${renderTitleHtml(n.taskTitle || "una tarea")}»${projectBit}</span>
+      </span>`;
+    el.addEventListener("click", () => {
+      markNotificationRead(n.id);
+      onOpenTask(n.taskId);
+      dismiss();
+    });
+  } else {
+    el.innerHTML = `
+      <span class="toast--notify__icon">🔔</span>
+      <span class="toast--notify__body">
+        <span class="toast--notify__title">Tienes ${newNotifications.length} tareas nuevas asignadas</span>
+        <span class="toast--notify__task">Toca para verlas</span>
+      </span>`;
+    el.addEventListener("click", () => { onOpenPanel(); dismiss(); });
+  }
+
+  root.appendChild(el);
+  let dismissed = false;
+  function dismiss() {
+    if (dismissed) return;
+    dismissed = true;
+    el.style.transition = "opacity 200ms ease";
+    el.style.opacity = "0";
+    setTimeout(() => el.remove(), 220);
+  }
+  setTimeout(dismiss, 6000);
+}
+
 /** Enciende o apaga el puntito de la campana según haya o no algo sin leer. */
 export function updateNotifBell(dotEl, notifications) {
   dotEl.hidden = !notifications.some((n) => !n.read);

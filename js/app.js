@@ -9,7 +9,7 @@ import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
 import { subscribeToNotifications } from "./data/notifications.js";
-import { updateNotifBell, openNotifPanel } from "./components/notification-bell.js";
+import { updateNotifBell, openNotifPanel, showAssignedTaskToast } from "./components/notification-bell.js";
 import { renderSidebar } from "./components/sidebar.js";
 import { renderTopbar } from "./components/topbar.js";
 import { renderListView } from "./views/list-view.js";
@@ -214,10 +214,19 @@ function bootstrap() {
 
   if (unsubNotifications) unsubNotifications();
   notifBellEl.hidden = false;
-  unsubNotifications = subscribeToNotifications(currentUser.uid, (list) => {
-    notifications = list;
-    updateNotifBell(notifDotEl, notifications);
-  });
+  unsubNotifications = subscribeToNotifications(
+    currentUser.uid,
+    (list) => {
+      notifications = list;
+      updateNotifBell(notifDotEl, notifications);
+    },
+    (newOnes) => {
+      showAssignedTaskToast(newOnes, {
+        onOpenTask: openTask,
+        onOpenPanel: () => openNotifPanel(notifBellEl, { notifications, onOpenTask: openTask }),
+      });
+    }
+  );
 
   if (unsubTags) unsubTags();
   unsubTags = subscribeToAllTags((tags) => { tagsRegistry = tags; renderShell(); });

@@ -1277,6 +1277,19 @@ body.is-col-resizing * { cursor: col-resize !important; }
   max-width: 320px;
 }
 .toast--error { border-left-color: var(--color-danger); }
+/* El toast de "te han asignado una tarea" — más llamativo que el de
+   confirmaciones: icono, dos líneas, y es un <button> (clicable, con
+   estado :hover) en vez de un <div> inerte. */
+.toast--notify {
+  display: flex; align-items: flex-start; gap: 10px; text-align: left;
+  cursor: pointer; font: inherit; color: inherit; width: 100%;
+}
+.toast--notify:hover { background: var(--color-panel); }
+.toast--notify__icon { font-size: 18px; line-height: 1.2; flex-shrink: 0; }
+.toast--notify__body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.toast--notify__title { font-size: 13px; color: var(--color-text-hi); line-height: 1.3; }
+.toast--notify__title b { font-weight: 600; }
+.toast--notify__task { font-size: 12px; color: var(--color-text-faint); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
 
 /* ==========================================================================

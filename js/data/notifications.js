@@ -57,8 +57,21 @@ import {
 
 export const NOTIF_VISIBLE_LIMIT = 20;
 
-export function subscribeToNotifications(uid, callback) {
+/**
+ * `onNewNotifications`, si se pasa, se llama SOLO con notificaciones que
+ * llegan de verdad mientras la sesión ya está abierta — nunca con las
+ * que ya existieran al arrancar la suscripción (el primer snapshot de
+ * Firestore siempre trae TODO el resultado actual marcado como "added",
+ * así que hace falta descartar explícitamente esa primera vuelta, o
+ * cualquiera que abriera la app con notificaciones pendientes vería un
+ * aviso emergente por cada una de golpe). Pensado para el aviso
+ * "llamativo" de notification-bell.js — el puntito de la campana, en
+ * cambio, sí debe reflejar también las que ya hubiera de antes, por eso
+ * `callback` (la lista completa) no tiene este filtro.
+ */
+export function subscribeToNotifications(uid, callback, onNewNotifications) {
   const q = query(collection(db, "notifications"), where("userId", "==", uid));
+  let isFirstSnapshot = true;
   return onSnapshot(
     q,
     (snap) => {
@@ -66,6 +79,13 @@ export function subscribeToNotifications(uid, callback) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       list.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
       callback(list);
+      if (!isFirstSnapshot && onNewNotifications) {
+        const added = snap.docChanges()
+          .filter((c) => c.type === "added")
+          .map((c) => ({ id: c.doc.id, ...c.doc.data() }));
+        if (added.length) onNewNotifications(added);
+      }
+      isFirstSnapshot = false;
       enforceNotificationLimits(list).catch((err) => console.error("enforceNotificationLimits:", err));
     },
     (err) => {
