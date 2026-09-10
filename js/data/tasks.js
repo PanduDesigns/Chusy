@@ -358,9 +358,67 @@ export function bulkAddAssignees(taskIds, uidsToAdd) {
   return runBatchedUpdate(taskIds, () => ({ assigneeIds: arrayUnion(...uidsToAdd) }));
 }
 
-/** Contrario de bulkAddAssignees (para poder deshacer una casilla marcada por error). */
+/** Contrario de bulkAddAssignees (para poder deshacer una casilla marcada por error). Nunca hace falta que transfiera el ownerId: solo QUITA, nunca dejaría fuera a quien ya estaba de todos modos si sigue marcado. Para el caso de quitar justo a quien fuera su dueña/o, ver bulkRemoveAssigneeWithOwnerTransfer. */
 export function bulkRemoveAssignees(taskIds, uidsToRemove) {
   return runBatchedUpdate(taskIds, () => ({ assigneeIds: arrayRemove(...uidsToRemove) }));
+}
+
+/**
+ * A quién le "toca" ser dueña/o de una tarea PERSONAL (sin proyecto)
+ * después de cambiarle los responsables. Filosofía (ver el historial de
+ * la v41): una tarea personal es de quien la lleve en cada momento, no
+ * un dato fijo de quién la creó — si se la asignas a otra persona, pasa
+ * a ser SU tarea personal (puede editarla, completarla Y borrarla); si
+ * se la queda alguien más aparte, no cambia nada.
+ *  - Si `currentOwnerId` sigue entre los nuevos responsables: no cambia.
+ *  - Si no: pasa a ser de quien encabece la lista nueva.
+ *  - Si se queda sin nadie asignado: se queda con quien ya la tuviera,
+ *    para no dejarla huérfana (sin nadie que pueda verla ni editarla).
+ */
+export function nextPersonalOwnerId(currentOwnerId, newAssigneeIds) {
+  if (!newAssigneeIds || !newAssigneeIds.length) return currentOwnerId;
+  if (currentOwnerId && newAssigneeIds.includes(currentOwnerId)) return currentOwnerId;
+  return newAssigneeIds[0];
+}
+
+function isPersonalTask(t) {
+  return !!t && !t.projectId && !(t.extraProjectIds || []).length;
+}
+
+/**
+ * Sustituye los responsables de varias tareas por una única persona
+ * ("Asignar a…" de la selección múltiple) — recibe las tareas enteras
+ * (no solo sus ids) porque, a diferencia de bulkUpdateTasks, aquí el
+ * ownerId de cada una depende de su estado actual: si es personal, pasa
+ * a serlo también de `uid` (ver nextPersonalOwnerId); si tiene
+ * proyecto, no se toca su ownerId — el acceso ya lo da el proyecto.
+ */
+export function bulkAssignSingle(tasks, uid) {
+  return runBatchedUpdate(tasks.map((t) => t.id), (id) => {
+    const t = tasks.find((x) => x.id === id);
+    const fields = { assigneeIds: [uid] };
+    if (isPersonalTask(t)) fields.ownerId = nextPersonalOwnerId(t.ownerId, [uid]);
+    return fields;
+  });
+}
+
+/**
+ * Igual que bulkRemoveAssignees, pero para cuando lo que se desmarca en
+ * "Agregar colaboradores" pudiera ser justo quien figuraba como dueña/o
+ * de alguna tarea personal — en ese caso, transfiere el ownerId a quien
+ * le quede asignado (ver nextPersonalOwnerId). Recibe las tareas enteras
+ * por el mismo motivo que bulkAssignSingle.
+ */
+export function bulkRemoveAssigneeWithOwnerTransfer(tasks, uid) {
+  return runBatchedUpdate(tasks.map((t) => t.id), (id) => {
+    const t = tasks.find((x) => x.id === id);
+    const fields = { assigneeIds: arrayRemove(uid) };
+    if (isPersonalTask(t) && t.ownerId === uid) {
+      const remaining = (t.assigneeIds || []).filter((a) => a !== uid);
+      fields.ownerId = nextPersonalOwnerId(uid, remaining);
+    }
+    return fields;
+  });
 }
 
 /**

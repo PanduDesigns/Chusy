@@ -20,7 +20,7 @@
 // tarea nueva todavía no tiene id al que colgar comentarios), y esos sí
 // se envían al momento — no forman parte del "draft".
 // ============================================================================
-import { createTask, updateTask, getTask } from "../data/tasks.js";
+import { createTask, updateTask, getTask, nextPersonalOwnerId } from "../data/tasks.js";
 import { notifyNewAssignees } from "../data/notifications.js";
 import { addComment, subscribeToComments } from "../data/comments.js";
 import {
@@ -756,30 +756,33 @@ export function openTaskModal({
   }
 
   /**
-   * El ownerId de una tarea nunca se ELIGE a mano en ningún control — es un
-   * dato histórico de si (y cuándo) se creó como personal, que además sirve
-   * de respaldo de permisos (quien lo tenga puede seguir borrándola más
-   * adelante aunque ya esté en un proyecto, ver firestore.rules). Solo hay
-   * que tocarlo en dos casos:
-   *  - Tarea NUEVA: si se crea desde "Mis tareas" (isPersonal), su ownerId
-   *    es quien la crea, se le añadan o no proyectos en la misma sesión
-   *    antes de guardar. Si se crea desde un proyecto, no lleva ownerId —
-   *    salvo que ese mismo proyecto se quite antes de guardar (ver abajo).
-   *  - Tarea ya EXISTENTE que se queda sin ningún proyecto (se han quitado
-   *    todos desde el selector) Y nunca tuvo ownerId: sin este respaldo, se
-   *    quedaría sin dueño/a, sin proyecto y visible solo para quien esté en
-   *    assigneeIds (o nadie, si tampoco hay responsables) — invisible para
-   *    el resto del equipo y para quien la estaba editando en cuanto
-   *    cerrara el modal. Pasa a ser personal de quien la esté guardando en
-   *    ese momento, igual que ya hace "Mover a mis tareas" en las acciones
-   *    masivas.
+   * El ownerId de una tarea nunca se ELIGE a mano en ningún control —
+   * sirve de respaldo de permisos (además de a quién ve "Mis tareas"
+   * cuando ya no está entre los responsables, ver subscribeToMyTasks).
+   * Desde la v41, para una tarea PERSONAL (sin proyecto) sigue a quien
+   * la lleve en cada momento, no es un dato fijo de quién la creó — ver
+   * nextPersonalOwnerId() y el historial de esa versión para el porqué:
+   * si se la asignas a otra persona, pasa a ser SU tarea personal
+   * (puede editarla, completarla y también borrarla, no solo lo
+   * primero). Casos:
+   *  - Tarea NUEVA: si se crea desde "Mis tareas" (isPersonal), empieza
+   *    siendo de quien la crea — salvo que, antes de guardar, ya se
+   *    haya reasignado a otra persona en el propio formulario (mismo
+   *    cálculo que para una ya existente). Si se crea desde un
+   *    proyecto, no lleva ownerId — salvo que ese mismo proyecto se
+   *    quite antes de guardar (ver el "if" de más abajo).
+   *  - Tarea ya EXISTENTE: si sigue teniendo proyecto, no se toca (el
+   *    acceso ya lo da el proyecto). Si no, se recalcula con
+   *    nextPersonalOwnerId() a partir de quién la tuviera antes
+   *    (`loadedOwnerId`, o quien la esté guardando si nunca tuvo) y de
+   *    quién se le vaya a dejar asignada ahora.
    */
   function computeOwnerIdOnSave(primaryProjectId) {
     if (isNew) {
-      return isPersonal ? currentUserProfile.uid : (primaryProjectId ? null : currentUserProfile.uid);
+      return isPersonal ? nextPersonalOwnerId(currentUserProfile.uid, draft.assigneeIds) : (primaryProjectId ? null : currentUserProfile.uid);
     }
-    if (!primaryProjectId && !loadedOwnerId) return currentUserProfile.uid;
-    return loadedOwnerId;
+    if (primaryProjectId) return loadedOwnerId;
+    return nextPersonalOwnerId(loadedOwnerId || currentUserProfile.uid, draft.assigneeIds);
   }
 
   async function handleAccept() {

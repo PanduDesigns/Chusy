@@ -17,7 +17,8 @@ import {
   bulkMoveToSectionInProject,
   bulkSetComplete,
   bulkAddAssignees,
-  bulkRemoveAssignees,
+  bulkAssignSingle,
+  bulkRemoveAssigneeWithOwnerTransfer,
   bulkMoveToMyTasks,
   bulkDeleteTasks,
   mergeTasks,
@@ -137,7 +138,7 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
           // "seguía siendo suyas", reafirmarlo no es información nueva.
           const newlyAssignedTasks = selectedTasks.filter((t) => !(t.assigneeIds || []).includes(m.uid));
           try {
-            await bulkUpdateTasks(ids, { assigneeIds: [m.uid] });
+            await bulkAssignSingle(selectedTasks, m.uid);
             showToast(`Asignadas a ${m.name}.`);
             newlyAssignedTasks.forEach((t) => {
               notifyNewAssignees({
@@ -357,7 +358,7 @@ function openCollabPopover(anchorRect, { ids, teamMembers, selectedTasks, curren
           showToast("No se pudo aplicar el cambio. Inténtalo de nuevo.", "error");
         }
       } else {
-        runAction(bulkRemoveAssignees(ids, [uid]));
+        runAction(bulkRemoveAssigneeWithOwnerTransfer(selectedTasks, uid));
       }
     });
   });

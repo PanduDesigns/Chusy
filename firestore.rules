@@ -153,13 +153,23 @@ service cloud.firestore {
       // La rama "eres uno de sus responsables" es la que permite compartir
       // una tarea personal con otra persona (asignándosela desde "Mis
       // tareas") sin meterla en ningún proyecto: esa persona pasa a poder
-      // leerla y editarla igual que su dueño/a, aunque no pueda borrarla
-      // (ver "allow delete" más abajo, sin cambios). Esta rama en
-      // concreto es la que hace que subscribeToMyTasks() (tasks.js) pueda
-      // usar un único where("assigneeIds","array-contains",uid) para
-      // TODA "Mis tareas" (de proyecto y personal a la vez) — antes hacía
-      // falta acotar esa consulta también por projectId porque esta rama
-      // todavía no existía, ver el comentario de esa función.
+      // leerla y editarla igual que su dueño/a. Desde la v41, el ownerId de
+      // una tarea PERSONAL sigue a quien la lleve (ver tasks.js,
+      // nextPersonalOwnerId) — así que, en el caso normal (un solo
+      // responsable), esa persona también pasa a cumplir la rama de aquí
+      // abajo, "resource.data.ownerId == request.auth.uid", y puede
+      // borrarla igual que antes solo podía su dueño/a original. La única
+      // vez que un/a responsable de una tarea personal NO puede borrarla es
+      // si hay más de una persona asignada a la vez (co-asignación): el
+      // ownerId se queda con quien ya lo fuera mientras esa persona siga
+      // entre los responsables, así que el resto de colaboradores puede
+      // leerla y editarla, pero no borrarla — solo su dueño/a, quien la
+      // creó, o un admin. Esta rama en concreto es la que hace que
+      // subscribeToMyTasks() (tasks.js) pueda usar un único
+      // where("assigneeIds","array-contains",uid) para TODA "Mis tareas"
+      // (de proyecto y personal a la vez) — antes hacía falta acotar esa
+      // consulta también por projectId porque esta rama todavía no
+      // existía, ver el comentario de esa función.
       allow read: if isActiveUser() &&
         (resource.data.projectId != null ||
          resource.data.ownerId == request.auth.uid ||
