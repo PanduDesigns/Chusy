@@ -37,6 +37,18 @@ rules_version = '2';
 //    `userId`. Cualquier cuenta activa puede CREAR una para otra persona
 //    (así avisa "te han asignado una tarea"), identificándose a sí misma
 //    como `fromUserId` — no puede crear un aviso a nombre de otra.
+//  - meta/quickCreate: `{enabled}` — si el botón "Nueva cabina" (apartado 3,
+//    "Creación Rápida") está habilitado para todo el equipo o reservado
+//    solo a administradores. Lectura para cualquier cuenta activa (el
+//    topbar de cualquier proyecto necesita saberlo para pintar el botón),
+//    escritura solo admin.
+//  - quickCreateProducts/{id}: los "productos" que se pueden montar desde
+//    "Nueva cabina" (tareas base + grupos de opciones con sus propias
+//    tareas, ver apartado 3 y el modelo de datos). Lectura para cualquier
+//    cuenta activa (hace falta para poder usarlos desde el botón, aunque
+//    esté deshabilitado para todo el mundo salvo admins); solo un admin
+//    puede crear, editar o borrar un producto — es contenido de
+//    configuración del equipo, no de un proyecto concreto.
 //
 // Cuentas eliminadas: "Eliminar usuario" (panel de administración) NO
 // borra el documento de Firestore ni la cuenta de Firebase Auth (borrar la
@@ -139,6 +151,13 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ---- Creación Rápida: ¿el botón "Nueva cabina" está abierto a todo el
+    // equipo, o reservado a admins? (apartado 3 del README) ----
+    match /meta/quickCreate {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
     // ---- Proyectos (visibles para todo el equipo) ----
     match /projects/{projectId} {
       allow read: if isActiveUser();
@@ -223,6 +242,21 @@ service cloud.firestore {
     match /tags/{tagId} {
       allow read: if isActiveUser();
       allow write: if isActiveUser();
+    }
+
+    // ---- Creación Rápida: productos configurables (tareas base + grupos
+    // de opciones, cada uno con las suyas — apartado 3 del README). Es
+    // contenido de configuración del equipo, como los campos personalizados
+    // o las secciones de un proyecto, pero sin proyecto propio del que
+    // colgar, así que va en su propia colección de nivel superior. Lectura
+    // abierta a cualquier cuenta activa (hace falta para poder USAR un
+    // producto desde el botón "Nueva cabina", que cualquiera puede llegar a
+    // pulsar si un admin lo habilita); solo un admin puede crear, editar o
+    // borrar un producto — gestionarlos es cosa de "Creación Rápida", el
+    // panel escondido en el menú de usuario.
+    match /quickCreateProducts/{productId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin();
     }
   }
 }

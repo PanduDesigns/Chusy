@@ -9,6 +9,7 @@ import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
 import { subscribeToNotifications } from "./data/notifications.js";
+import { subscribeToQuickCreateConfig } from "./data/quick-create.js";
 import { updateNotifBell, openNotifPanel, showAssignedTaskToast } from "./components/notification-bell.js";
 import { renderSidebar } from "./components/sidebar.js";
 import { renderTopbar } from "./components/topbar.js";
@@ -27,6 +28,8 @@ import { openSearchModal } from "./components/search-modal.js";
 import { openAccountModal } from "./components/account-modal.js";
 import { openTeamAdminModal } from "./components/team-admin-modal.js";
 import { openAsanaImportModal } from "./components/asana-import-modal.js";
+import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal.js";
+import { openQuickCreateModal } from "./components/quick-create-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { removeBulkToolbar } from "./components/bulk-toolbar.js";
 import { showToast, getTaskSectionForProject } from "./utils.js";
@@ -62,6 +65,11 @@ let sortState = { column: null, direction: "asc" };
 let globalTasksByProject = {}; // { [projectId]: tasks[] } — línea de tiempo global y buscador
 let notifications = [];
 let unsubGlobalTasks = {}; // { [projectId]: unsubscribeFn }
+// Si el botón "Nueva cabina" (topbar de un proyecto, ver Creación Rápida en
+// el menú de usuario) está abierto a todo el equipo o reservado a admins —
+// en tiempo real, para que se note al momento en cualquier proyecto abierto
+// si un admin lo activa desde otra sesión (ver bootstrap()).
+let quickCreateEnabled = false;
 
 // Minimizar la barra lateral es una preferencia de este navegador (no de la
 // cuenta): cada dispositivo puede tenerla como prefiera.
@@ -164,6 +172,7 @@ let unsubTags = null;
 let unsubCurrentProject = null;
 let unsubCurrentTasks = null;
 let unsubNotifications = null;
+let unsubQuickCreateConfig = null;
 let hasRestoredLocation = false; // solo se restaura la sección al arrancar una vez por sesión — ver restoreLastLocation()
 
 function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
@@ -196,13 +205,14 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications, unsubQuickCreateConfig].forEach((fn) => fn && fn());
   Object.values(unsubGlobalTasks).forEach((fn) => fn && fn());
-  unsubProjects = unsubArchivedProjects = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = null;
+  unsubProjects = unsubArchivedProjects = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = unsubQuickCreateConfig = null;
   unsubGlobalTasks = {}; globalTasksByProject = {};
   projects = []; archivedProjects = []; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
   activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
+  quickCreateEnabled = false;
   hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
   removeBulkToolbar();
   notifBellEl.hidden = true;
@@ -230,6 +240,9 @@ function bootstrap() {
 
   if (unsubTags) unsubTags();
   unsubTags = subscribeToAllTags((tags) => { tagsRegistry = tags; renderShell(); });
+
+  if (unsubQuickCreateConfig) unsubQuickCreateConfig();
+  unsubQuickCreateConfig = subscribeToQuickCreateConfig((cfg) => { quickCreateEnabled = !!cfg.enabled; renderShell(); });
 
   if (unsubMyTasks) unsubMyTasks();
   unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; renderShell(); });
@@ -412,7 +425,6 @@ function renderShell() {
     isMyTasksActive: mode === "mytasks",
     isTimelineActive: mode === "timeline",
     isArchiveActive: mode === "archive",
-    isMetricsActive: mode === "metrics",
     myTasksCount: myTasks.filter((t) => !t.isComplete).length,
     userProfile: currentUser,
     isCollapsed: sidebarCollapsed,
@@ -426,6 +438,7 @@ function renderShell() {
     onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
     onOpenAsanaImport: () => openAsanaImportModal({ teamMembers, currentUser }),
+    onOpenQuickCreateAdmin: () => openQuickCreateAdminModal({ currentUser, quickCreateEnabled }),
     onCreateProject: () =>
       openProjectModal({
         onCreate: async (data) => {
@@ -556,6 +569,9 @@ function renderProjectTopbar() {
     onViewChange: (v) => { currentView = v; saveLastLocation({ mode: "project", projectId: currentProjectId, view: v }); renderProjectTopbar(); renderMain(); },
     onNewTask: () => openNewProjectTask(currentProject.sections[0]?.id),
     onToggleSidebar: () => sidebarEl.classList.toggle("is-open"),
+    quickCreateEnabled,
+    isAdmin: currentUser.role === "admin",
+    onOpenQuickCreate: () => openQuickCreateModal({ project: currentProject, currentUser, quickCreateEnabled }),
   });
 }
 

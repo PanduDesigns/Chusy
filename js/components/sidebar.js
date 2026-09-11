@@ -3,6 +3,13 @@
 // Se puede minimizar a una barra de iconos con el botón de la esquina
 // (redondo, en el borde derecho) — queda como preferencia de este
 // navegador, no afecta a nadie más ni a otras sesiones.
+//
+// El menú que se abre al clicar el propio usuario (pie de la barra) aloja,
+// además de "Mi cuenta" y las herramientas de administración de siempre,
+// dos entradas más solo para admins: "Métricas" (antes un botón fijo aparte
+// en esta misma barra) y "Creación Rápida" — el panel, a propósito
+// "escondido" aquí y en ningún otro sitio, para habilitar/configurar el
+// botón "Nueva cabina" de los proyectos (ver quick-create-admin-modal.js).
 // ============================================================================
 import { initials, colorFromString, escapeHtml, projectBadgeHtml } from "../utils.js";
 import { openContextMenu } from "./context-menu.js";
@@ -10,7 +17,7 @@ import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/p
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 import { openEditProjectModal } from "./edit-project-modal.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isMetricsActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenAsanaImport, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenAsanaImport, onOpenQuickCreateAdmin, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const items = projects.map((p) => `
@@ -49,11 +56,6 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       <span class="sidebar__item-icon">🗄️</span>
       <span class="sidebar__item-name sidebar__label">Archivo</span>
     </button>
-    ${userProfile.role === "admin" ? `
-    <button class="sidebar__item sidebar__item--pinned${isMetricsActive ? " is-active" : ""}" id="btn-metrics" title="Métricas">
-      <span class="sidebar__item-icon">📊</span>
-      <span class="sidebar__item-name sidebar__label">Métricas</span>
-    </button>` : ""}
 
     <span class="sidebar__section-label sidebar__label">Proyectos</span>
     <div class="sidebar__list">
@@ -114,8 +116,6 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   container.querySelector("#btn-my-tasks").addEventListener("click", onSelectMyTasks);
   container.querySelector("#btn-timeline").addEventListener("click", onSelectTimeline);
   container.querySelector("#btn-archive").addEventListener("click", onSelectArchive);
-  const metricsBtn = container.querySelector("#btn-metrics");
-  if (metricsBtn) metricsBtn.addEventListener("click", onSelectMetrics);
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
   container.querySelector("#btn-toggle-collapse").addEventListener("click", onToggleCollapse);
@@ -126,6 +126,12 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     if (userProfile.role === "admin") {
       items.push({ label: "Administrar equipo", icon: "🛠️", onClick: onOpenTeamAdmin });
       items.push({ label: "Importar desde Asana", icon: "📥", onClick: onOpenAsanaImport });
+      items.push({ label: "Métricas", icon: "📊", onClick: onSelectMetrics });
+      // "Secreta" en el sentido de que solo vive aquí: nadie que no sea
+      // admin ve siquiera esta entrada, y no hay ningún botón fijo en el
+      // resto de la interfaz que la señale (a diferencia de Métricas,
+      // arriba, que hasta la v41 sí tenía uno) — ver quick-create-admin-modal.js.
+      items.push({ label: "Creación Rápida", icon: "⚡", onClick: onOpenQuickCreateAdmin });
     }
     items.push({ divider: true });
     items.push({ label: "Cerrar sesión", icon: "⏻", danger: true, onClick: onLogout });

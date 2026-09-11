@@ -1524,3 +1524,28 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .notif-row__text b { font-weight: 600; }
 .notif-row__project { color: var(--color-text-faint); font-weight: 400; }
 .notif-row__time { font-size: 11px; color: var(--color-text-faint); margin-top: 2px; }
+
+/* ==========================================================================
+   Creación Rápida — panel de admin (quick-create-admin-modal.js) y selector
+   "Nueva cabina" de un proyecto (quick-create-modal.js). Ver el apartado 3
+   del README.
+   ========================================================================== */
+/* Cajas anidadas del panel de admin: un grupo de opciones contiene varias
+   opciones, cada una con su propia lista de tareas — el borde izquierdo
+   marca visualmente ese anidamiento sin necesitar sangrías de verdad. */
+.qc-group-box { border: 1px solid var(--color-line); border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.qc-option-box { border-left: 2px solid var(--color-line-bright); padding-left: 12px; display: flex; flex-direction: column; gap: 8px; }
+.qc-task-row { background: var(--color-void-raised); border: 1px solid var(--color-line); border-radius: var(--radius-sm); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.qc-task-row .field__input { padding: 6px 10px; font-size: 13px; }
+
+/* Filas de opción del selector "Nueva cabina" — radio (grupo "Una opción")
+   o checkbox (grupo "Varias opciones"), decidido por el propio input. */
+.qc-option-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border-radius: var(--radius-sm); cursor: pointer; transition: var(--transition-fast); }
+.qc-option-row:hover { background: var(--color-panel-raised); }
+.qc-option-row input[type="radio"], .qc-option-row input[type="checkbox"] { accent-color: var(--color-signal); margin-top: 2px; flex-shrink: 0; width: 15px; height: 15px; cursor: pointer; }
+
+/* Fila de "elegir un producto" (paso 1 del selector) — mismo espíritu que
+   .metrics-overdue-row (fila clicable con borde que se ilumina al pasar el
+   ratón), con la insignia icono+color de project-badge en vez de un punto. */
+.qc-product-pick { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--color-panel); border: 1px solid var(--color-line); border-radius: var(--radius-sm); padding: 10px 12px; transition: var(--transition-fast); }
+.qc-product-pick:hover { border-color: var(--color-line-bright); background: var(--color-panel-raised); }
