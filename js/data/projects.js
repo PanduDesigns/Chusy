@@ -33,7 +33,13 @@ export async function createProject({ name, description, color, icon, creatorUid
     description: description || "",
     color: color || "#FCD000",
     icon: icon || "📁",
-    sections: sections && sections.length ? sections : DEFAULT_SECTIONS,
+    // Array.isArray() a propósito, no "sections && sections.length": con
+    // sections.length===0 (el usuario quitó las 3 sugeridas de serie a
+    // mano en el modal, a propósito) ese && daba falsy y esto caía igual
+    // en DEFAULT_SECTIONS — el proyecto se creaba con secciones aunque se
+    // hubieran quitado todas. Solo hay que aplicar el valor por defecto
+    // cuando de verdad no se ha proporcionado nada (undefined/null).
+    sections: Array.isArray(sections) ? sections : DEFAULT_SECTIONS,
     memberIds: [creatorUid],
     createdBy: creatorUid,
     createdAt: serverTimestamp(),

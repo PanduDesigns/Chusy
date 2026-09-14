@@ -5,9 +5,11 @@
 // para montar, de un par de clics, un conjunto de tareas dentro de un
 // proyecto — pensada para procesos que se repiten con variantes (p.ej.
 // "Cabina de pintura", con un grupo "Tipo de flujo" que añade unas tareas u
-// otras según la opción elegida). Ver el apartado 3 del README ("Creación
-// Rápida") para el porqué y el apartado 5 para la forma exacta del
-// documento.
+// otras según la opción elegida). Cada tarea de la plantilla puede llevar
+// opcionalmente unos "días necesarios" (`durationDays`, número o null), que
+// quick-create-modal.js usa para calcular su fecha límite al insertar el
+// producto de verdad. Ver el apartado 3 del README ("Creación Rápida") para
+// el porqué y el apartado 5 para la forma exacta del documento.
 //
 // Ni los productos ni el ajuste de habilitación (meta/quickCreate) dependen
 // de ningún proyecto concreto — son configuración del equipo, como los
@@ -91,15 +93,17 @@ export function setQuickCreateEnabled(enabled) {
 
 /**
  * A partir de un producto y las opciones marcadas en cada uno de sus
- * grupos, calcula la lista final de tareas a crear: las tareas base
- * (siempre) más las de cada opción elegida. `selections` tiene la forma
- * `{ [groupId]: Set(optionId) }` — un grupo de selección única
+ * grupos, calcula la lista final de tareas de la PLANTILLA a crear: las
+ * tareas base (siempre) más las de cada opción elegida — cada una tal cual
+ * está guardada en el producto, `durationDays` incluido. `selections` tiene
+ * la forma `{ [groupId]: Set(optionId) }` — un grupo de selección única
  * (`selectionType: "single"`) nunca llega a tener más de un elemento en su
  * Set (lo garantiza quick-create-modal.js al marcar las opciones), pero se
  * lee igual como Set en los dos casos para no bifurcar esta función por
- * tipo de grupo. Pura (no toca Firestore): la usa tanto la vista previa en
- * vivo del propio selector como, justo antes de crear las tareas de
- * verdad, quien llama a createTasksFromResolvedList() más abajo.
+ * tipo de grupo. Pura (no toca Firestore) y no sabe nada de fechas ni de
+ * responsables — eso lo añade quick-create-modal.js por encima, con la
+ * "tarea principal" (que no viene de ninguna plantilla) y las fechas
+ * calculadas a partir de la fecha de entrega — ver ese archivo.
  */
 export function resolveQuickCreateTasks(product, selections) {
   const tasks = [...(product.baseTasks || [])];
@@ -116,21 +120,22 @@ export function resolveQuickCreateTasks(product, selections) {
 const BATCH_CHUNK = 450; // por debajo del límite de 500 escrituras/lote de Firestore — mismo criterio que tasks.js
 
 /**
- * Crea una tarea de proyecto por cada entrada de `resolvedTasks` (ver
- * resolveQuickCreateTasks), todas en `sectionId` dentro de `projectId`. Sin
- * responsables ni etiquetas (el producto no los define — son tareas
- * "en blanco" listas para repartir) y con prioridad "media", igual que
- * cualquier tarea nueva creada a mano. El `order` se asigna creciente
- * (no todas con el mismo `Date.now()`) para que, si se crean varias de
- * golpe, salgan en Lista/Tablero en el mismo orden en que aparecían dentro
- * del producto — mismo motivo que ya documenta el campo `order` en
- * tasks.js.
+ * Crea una tarea de proyecto por cada entrada de `tasks` — ya resueltas del
+ * todo por quick-create-modal.js antes de llamar aquí: título, descripción,
+ * `startDate`/`dueDate` (strings "YYYY-MM-DD" o null, igual que guarda el
+ * propio modal de tarea) y `assigneeIds` ya calculados a partir de la
+ * asignación rápida. Esta función no sabe nada de productos, plantillas ni
+ * fechas — solo escribe lo que se le pasa. Todas en `sectionId` dentro de
+ * `projectId`, con prioridad "media" igual que cualquier tarea nueva creada
+ * a mano. En lotes de como mucho 450 (`writeBatch`, mismo límite que ya
+ * respeta tasks.js), con `order` creciente para que salgan en Lista/Tablero
+ * en el mismo orden en que venían en `tasks` (la tarea principal primero).
  */
-export async function createTasksFromResolvedList(resolvedTasks, { projectId, sectionId, createdBy }) {
+export async function createTasksFromQuickCreateInsertion(tasks, { projectId, sectionId, createdBy }) {
   const baseOrder = Date.now();
-  for (let i = 0; i < resolvedTasks.length; i += BATCH_CHUNK) {
+  for (let i = 0; i < tasks.length; i += BATCH_CHUNK) {
     const batch = writeBatch(db);
-    resolvedTasks.slice(i, i + BATCH_CHUNK).forEach((t, j) => {
+    tasks.slice(i, i + BATCH_CHUNK).forEach((t, j) => {
       const ref = doc(collection(db, "tasks"));
       batch.set(ref, {
         projectId,
@@ -140,9 +145,9 @@ export async function createTasksFromResolvedList(resolvedTasks, { projectId, se
         extraSections: {},
         title: t.title,
         description: t.description || "",
-        assigneeIds: [],
-        dueDate: null,
-        startDate: null,
+        assigneeIds: t.assigneeIds || [],
+        dueDate: t.dueDate || null,
+        startDate: t.startDate || null,
         priority: "media",
         tags: [],
         dependsOn: [],
@@ -160,5 +165,5 @@ export async function createTasksFromResolvedList(resolvedTasks, { projectId, se
     });
     await batch.commit();
   }
-  return resolvedTasks.length;
+  return tasks.length;
 }

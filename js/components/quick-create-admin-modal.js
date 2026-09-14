@@ -37,7 +37,7 @@ import {
 } from "../data/quick-create.js";
 
 function blankTask() {
-  return { id: uid(), title: "", description: "" };
+  return { id: uid(), title: "", description: "", durationDays: null };
 }
 function blankOption() {
   return { id: uid(), name: "", tasks: [] };
@@ -114,14 +114,16 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
   const footerEl = overlay.querySelector("#qc-footer");
 
   function close() {
-    if (state.busy) return;
-    document.removeEventListener("keydown", onKeydown);
+    // Ni `state.busy` bloquea esto ni hay cierre por clic fuera / Escape
+    // más abajo — solo la X, "Cancelar" o guardar. Perder un producto a
+    // medio rellenar por un clic sin querer (o quedarse con la X sin
+    // reaccionar a media operación) fue justo el bug que motivó este
+    // cambio: si algo llegara a quedarse colgado a media escritura, la X
+    // tiene que poder sacar de aquí igualmente — la escritura en Firestore,
+    // si estaba en marcha, sigue su curso en segundo plano de todos modos.
     overlay.remove();
   }
-  function onKeydown(e) { if (e.key === "Escape") close(); }
-  document.addEventListener("keydown", onKeydown);
   overlay.querySelector("#close").addEventListener("click", close);
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
 
   function render() {
     bodyEl.innerHTML = renderBody();
@@ -197,7 +199,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
 
       <div>
         <span class="field__label" style="font-size:13px;">Tareas base</span>
-        <p class="field__hint">Se crean siempre que se use este producto, sin depender de ninguna opción elegida.</p>
+        <p class="field__hint">Se crean siempre que se use este producto, sin depender de ninguna opción elegida. "Días necesarios" es opcional: al insertar el producto en un proyecto, se usa para calcular la fecha límite de cada tarea a partir de la fecha de inserción.</p>
         <div id="qc-base-tasks" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
           ${p.baseTasks.map((t) => taskRowHtml(t, { kind: "base" })).join("") || emptyTasksHint()}
         </div>
@@ -222,13 +224,17 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
 
   function taskRowHtml(t, { kind, groupId, optionId }) {
     const dataAttrs = kind === "base" ? `data-base-task="${t.id}"` : `data-group="${groupId}" data-option="${optionId}" data-opt-task="${t.id}"`;
+    const days = t.durationDays === null || t.durationDays === undefined ? "" : t.durationDays;
     return `
       <div class="qc-task-row" ${dataAttrs}>
         <div style="display:flex;gap:8px;align-items:center;">
           <input class="field__input qc-task-title" value="${escapeHtml(t.title)}" placeholder="Título de la tarea" style="flex:1;">
           <button type="button" class="subtask-row__remove qc-remove-task" title="Eliminar tarea">✕</button>
         </div>
-        <input class="field__input qc-task-desc" value="${escapeHtml(t.description || "")}" placeholder="Descripción (opcional)">
+        <div style="display:flex;gap:8px;">
+          <input class="field__input qc-task-desc" value="${escapeHtml(t.description || "")}" placeholder="Descripción (opcional)" style="flex:1;">
+          <input class="field__input qc-task-days" type="number" min="0" step="1" value="${days}" placeholder="Días" title="Días necesarios para completarla, contados desde que se inserta el producto en un proyecto" style="width:70px;flex:none;">
+        </div>
       </div>`;
   }
 
@@ -403,6 +409,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
       if (!task) return;
       row.querySelector(".qc-task-title").addEventListener("input", (e) => { task.title = e.target.value; });
       row.querySelector(".qc-task-desc").addEventListener("input", (e) => { task.description = e.target.value; });
+      row.querySelector(".qc-task-days").addEventListener("input", (e) => { task.durationDays = e.target.value === "" ? null : Math.max(0, parseInt(e.target.value, 10) || 0); });
       row.querySelector(".qc-remove-task").addEventListener("click", () => {
         state.editingProduct.baseTasks = state.editingProduct.baseTasks.filter((t) => t.id !== taskId);
         render();
@@ -456,6 +463,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
           if (!task) return;
           row.querySelector(".qc-task-title").addEventListener("input", (e) => { task.title = e.target.value; });
           row.querySelector(".qc-task-desc").addEventListener("input", (e) => { task.description = e.target.value; });
+          row.querySelector(".qc-task-days").addEventListener("input", (e) => { task.durationDays = e.target.value === "" ? null : Math.max(0, parseInt(e.target.value, 10) || 0); });
           row.querySelector(".qc-remove-task").addEventListener("click", () => {
             option.tasks = option.tasks.filter((t) => t.id !== taskId);
             render();
@@ -479,7 +487,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
       icon: p.icon,
       color: p.color,
       baseTasks: p.baseTasks
-        .map((t) => ({ id: t.id, title: t.title.trim(), description: (t.description || "").trim() }))
+        .map((t) => ({ id: t.id, title: t.title.trim(), description: (t.description || "").trim(), durationDays: t.durationDays ?? null }))
         .filter((t) => t.title),
       groups: p.groups
         .map((g) => ({
@@ -491,7 +499,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
               id: o.id,
               name: o.name.trim(),
               tasks: (o.tasks || [])
-                .map((t) => ({ id: t.id, title: t.title.trim(), description: (t.description || "").trim() }))
+                .map((t) => ({ id: t.id, title: t.title.trim(), description: (t.description || "").trim(), durationDays: t.durationDays ?? null }))
                 .filter((t) => t.title),
             }))
             .filter((o) => o.name),

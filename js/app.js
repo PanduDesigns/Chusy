@@ -571,7 +571,7 @@ function renderProjectTopbar() {
     onToggleSidebar: () => sidebarEl.classList.toggle("is-open"),
     quickCreateEnabled,
     isAdmin: currentUser.role === "admin",
-    onOpenQuickCreate: () => openQuickCreateModal({ project: currentProject, currentUser, quickCreateEnabled }),
+    onOpenQuickCreate: () => openQuickCreateModal({ project: currentProject, currentUser, quickCreateEnabled, teamMembers }),
   });
 }
 
