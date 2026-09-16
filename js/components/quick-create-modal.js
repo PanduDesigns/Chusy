@@ -30,7 +30,7 @@
 //
 // Nada de esto persiste nada hasta pulsar "Crear tareas".
 // ============================================================================
-import { el, escapeHtml, badgeHtml, showToast, uid, toDate, toDateInputValue, addDays, colorFromString, initials } from "../utils.js";
+import { el, escapeHtml, badgeHtml, showToast, uid, toDate, toDateInputValue, addDays, colorFromString, initials, PRIORITY_LABELS } from "../utils.js";
 import { getQuickCreateProducts, resolveQuickCreateTasks, createTasksFromQuickCreateInsertion } from "../data/quick-create.js";
 import { setProjectSections } from "../data/projects.js";
 import { openQuickCreateAdminModal } from "./quick-create-admin-modal.js";
@@ -219,7 +219,8 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
   function previewTaskLabel(t) {
     if (t.isMain) return `<strong style="color:var(--color-text-hi);">${escapeHtml(t.title)}</strong> <span style="color:var(--color-text-faint);">— tarea principal</span>`;
     const dur = t.durationDays === null || t.durationDays === undefined ? "" : ` <span style="color:var(--color-text-faint);">(${t.durationDays}d)</span>`;
-    return `${escapeHtml(t.title)}${dur}`;
+    const prio = t.priority && t.priority !== "media" ? ` <span style="color:var(--color-text-faint);">· ${PRIORITY_LABELS[t.priority] || t.priority}</span>` : "";
+    return `${escapeHtml(t.title)}${dur}${prio}`;
   }
 
   function groupPickerHtml(g) {
@@ -431,6 +432,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       startDate: insertionDateStr,
       dueDate: toDateInputValue(computeTaskDueDate(insertionDate, deliveryDate, t.durationDays)),
       assigneeIds: assignedUidsFor(t.id),
+      priority: t.priority || "media",
     }));
     const allTasks = [mainTask, ...restTasks];
 

@@ -1549,3 +1549,14 @@ body.is-col-resizing * { cursor: col-resize !important; }
    ratón), con la insignia icono+color de project-badge en vez de un punto. */
 .qc-product-pick { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--color-panel); border: 1px solid var(--color-line); border-radius: var(--radius-sm); padding: 10px 12px; transition: var(--transition-fast); }
 .qc-product-pick:hover { border-color: var(--color-line-bright); background: var(--color-panel-raised); }
+
+/* Arrastrar para reordenar productos/grupos/opciones en el panel de admin
+   (quick-create-admin-modal.js) — tirador dedicado en vez de la fila
+   entera arrastrable, porque estas filas llevan campos de texto de verdad
+   y arrastrar la fila completa estorbaría al seleccionar texto dentro. */
+.qc-drag-handle { cursor: grab; color: var(--color-text-faint); font-size: 13px; padding: 2px 6px; flex-shrink: 0; user-select: none; line-height: 1; }
+.qc-drag-handle:hover { color: var(--color-text-lo); }
+.qc-drag-handle:active { cursor: grabbing; }
+.qc-draggable-row.is-dragging-item { opacity: 0.4; }
+.qc-draggable-row.is-drop-before { border-top: 2px solid var(--color-signal); }
+.qc-draggable-row.is-drop-after { border-bottom: 2px solid var(--color-signal); }
