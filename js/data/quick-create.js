@@ -161,15 +161,18 @@ const BATCH_CHUNK = 450; // por debajo del límite de 500 escrituras/lote de Fir
  * todo por quick-create-modal.js antes de llamar aquí: título, descripción,
  * `startDate`/`dueDate` (strings "YYYY-MM-DD" o null, igual que guarda el
  * propio modal de tarea), `assigneeIds` ya calculados a partir de la
- * asignación rápida y `priority` (una de las cuatro válidas, o ausente —
- * entonces "media", igual que cualquier tarea nueva creada a mano). Esta
- * función no sabe nada de productos, plantillas ni fechas — solo escribe lo
- * que se le pasa. Todas en `sectionId` dentro de `projectId`. En lotes de
- * como mucho 450 (`writeBatch`, mismo límite que ya respeta tasks.js), con
- * `order` creciente para que salgan en Lista/Tablero en el mismo orden en
- * que venían en `tasks` (la tarea principal primero).
+ * asignación rápida, `priority` (una de las cuatro válidas, o ausente —
+ * entonces "media") y `sectionId` PROPIO de cada tarea (ya no un único
+ * `sectionId` compartido para todo el lote: desde que "Nueva cabina" deja
+ * elegir varios productos en una misma pasada, cada uno puede ir a una
+ * sección distinta, así que cada tarea trae ya resuelta la suya). Esta
+ * función no sabe nada de productos, plantillas ni fechas — solo escribe
+ * lo que se le pasa. En lotes de como mucho 450 (`writeBatch`, mismo
+ * límite que ya respeta tasks.js), con `order` creciente para que salgan
+ * en Lista/Tablero en el mismo orden en que venían en `tasks` (la tarea
+ * principal de cada producto, antes que las suyas).
  */
-export async function createTasksFromQuickCreateInsertion(tasks, { projectId, sectionId, createdBy }) {
+export async function createTasksFromQuickCreateInsertion(tasks, { projectId, createdBy }) {
   const baseOrder = Date.now();
   for (let i = 0; i < tasks.length; i += BATCH_CHUNK) {
     const batch = writeBatch(db);
@@ -178,7 +181,7 @@ export async function createTasksFromQuickCreateInsertion(tasks, { projectId, se
       batch.set(ref, {
         projectId,
         ownerId: null,
-        sectionId: sectionId || null,
+        sectionId: t.sectionId || null,
         extraProjectIds: [],
         extraSections: {},
         title: t.title,

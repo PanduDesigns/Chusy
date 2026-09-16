@@ -4,45 +4,56 @@
 // administradores hasta que uno de ellos active "Nueva cabina" para todo el
 // equipo desde el panel "Creación Rápida" (quick-create-admin-modal.js).
 //
-// Pantallas dentro del mismo modal:
-//  1. Elegir un producto (si solo hay uno configurado, igualmente hay que
-//     elegirlo — no se salta el paso, así siempre se ve de qué producto se
-//     trata antes de tocar nada).
-//  2. Configurarlo: nombre de esta instancia concreta del producto (con la
-//     que se crea la "tarea principal", ver más abajo), marcar una opción
-//     (grupos "Una opción") o cualquier número (grupos "Varias opciones")
-//     de cada grupo, fecha de entrega, sección de destino (o crear una
-//     nueva con el nombre de esta instancia) y, opcionalmente, a quién se
-//     le asignan cuáles de las tareas resultantes — todo con una vista
-//     previa en vivo de qué se va a crear.
-//  3. Confirmar — crea las tareas y cierra.
+// Asistente de tres pasos (uno o varios productos de una sola pasada):
+//  1. 'pick' — elegir uno o VARIOS productos (casillas, no una sola
+//     elección). "Continuar" lleva al primero.
+//  2. 'configure' — UN producto a la vez, "Producto X de Y" si hay más de
+//     uno: nombre de esta instancia concreta (con el que se crea la
+//     "tarea principal", ver más abajo), marcar sus opciones, fecha de
+//     entrega y sección de destino (o crear una nueva con ese nombre).
+//     "Siguiente producto" avanza al que toque; en el último, "Continuar"
+//     lleva al paso 3. Cada producto guarda su propia configuración en
+//     `state.configs[productId]`, así que ir hacia atrás con "← Atrás" no
+//     pierde lo ya rellenado de otro producto.
+//  3. 'assign' — asignación rápida (opcional), UNA sola vez para TODAS las
+//     tareas de TODOS los productos elegidos a la vez, en vez de repetirla
+//     producto por producto. "Crear tareas" los crea todos de golpe.
 //
-// La "tarea principal": además de las tareas de la plantilla (base + las de
-// las opciones elegidas), SIEMPRE se crea una tarea adicional, la primera
-// de todas, con el nombre que se le haya dado a esta instancia del
-// producto — pensada como el "contenedor" de todo el conjunto. Lleva de
+// La "tarea principal": por cada producto elegido (no una sola para todo
+// el conjunto), además de las tareas de su plantilla (base + las de las
+// opciones elegidas), SIEMPRE se crea una tarea adicional, la primera de
+// las suyas, con el nombre que se le haya dado a esa instancia. Lleva de
 // fecha de inicio la de hoy (cuando se inserta) y de fecha final la propia
-// fecha de entrega. El resto de tareas también empiezan hoy, pero su fecha
-// final sale de sus "días necesarios" (definidos en la plantilla, ver
-// quick-create-admin-modal.js) contados desde hoy — sin pasarse nunca de la
-// fecha de entrega, y usando la fecha de entrega directamente si no tienen
-// días marcados (ver computeTaskDueDate() más abajo).
+// fecha de entrega DE ESE PRODUCTO. El resto de sus tareas también
+// empiezan hoy, pero su fecha final sale de sus "días necesarios"
+// (definidos en la plantilla, ver quick-create-admin-modal.js) contados
+// desde hoy — sin pasarse nunca de la fecha de entrega de ese producto, y
+// usando la fecha de entrega directamente si no tienen días marcados (ver
+// computeTaskDueDate() más abajo). Como cada producto puede tener su
+// propia sección de destino, cada tarea se crea llevando ya su propio
+// `sectionId` resuelto — createTasksFromQuickCreateInsertion() (en
+// quick-create.js) ya no recibe una sección compartida para todo el lote.
 //
-// Nada de esto persiste nada hasta pulsar "Crear tareas".
+// Nada de esto persiste nada hasta pulsar "Crear tareas", en el último paso.
 // ============================================================================
 import { el, escapeHtml, badgeHtml, showToast, uid, toDate, toDateInputValue, addDays, colorFromString, initials, PRIORITY_LABELS } from "../utils.js";
 import { getQuickCreateProducts, resolveQuickCreateTasks, createTasksFromQuickCreateInsertion } from "../data/quick-create.js";
 import { setProjectSections } from "../data/projects.js";
 import { openQuickCreateAdminModal } from "./quick-create-admin-modal.js";
 
-const MAIN_TASK_ID = "__main__"; // id sintético de la "tarea principal" — uid() nunca genera esto, no puede chocar con una tarea real de la plantilla
 const NEW_SECTION_VALUE = "__new_section__"; // valor especial del desplegable de sección para "crear una nueva con este nombre"
+
+/** Id sintético de la "tarea principal" de un producto — uid() nunca genera esto, no puede chocar con una tarea real de ninguna plantilla. Una por producto (no una sola para todo el conjunto), de ahí la función en vez de una constante suelta. */
+function mainTaskIdFor(productId) {
+  return `__main__:${productId}`;
+}
 
 /**
  * Fecha límite de una tarea (no la principal) a partir de la fecha de
- * inserción, la de entrega y sus "días necesarios" (o null si no tiene).
- * Sin duración marcada, directamente la fecha de entrega. Con duración,
- * inserción + esos días — pero nunca más allá de la fecha de entrega.
+ * inserción, la de entrega (de SU producto) y sus "días necesarios" (o
+ * null si no tiene). Sin duración marcada, directamente la fecha de
+ * entrega. Con duración, inserción + esos días — pero nunca más allá de
+ * la fecha de entrega.
  */
 function computeTaskDueDate(insertionDate, deliveryDate, durationDays) {
   if (durationDays === null || durationDays === undefined) return deliveryDate;
@@ -60,13 +71,13 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
   const state = {
     loading: true,
     products: [],
-    selectedProductId: null,
-    selections: {}, // { [groupId]: Set(optionId) }
-    instanceName: "",
-    deliveryDate: "",
-    sectionId: sortedSections[0]?.id || "",
+    step: "pick", // 'pick' | 'configure' | 'assign'
+    selectedProductIds: [], // en el orden en que se han ido marcando
+    configIndex: 0, // qué producto de selectedProductIds se está configurando ahora mismo (paso 'configure')
+    configs: {}, // { [productId]: { selections, instanceName, deliveryDate, sectionId } }
+    lastUsedDeliveryDate: "", // comodidad: la última fecha de entrega usada se propone como punto de partida del siguiente producto
     assignPeople: [], // [uid, ...] — orden en que se han ido marcando
-    assignments: {}, // { [uid]: Set(taskId) } — taskId incluye MAIN_TASK_ID
+    assignments: {}, // { [uid]: Set(taskId) } — taskId incluye mainTaskIdFor(productId)
     busy: false,
   };
 
@@ -108,7 +119,9 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
   function renderBody() {
     if (state.loading) return `<p style="font-size:13px;color:var(--color-text-faint);">Cargando productos…</p>`;
     if (!state.products.length) return renderEmptyState();
-    return state.selectedProductId ? renderConfigureScreen() : renderPickScreen();
+    if (state.step === "pick") return renderPickScreen();
+    if (state.step === "configure") return renderConfigureScreen();
+    return renderAssignScreen();
   }
 
   function renderEmptyState() {
@@ -125,20 +138,22 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
 
   function renderPickScreen() {
     return `
-      <p class="field__hint">Elige qué producto quieres montar en este proyecto.</p>
+      <p class="field__hint">Elige uno o varios productos para montar en este proyecto — puedes marcar varios y configurarlos uno detrás de otro.</p>
       <div style="display:flex;flex-direction:column;gap:8px;">${state.products.map(productPickHtml).join("")}</div>`;
   }
 
   function productPickHtml(p) {
+    const selected = state.selectedProductIds.includes(p.id);
     const { groupCount, taskCount } = productCounts(p);
     return `
-      <button type="button" class="qc-product-pick" data-pick-product="${p.id}">
+      <label class="qc-product-pick${selected ? " is-selected" : ""}">
+        <input type="checkbox" data-toggle-product="${p.id}" ${selected ? "checked" : ""} style="width:16px;height:16px;accent-color:var(--color-signal);cursor:pointer;flex-shrink:0;">
         ${badgeHtml(p.icon, p.color, "project-badge--lg")}
         <span style="min-width:0;">
           <div style="font-size:14px;font-weight:600;color:var(--color-text-hi);">${escapeHtml(p.name)}</div>
           <div style="font-size:11.5px;color:var(--color-text-faint);margin-top:2px;">${groupCount ? `${groupCount} grupo${groupCount === 1 ? "" : "s"} de opciones · ` : ""}${taskCount} tarea${taskCount === 1 ? "" : "s"} en total</div>
         </span>
-      </button>`;
+      </label>`;
   }
 
   function productCounts(p) {
@@ -149,18 +164,40 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     return { groupCount, taskCount };
   }
 
+  /** Configuración en memoria de un producto elegido — se crea la primera vez que se llega a su paso 'configure' (nombre de instancia ya puesto al del producto, fecha de entrega heredada de la última usada si la hay) y se conserva tal cual al ir hacia atrás y hacia adelante entre productos. */
+  function ensureConfig(productId) {
+    if (state.configs[productId]) return state.configs[productId];
+    const product = state.products.find((p) => p.id === productId);
+    state.configs[productId] = {
+      selections: {},
+      instanceName: product ? product.name : "",
+      deliveryDate: state.lastUsedDeliveryDate || "",
+      sectionId: sortedSections[0]?.id || "",
+    };
+    return state.configs[productId];
+  }
+
   function renderConfigureScreen() {
-    const product = state.products.find((p) => p.id === state.selectedProductId);
+    const productId = state.selectedProductIds[state.configIndex];
+    const product = state.products.find((p) => p.id === productId);
     if (!product) {
       // Caso límite, en la práctica casi imposible: el producto se borró
-      // mientras este selector estaba abierto con él ya elegido.
-      state.selectedProductId = null;
-      return renderPickScreen();
+      // mientras este selector estaba abierto con él ya elegido. Se salta.
+      state.selectedProductIds = state.selectedProductIds.filter((id) => id !== productId);
+      if (state.configIndex >= state.selectedProductIds.length) state.configIndex = Math.max(0, state.selectedProductIds.length - 1);
+      if (!state.selectedProductIds.length) { state.step = "pick"; return renderPickScreen(); }
+      return renderConfigureScreen();
     }
 
-    const resolved = resolveQuickCreateTasks(product, state.selections);
-    const mainTaskLabel = state.instanceName.trim() || "Tarea principal";
-    const assignableTasks = [{ id: MAIN_TASK_ID, title: mainTaskLabel, isMain: true }, ...resolved];
+    const config = ensureConfig(productId);
+    const resolved = resolveQuickCreateTasks(product, config.selections);
+    const multi = state.selectedProductIds.length > 1;
+    const mainTaskLabel = config.instanceName.trim() || "Tarea principal";
+    const previewTasks = [{ title: mainTaskLabel, isMain: true }, ...resolved];
+
+    const stepLabel = multi
+      ? `<p style="font-size:12px;color:var(--color-text-faint);font-weight:600;text-transform:uppercase;letter-spacing:0.03em;margin:0;">Producto ${state.configIndex + 1} de ${state.selectedProductIds.length}</p>`
+      : "";
 
     const baseTasksBlock = (product.baseTasks || []).length
       ? `
@@ -170,26 +207,39 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       </div>`
       : "";
 
-    const groupsBlock = (product.groups || []).map((g) => groupPickerHtml(g)).join("");
+    const groupsBlock = (product.groups || []).map((g) => groupPickerHtml(g, config)).join("");
 
     const sectionOptions = `
-      <option value="" ${state.sectionId === "" ? "selected" : ""}>— Sin sección —</option>
-      ${sortedSections.map((s) => `<option value="${s.id}" ${state.sectionId === s.id ? "selected" : ""}>${escapeHtml(s.name)}</option>`).join("")}
-      <option value="${NEW_SECTION_VALUE}" ${state.sectionId === NEW_SECTION_VALUE ? "selected" : ""}>+ Crear una sección con este nombre</option>`;
+      <option value="" ${config.sectionId === "" ? "selected" : ""}>— Sin sección —</option>
+      ${sortedSections.map((s) => `<option value="${s.id}" ${config.sectionId === s.id ? "selected" : ""}>${escapeHtml(s.name)}</option>`).join("")}
+      <option value="${NEW_SECTION_VALUE}" ${config.sectionId === NEW_SECTION_VALUE ? "selected" : ""}>+ Crear una sección con este nombre</option>`;
 
     const previewBlock = `
       <div style="border-top:1px solid var(--color-line);padding-top:14px;">
-        <span class="field__label" style="font-size:13px;">Se crearán ${assignableTasks.length} tarea${assignableTasks.length === 1 ? "" : "s"}</span>
+        <span class="field__label" style="font-size:13px;">${multi ? "Este producto creará" : "Se crearán"} ${previewTasks.length} tarea${previewTasks.length === 1 ? "" : "s"}</span>
         <ul style="margin:6px 0 0 18px;padding:0;max-height:150px;overflow-y:auto;font-size:12.5px;color:var(--color-text-lo);">
-          ${assignableTasks.map((t) => `<li>${previewTaskLabel(t)}</li>`).join("")}
+          ${previewTasks.map((t) => `<li>${previewTaskLabel(t)}</li>`).join("")}
         </ul>
       </div>`;
 
-    const finalizeBlock = `
+    return `
+      ${stepLabel}
+      <div style="display:flex;align-items:center;gap:10px;">
+        ${badgeHtml(product.icon, product.color, "project-badge--lg")}
+        <span style="font-size:15px;font-weight:600;">${escapeHtml(product.name)}</span>
+      </div>
+      <label class="field">
+        <span class="field__label">Nombre de esta cabina</span>
+        <input class="field__input" id="qc-instance-name" value="${escapeHtml(config.instanceName)}" placeholder="Ej. ${escapeHtml(product.name)}">
+        <p class="field__hint">Se crea como la primera tarea del conjunto (la "tarea principal"), con este nombre.</p>
+      </label>
+      ${baseTasksBlock}
+      ${groupsBlock}
+      ${previewBlock}
       <div style="border-top:1px solid var(--color-line);padding-top:14px;display:flex;flex-direction:column;gap:14px;">
         <label class="field">
           <span class="field__label">Fecha de entrega</span>
-          <input class="field__input" type="date" id="qc-delivery-date" value="${state.deliveryDate}">
+          <input class="field__input" type="date" id="qc-delivery-date" value="${config.deliveryDate}">
           <p class="field__hint">La tarea principal irá de hoy a esta fecha. El resto, de hoy a su propia duración si la tiene (sin pasarse nunca de esta fecha) — o directamente esta fecha si no la tiene.</p>
         </label>
         <label class="field">
@@ -197,23 +247,6 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
           <select class="field__select" id="qc-section">${sectionOptions}</select>
         </label>
       </div>`;
-
-    return `
-      <button type="button" class="btn btn--ghost btn--sm" id="qc-back-to-pick" style="width:fit-content;">← Elegir otro producto</button>
-      <div style="display:flex;align-items:center;gap:10px;">
-        ${badgeHtml(product.icon, product.color, "project-badge--lg")}
-        <span style="font-size:15px;font-weight:600;">${escapeHtml(product.name)}</span>
-      </div>
-      <label class="field">
-        <span class="field__label">Nombre de esta cabina</span>
-        <input class="field__input" id="qc-instance-name" value="${escapeHtml(state.instanceName)}" placeholder="Ej. ${escapeHtml(product.name)}">
-        <p class="field__hint">Se crea como la primera tarea del conjunto (la "tarea principal"), con este nombre.</p>
-      </label>
-      ${baseTasksBlock}
-      ${groupsBlock}
-      ${previewBlock}
-      ${finalizeBlock}
-      ${renderAssignBlock(assignableTasks)}`;
   }
 
   function previewTaskLabel(t) {
@@ -223,8 +256,8 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     return `${escapeHtml(t.title)}${dur}${prio}`;
   }
 
-  function groupPickerHtml(g) {
-    const chosen = state.selections[g.id] || new Set();
+  function groupPickerHtml(g, config) {
+    const chosen = config.selections[g.id] || new Set();
     const inputType = g.selectionType === "multiple" ? "checkbox" : "radio";
     const rows = (g.options || [])
       .map(
@@ -245,7 +278,28 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       </fieldset>`;
   }
 
+  /** Todas las tareas de TODOS los productos elegidos — para el paso 3 (asignación rápida) y para el recuento final. Cada una lleva `productName` para poder distinguirlas cuando hay más de un producto. */
+  function buildAllAssignableTasks() {
+    const result = [];
+    state.selectedProductIds.forEach((productId) => {
+      const product = state.products.find((p) => p.id === productId);
+      const config = state.configs[productId];
+      if (!product || !config) return;
+      const mainLabel = config.instanceName.trim() || product.name;
+      result.push({ id: mainTaskIdFor(productId), title: mainLabel, isMain: true, productName: product.name });
+      resolveQuickCreateTasks(product, config.selections).forEach((t) => {
+        result.push({ id: t.id, title: t.title, productName: product.name });
+      });
+    });
+    return result;
+  }
+
+  function renderAssignScreen() {
+    return renderAssignBlock(buildAllAssignableTasks());
+  }
+
   function renderAssignBlock(assignableTasks) {
+    const multi = state.selectedProductIds.length > 1;
     const peopleChips = assignableMembers
       .map(
         (m) => `
@@ -259,26 +313,26 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     const blocks = state.assignPeople
       .map((personUid) => assignableMembers.find((m) => m.uid === personUid))
       .filter(Boolean)
-      .map((m) => assignBlockHtml(m, assignableTasks))
+      .map((m) => assignBlockHtml(m, assignableTasks, multi))
       .join("");
 
     return `
-      <div style="border-top:1px solid var(--color-line);padding-top:14px;">
+      <div>
         <span class="field__label" style="font-size:13px;">Asignación rápida (opcional)</span>
-        <p class="field__hint">Marca a quién quieres asignarle tareas de este conjunto — para cada persona podrás elegir cuáles, y se les asignarán al crear las tareas.</p>
+        <p class="field__hint">${assignableTasks.length} tarea${assignableTasks.length === 1 ? "" : "s"} en total${multi ? ` de ${state.selectedProductIds.length} productos` : ""}. Marca a quién quieres asignarle algo — para cada persona podrás elegir cuáles, y se les asignarán al crear las tareas.</p>
         ${assignableMembers.length ? `<div class="chip-select" style="margin-top:8px;">${peopleChips}</div>` : `<p class="field__hint">No hay nadie más en el equipo todavía.</p>`}
         ${blocks}
       </div>`;
   }
 
-  function assignBlockHtml(member, assignableTasks) {
+  function assignBlockHtml(member, assignableTasks, showProduct) {
     const checked = state.assignments[member.uid] || new Set();
     const rows = assignableTasks
       .map(
         (t) => `
       <label class="qc-option-row" style="padding:5px 8px;">
         <input type="checkbox" data-assign-uid="${member.uid}" data-assign-task="${t.id}" ${checked.has(t.id) ? "checked" : ""}>
-        <span style="font-size:12.5px;color:var(--color-text-hi);">${escapeHtml(t.title)}${t.isMain ? ` <span style="color:var(--color-text-faint);">(tarea principal)</span>` : ""}</span>
+        <span style="font-size:12.5px;color:var(--color-text-hi);">${escapeHtml(t.title)}${t.isMain ? ` <span style="color:var(--color-text-faint);">(tarea principal)</span>` : ""}${showProduct ? ` <span style="color:var(--color-text-faint);">— ${escapeHtml(t.productName)}</span>` : ""}</span>
       </label>`
       )
       .join("");
@@ -300,67 +354,114 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     if (state.loading || !state.products.length) {
       return `<button type="button" class="btn btn--ghost" id="qc-cancel" style="margin-left:auto;">Cerrar</button>`;
     }
-    if (!state.selectedProductId) {
-      return `<button type="button" class="btn btn--ghost" id="qc-cancel" style="margin-left:auto;">Cancelar</button>`;
+    if (state.step === "pick") {
+      const n = state.selectedProductIds.length;
+      return `
+        <button type="button" class="btn btn--ghost" id="qc-cancel">Cancelar</button>
+        <button type="button" class="btn btn--primary" id="qc-continue-pick" style="margin-left:auto;" ${n ? "" : "disabled"}>Continuar${n ? ` (${n})` : ""}</button>`;
     }
-    const product = state.products.find((p) => p.id === state.selectedProductId);
-    const totalCount = product ? resolveQuickCreateTasks(product, state.selections).length + 1 : 1;
+    if (state.step === "configure") {
+      const isLast = state.configIndex >= state.selectedProductIds.length - 1;
+      return `
+        <button type="button" class="btn btn--ghost" id="qc-back-step" ${state.busy ? "disabled" : ""}>← Atrás</button>
+        <button type="button" class="btn btn--primary" id="qc-next-step" style="margin-left:auto;" ${state.busy ? "disabled" : ""}>${isLast ? "Continuar →" : "Siguiente producto →"}</button>`;
+    }
+    // 'assign'
+    const total = buildAllAssignableTasks().length;
     return `
-      <button type="button" class="btn btn--ghost" id="qc-cancel" ${state.busy ? "disabled" : ""}>Cancelar</button>
-      <button type="button" class="btn btn--primary" id="qc-confirm" style="margin-left:auto;" ${state.busy ? "disabled" : ""}>${state.busy ? "Creando…" : `Crear tareas (${totalCount})`}</button>`;
+      <button type="button" class="btn btn--ghost" id="qc-back-step" ${state.busy ? "disabled" : ""}>← Atrás</button>
+      <button type="button" class="btn btn--primary" id="qc-confirm-all" style="margin-left:auto;" ${state.busy ? "disabled" : ""}>${state.busy ? "Creando…" : `Crear tareas (${total})`}</button>`;
   }
 
   // ----------------------------------------------------------- listeners ----
   function attachListeners() {
     overlay.querySelector("#qc-cancel")?.addEventListener("click", close);
-
     overlay.querySelector("#qc-go-admin")?.addEventListener("click", () => {
       close();
       openQuickCreateAdminModal({ currentUser, quickCreateEnabled });
     });
+    overlay.querySelector("#qc-back-step")?.addEventListener("click", goBack);
 
-    overlay.querySelectorAll("[data-pick-product]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const product = state.products.find((p) => p.id === btn.dataset.pickProduct);
-        state.selectedProductId = btn.dataset.pickProduct;
-        state.selections = {};
-        state.instanceName = product ? product.name : "";
-        state.deliveryDate = "";
-        state.assignPeople = [];
-        state.assignments = {};
+    if (state.step === "pick") wirePickScreen();
+    else if (state.step === "configure") wireConfigureScreen();
+    else wireAssignScreen();
+  }
+
+  function goBack() {
+    if (state.busy) return;
+    if (state.step === "assign") {
+      state.step = "configure";
+      state.configIndex = state.selectedProductIds.length - 1;
+    } else if (state.step === "configure") {
+      if (state.configIndex > 0) state.configIndex -= 1;
+      else state.step = "pick";
+    }
+    render();
+  }
+
+  function wirePickScreen() {
+    overlay.querySelectorAll("[data-toggle-product]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const productId = input.dataset.toggleProduct;
+        if (input.checked) {
+          state.selectedProductIds = [...state.selectedProductIds, productId];
+        } else {
+          state.selectedProductIds = state.selectedProductIds.filter((id) => id !== productId);
+          delete state.configs[productId]; // ya no aplica — se reconstruye desde cero si se vuelve a marcar
+        }
         render();
       });
     });
 
-    overlay.querySelector("#qc-back-to-pick")?.addEventListener("click", () => {
-      state.selectedProductId = null;
-      state.selections = {};
-      state.instanceName = "";
-      state.deliveryDate = "";
-      state.assignPeople = [];
-      state.assignments = {};
+    overlay.querySelector("#qc-continue-pick")?.addEventListener("click", () => {
+      if (!state.selectedProductIds.length) return;
+      state.step = "configure";
+      state.configIndex = 0;
       render();
+      overlay.querySelector("#qc-instance-name")?.focus();
     });
+  }
+
+  function wireConfigureScreen() {
+    const productId = state.selectedProductIds[state.configIndex];
+    const config = ensureConfig(productId);
+
+    overlay.querySelector("#qc-instance-name")?.addEventListener("input", (e) => { config.instanceName = e.target.value; });
+    overlay.querySelector("#qc-delivery-date")?.addEventListener("change", (e) => {
+      config.deliveryDate = e.target.value;
+      state.lastUsedDeliveryDate = e.target.value;
+    });
+    overlay.querySelector("#qc-section")?.addEventListener("change", (e) => { config.sectionId = e.target.value; });
 
     overlay.querySelectorAll("input[data-group][data-option]").forEach((input) => {
       input.addEventListener("change", () => {
         const groupId = input.dataset.group;
         const optionId = input.dataset.option;
         if (input.type === "radio") {
-          state.selections = { ...state.selections, [groupId]: new Set([optionId]) };
+          config.selections = { ...config.selections, [groupId]: new Set([optionId]) };
         } else {
-          const current = new Set(state.selections[groupId] || []);
+          const current = new Set(config.selections[groupId] || []);
           input.checked ? current.add(optionId) : current.delete(optionId);
-          state.selections = { ...state.selections, [groupId]: current };
+          config.selections = { ...config.selections, [groupId]: current };
         }
         render();
       });
     });
 
-    overlay.querySelector("#qc-instance-name")?.addEventListener("input", (e) => { state.instanceName = e.target.value; });
-    overlay.querySelector("#qc-delivery-date")?.addEventListener("change", (e) => { state.deliveryDate = e.target.value; });
-    overlay.querySelector("#qc-section")?.addEventListener("change", (e) => { state.sectionId = e.target.value; });
+    overlay.querySelector("#qc-next-step")?.addEventListener("click", () => {
+      const name = config.instanceName.trim();
+      if (!name) { overlay.querySelector("#qc-instance-name")?.focus(); return; }
+      if (!config.deliveryDate) { overlay.querySelector("#qc-delivery-date")?.focus(); return; }
+      if (state.configIndex < state.selectedProductIds.length - 1) {
+        state.configIndex += 1;
+      } else {
+        state.step = "assign";
+      }
+      render();
+    });
+  }
 
+  function wireAssignScreen() {
     overlay.querySelectorAll("[data-assign-person]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const personUid = btn.dataset.assignPerson;
@@ -400,57 +501,85 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       });
     });
 
-    overlay.querySelector("#qc-confirm")?.addEventListener("click", handleConfirm);
+    overlay.querySelector("#qc-confirm-all")?.addEventListener("click", handleConfirmAll);
   }
 
   function assignedUidsFor(taskId) {
     return state.assignPeople.filter((personUid) => (state.assignments[personUid] || new Set()).has(taskId));
   }
 
-  async function handleConfirm() {
-    const product = state.products.find((p) => p.id === state.selectedProductId);
-    if (!product) return;
-    const instanceName = state.instanceName.trim();
-    if (!instanceName) { overlay.querySelector("#qc-instance-name")?.focus(); return; }
-    if (!state.deliveryDate) { overlay.querySelector("#qc-delivery-date")?.focus(); return; }
-
-    const resolved = resolveQuickCreateTasks(product, state.selections);
-    const insertionDate = new Date();
-    const deliveryDate = toDate(state.deliveryDate);
-    const insertionDateStr = toDateInputValue(insertionDate);
-
-    const mainTask = {
-      title: instanceName,
-      description: "",
-      startDate: insertionDateStr,
-      dueDate: toDateInputValue(deliveryDate),
-      assigneeIds: assignedUidsFor(MAIN_TASK_ID),
-    };
-    const restTasks = resolved.map((t) => ({
-      title: t.title,
-      description: t.description || "",
-      startDate: insertionDateStr,
-      dueDate: toDateInputValue(computeTaskDueDate(insertionDate, deliveryDate, t.durationDays)),
-      assigneeIds: assignedUidsFor(t.id),
-      priority: t.priority || "media",
-    }));
-    const allTasks = [mainTask, ...restTasks];
+  async function handleConfirmAll() {
+    if (!state.selectedProductIds.length) return;
 
     state.busy = true;
     render();
     try {
-      let targetSectionId = state.sectionId || null;
-      if (state.sectionId === NEW_SECTION_VALUE) {
-        const newSection = { id: uid(), name: instanceName, order: (project.sections || []).length };
-        await setProjectSections(project.id, [...(project.sections || []), newSection]);
-        targetSectionId = newSection.id;
+      const insertionDate = new Date();
+      const insertionDateStr = toDateInputValue(insertionDate);
+
+      // 1) Qué sección usa cada producto — resolviendo primero las que hay
+      // que crear, TODAS de una vez (no un setProjectSections() por
+      // producto), para que dos productos que ambos pidan "sección nueva"
+      // en esta misma pasada no se pisen el `order` ni se sobrescriban el
+      // uno al otro.
+      let sections = [...(project.sections || [])];
+      const sectionIdByProduct = {};
+      state.selectedProductIds.forEach((productId) => {
+        const config = state.configs[productId];
+        if (config.sectionId === NEW_SECTION_VALUE) {
+          const newSection = { id: uid(), name: config.instanceName.trim() || "Nueva sección", order: sections.length };
+          sections = [...sections, newSection];
+          sectionIdByProduct[productId] = newSection.id;
+        } else {
+          sectionIdByProduct[productId] = config.sectionId || null;
+        }
+      });
+      if (sections.length !== (project.sections || []).length) {
+        await setProjectSections(project.id, sections);
       }
-      await createTasksFromQuickCreateInsertion(allTasks, { projectId: project.id, sectionId: targetSectionId, createdBy: currentUser.uid });
-      showToast(`${allTasks.length} tarea${allTasks.length === 1 ? "" : "s"} creada${allTasks.length === 1 ? "" : "s"}.`);
+
+      // 2) Lista completa de tareas de TODOS los productos, cada una ya
+      // con su sección, fechas y responsables resueltos.
+      const allTasks = [];
+      state.selectedProductIds.forEach((productId) => {
+        const product = state.products.find((p) => p.id === productId);
+        const config = state.configs[productId];
+        const deliveryDate = toDate(config.deliveryDate);
+        const targetSectionId = sectionIdByProduct[productId];
+        const mainTaskId = mainTaskIdFor(productId);
+        const instanceName = config.instanceName.trim();
+
+        allTasks.push({
+          title: instanceName,
+          description: "",
+          startDate: insertionDateStr,
+          dueDate: toDateInputValue(deliveryDate),
+          assigneeIds: assignedUidsFor(mainTaskId),
+          priority: "media",
+          sectionId: targetSectionId,
+        });
+
+        resolveQuickCreateTasks(product, config.selections).forEach((t) => {
+          allTasks.push({
+            title: t.title,
+            description: t.description || "",
+            startDate: insertionDateStr,
+            dueDate: toDateInputValue(computeTaskDueDate(insertionDate, deliveryDate, t.durationDays)),
+            assigneeIds: assignedUidsFor(t.id),
+            priority: t.priority || "media",
+            sectionId: targetSectionId,
+          });
+        });
+      });
+
+      // 3) Crear todo de golpe.
+      await createTasksFromQuickCreateInsertion(allTasks, { projectId: project.id, createdBy: currentUser.uid });
+      const productCount = state.selectedProductIds.length;
+      showToast(`${allTasks.length} tarea${allTasks.length === 1 ? "" : "s"} creada${allTasks.length === 1 ? "" : "s"}${productCount > 1 ? ` en ${productCount} productos` : ""}.`);
       state.busy = false;
       close();
     } catch (e) {
-      console.error("handleConfirm quick-create:", e);
+      console.error("handleConfirmAll quick-create:", e);
       showToast("No se pudieron crear las tareas.", "error");
       state.busy = false;
       render();

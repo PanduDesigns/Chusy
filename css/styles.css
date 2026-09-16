@@ -1547,8 +1547,9 @@ body.is-col-resizing * { cursor: col-resize !important; }
 /* Fila de "elegir un producto" (paso 1 del selector) — mismo espíritu que
    .metrics-overdue-row (fila clicable con borde que se ilumina al pasar el
    ratón), con la insignia icono+color de project-badge en vez de un punto. */
-.qc-product-pick { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--color-panel); border: 1px solid var(--color-line); border-radius: var(--radius-sm); padding: 10px 12px; transition: var(--transition-fast); }
+.qc-product-pick { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--color-panel); border: 1px solid var(--color-line); border-radius: var(--radius-sm); padding: 10px 12px; transition: var(--transition-fast); cursor: pointer; }
 .qc-product-pick:hover { border-color: var(--color-line-bright); background: var(--color-panel-raised); }
+.qc-product-pick.is-selected { border-color: var(--color-signal-dim); background: var(--color-signal-soft); }
 
 /* Arrastrar para reordenar productos/grupos/opciones en el panel de admin
    (quick-create-admin-modal.js) — tirador dedicado en vez de la fila
