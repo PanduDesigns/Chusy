@@ -1131,6 +1131,38 @@ body.is-col-resizing * { cursor: col-resize !important; }
   transform: rotate(45deg); border-radius: 2px;
 }
 
+/* Fila-bloque de una sección entera (modo Secciones del Gantt, v44): barra
+   más gruesa y sólida que una tarea normal — se ve de un vistazo que es un
+   resumen, no una tarea — y sin el cursor de "esto se puede abrir", porque
+   no lo es (ver comentario de aggregateBucket en timeline-view.js). */
+.tl-bar--agg { height: 20px; border-width: 2px; border-radius: 3px; opacity: 1; cursor: default; }
+.tl-bar--agg:hover { transform: none; }
+/* Hito real dentro de una sección colapsada: mismo rombo pero pequeño y
+   "recortado" en el color de fondo, para que se lea encima de una barra
+   agregada de cualquier color de prioridad sin fundirse con ella. */
+.tl-milestone--mini { transform: scale(0.65); }
+.tl-milestone--mini .tl-milestone__diamond { background: var(--color-void); box-shadow: inset 0 0 0 1.5px var(--color-text-hi); }
+
+/* Expandir una sección sin salir del modo Secciones (v46): toda la fila
+   agregada es el interruptor — más fácil de acertar con el ratón que un
+   botón pequeño suelto. */
+.tl-group-label--toggle { cursor: pointer; }
+.tl-group-label--toggle:hover { background: var(--color-panel-raised); }
+.tl-agg-chevron { flex-shrink: 0; width: 9px; font-size: 9px; color: var(--color-text-faint); }
+
+/* Arrastrar una barra o un hito para cambiar sus fechas (v46, solo tareas
+   reales — ver wireBarDragging en timeline-view.js). El halo dorado marca
+   que el arrastre está en curso; sin transición, para que siga al cursor
+   al milímetro en vez de ir a rebufo. */
+.tl-bar--dragging { opacity: 1; box-shadow: 0 0 0 2px var(--color-signal), 0 4px 10px rgba(0, 0, 0, 0.35); z-index: 5; transition: none; }
+.tl-drag-tooltip {
+  position: fixed; transform: translate(-50%, -100%);
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-radius: var(--radius-sm); padding: 3px 8px; font-size: 11px;
+  font-family: var(--font-mono); color: var(--color-text-hi); white-space: nowrap;
+  z-index: 200; pointer-events: none; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
 .tl-today-line {
   background: var(--color-signal); width: 2px; opacity: 0.6;
   pointer-events: none; z-index: 1; justify-self: center;

@@ -3,19 +3,89 @@
 // por proyecto) o de proyectos (vista global) con sus tareas ya dentro, así
 // la misma vista sirve para los dos casos sin duplicar lógica.
 //
-// Zoom con un clic entre días / semanas / meses (`zoom`, controlado desde
-// fuera vía `onZoomChange` para que se recuerde al cambiar de vista). En
-// semanas se indica el número de semana ISO del año.
+// Zoom con un clic entre días / semanas / meses / trimestres / años (`zoom`,
+// controlado desde fuera vía `onZoomChange` para que se recuerde al cambiar
+// de vista). En semanas se indica el número de semana ISO del año. Las
+// vacaciones inhábiles (apartado más abajo) solo se pueden marcar en día,
+// semana o mes: en trimestre o año, prácticamente cualquier columna roza
+// agosto o la Navidad, así que resaltarlas ahí no distinguiría nada — el
+// botón se oculta en esos dos zooms en vez de mostrar un resaltado inútil.
 //
 // Cómo se calcula cada barra: si la tarea tiene fecha de inicio Y fecha
 // límite, la barra cubre todo ese rango (recortado a las columnas visibles
 // según el zoom). Si solo tiene una de las dos, se dibuja un marcador de
 // una columna en esa fecha. Los hitos siempre se dibujan como un rombo,
 // nunca como barra.
+//
+// Modo Secciones vs Tareas (`viewMode`, controlado desde fuera vía
+// `onViewModeChange`, igual que el zoom — ver v44 en el historial del
+// README): "Tareas" es el comportamiento de siempre, una fila por tarea.
+// "Secciones" colapsa cada sección en UNA sola fila-bloque: fecha de
+// inicio/fin = la más temprana/tardía entre TODAS las fechas (inicio o
+// límite) de sus tareas, color de la barra = el de la prioridad más
+// urgente presente entre ellas (mismos colores que ya usa el modo Tareas,
+// para no inventar un lenguaje de color nuevo), y el título de la fila
+// lleva "· completadas/total". El PUNTO de la etiqueta sigue siendo el
+// color de sección/proyecto de siempre; desde la v46 la propia barra
+// agregada lleva ADEMÁS un filo de color a la izquierda (`accentColor`,
+// SECTION_ACCENT_COLORS más abajo) distinto por sección, para
+// diferenciarlas de un vistazo sin tocar el color de prioridad de la
+// barra en sí — las dos cosas conviven sin pisarse: el filo dice DE QUÉ
+// sección es, el resto de la barra sigue diciendo CÓMO de urgente está.
+//
+// En la vista de UN proyecto, cada "grupo" que llega ya es una sección —
+// así que en modo Secciones esa fila-bloque sustituye entera a la cabecera
+// + sus tareas (sin cabecera aparte, `flat: true`). En la global cada
+// "grupo" es un proyecto que SÍ trae más de una sección dentro (`g.sections`,
+// el array `sections` del proyecto, añadido por quien llama) — ahí la
+// cabecera de proyecto se mantiene igual que en modo Tareas, y son las
+// filas de dentro las que pasan de una por tarea a una por sección
+// (buildSectionModeGroups decide cuál de los dos casos es, mirando si el
+// grupo trae `.sections` o no).
+//
+// Expandir una sección (v46, `expandedSections`: un Set de claves,
+// controlado desde fuera vía `onToggleSectionExpand`, mismo patrón que el
+// resto del estado del Gantt): un clic en la fila-bloque de una sección la
+// despliega SIN salir del modo Secciones — sus tareas de verdad aparecen
+// justo debajo, sangradas, con barra y color de prioridad normales, y la
+// fila-bloque de arriba se queda como resumen (con su flecha ahora hacia
+// abajo). La clave de cada sección lleva el id del proyecto delante
+// (`sectionKey`, ver buildSectionModeGroups) porque "Sin sección" usa el
+// mismo id vacío en todos los proyectos, y si no se namespacearan así,
+// expandir "Sin sección" en un proyecto la dejaría expandida también en
+// otro sin haberlo pedido. Expandir es solo para mirar más de cerca sin
+// perder el resto colapsado: la exportación (más abajo) sigue exportando
+// siempre la vista colapsada de `displayGroups`, no lo que esté expandido
+// en pantalla en ese momento — son dos cosas independientes a propósito
+// (ver el porqué en el historial de la v46).
+//
+// Arrastrar una barra para cambiar sus fechas (v46, ver wireBarDragging):
+// SOLO en tareas de verdad (modo Tareas, o una tarea de una sección
+// expandida en modo Secciones) — nunca en la barra agregada de una
+// sección colapsada ni en los rombos en miniatura de sus hitos: esa barra
+// no tiene fecha propia, son las fechas mín/máx de sus tareas (ver
+// aggregateBucket), así que "arrastrarla" no tendría una tarea real a la
+// que escribirle la fecha. Solo con zoom de día o semana, porque a partir
+// de mes cada píxel ya representa demasiados días para arrastrar con
+// precisión (a trimestre, prácticamente todo un mes por pocos píxeles).
+// Tirar del borde izquierdo cambia la fecha de inicio, del derecho la
+// fecha límite, y del cuerpo mueve las dos a la vez sin cambiar la
+// duración; un hito (un solo rombo) siempre se mueve entero, sea cual sea
+// el punto exacto donde se pulse. Reutiliza tal cual updateTask() de
+// tasks.js, la misma función que ya usa el modal de tarea, así que no
+// hay ningún permiso ni validación nuevos que mantener aparte.
+//
+// Exportar (gantt-export.js) recibe siempre `displayGroups`, la versión ya
+// agregada cuando toca — así el archivo descargado es exactamente lo que
+// hay en pantalla en ese momento (salvo qué sección esté expandida, ver
+// arriba), y gantt-export.js no necesita saber nada de cómo se agregó
+// (solo recibe `viewMode` para ajustar textos como "tareas" -> "secciones"
+// en cabeceras y avisos).
 // ============================================================================
-import { escapeHtml, toDate, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast, renderTitleHtml, plainTitleText } from "../utils.js";
+import { escapeHtml, toDate, toDateInputValue, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast, renderTitleHtml, plainTitleText, getTaskSectionForProject } from "../utils.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { exportTimelineToExcel, exportTimelineToPdf } from "../components/gantt-export.js";
+import { updateTask } from "../data/tasks.js";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -25,12 +95,33 @@ const PRIORITY_COLORS = {
   media: "#78848C",
   baja: "var(--color-text-faint)",
 };
+// Orden de severidad para elegir el color de una fila agregada (modo
+// Secciones): el de la tarea MÁS urgente que haya dentro, no una media ni
+// "la última que se mire" — así una sola tarea urgente enterrada en una
+// sección de 20 ya se nota en el Gantt colapsado.
+const PRIORITY_RANK = { urgente: 0, alta: 1, media: 2, baja: 3 };
+
+// Filo de color por sección (v46, modo Secciones), independiente del color
+// de prioridad de la barra. Tonos elegidos a propósito lejos del rojo/dorado
+// de las prioridades (ver --color-danger/--color-signal) para que no se
+// confundan con "urgente". Con más secciones que colores, se repiten en
+// ciclo (mismo criterio que el de 10 colores de la plantilla Martech).
+const SECTION_ACCENT_COLORS = ["#76CE64", "#64CE9D", "#64B5CE", "#646BCE", "#A764CE", "#CE64AB"];
 
 const ZOOM_CONFIG = {
   day: { width: 32, label: "Días" },
   week: { width: 64, label: "Semanas" },
   month: { width: 96, label: "Meses" },
+  quarter: { width: 90, label: "Trimestres" },
+  year: { width: 110, label: "Años" },
 };
+// Arrastrar para cambiar fechas (ver wireBarDragging) solo tiene precisión
+// suficiente en estos dos: a partir de mes, cada píxel ya representa
+// demasiados días.
+const DRAGGABLE_ZOOMS = new Set(["day", "week"]);
+// Vacaciones inhábiles: idem, a partir de trimestre casi cualquier columna
+// roza agosto o Navidad, así que resaltarlas deja de distinguir nada.
+const HOLIDAY_CAPABLE_ZOOMS = new Set(["day", "week", "month"]);
 
 /** Agosto completo, o del 22 de diciembre al 6 de enero (cierre de Navidad). */
 function isHolidayColumn(col) {
@@ -44,9 +135,120 @@ function isHolidayColumn(col) {
   return false;
 }
 
-export function renderTimelineView(container, { groups, zoom, onZoomChange, showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project }) {
+/**
+ * Agrega una lista de tareas reales en una única "tarea" sintética que
+ * representa a todas ellas como un bloque (modo Secciones). Fecha de
+ * inicio/fin = la más temprana/tardía entre CUALQUIER fecha (inicio o
+ * límite) de las tareas que la componen — sin fechas, se queda a `null`
+ * igual que le pasaría a una tarea suelta sin fecha (fila con etiqueta,
+ * sin barra). Prioridad = la más urgente presente entre ellas, o "media"
+ * si ninguna tiene una reconocible. Los hitos originales se conservan
+ * aparte (`milestones`, con su id y fecha real intactos) para poder
+ * dibujarlos encima del bloque sin perderlos. `sourceTasks` guarda las
+ * tareas reales tal cual, para poder desplegarlas si se expande la
+ * sección (v46); `sectionKey`/`accentColor` también son de la v46, ver el
+ * comentario de cabecera del archivo.
+ */
+function aggregateBucket(label, tasks, sectionKey, accentColor) {
+  const dates = tasks.flatMap((t) => [t.startDate, t.dueDate].filter(Boolean).map(toDate)).filter(Boolean);
+  const completeCount = tasks.filter((t) => t.isComplete).length;
+  let priority = null;
+  tasks.forEach((t) => {
+    const rank = PRIORITY_RANK[t.priority];
+    if (rank !== undefined && (priority === null || rank < PRIORITY_RANK[priority])) priority = t.priority;
+  });
+  return {
+    title: `${label} · ${completeCount}/${tasks.length}`,
+    startDate: dates.length ? new Date(Math.min(...dates)) : null,
+    dueDate: dates.length ? new Date(Math.max(...dates)) : null,
+    priority: priority || "media",
+    isComplete: tasks.length > 0 && completeCount === tasks.length,
+    isMilestone: false,
+    assigneeIds: [...new Set(tasks.flatMap((t) => t.assigneeIds || []))],
+    isAggregate: true,
+    milestones: tasks.filter((t) => t.isMilestone && (t.startDate || t.dueDate)),
+    sourceTasks: tasks,
+    sectionKey,
+    accentColor,
+  };
+}
+
+/**
+ * Reparte `tasks` (todas de UN proyecto, `projectId`) en sus secciones,
+ * mismo criterio que la vista de un solo proyecto (`getTaskSectionForProject`,
+ * para que una tarea que tiene a este proyecto como ADICIONAL caiga en la
+ * sección correcta igual que en su Lista/Tablero, no en la de su proyecto
+ * principal). "Sin sección" va primero si hay alguna, mismo criterio que
+ * el resto de la app desde la v34. Solo devuelve buckets con alguna tarea.
+ * `id: ""` para "Sin sección" (igual que el resto de la app) — se usa para
+ * construir la sectionKey namespaceada de expandir (ver buildSectionModeGroups).
+ */
+function sectionBucketsForProject(tasks, projectId, sectionDefs) {
+  const sorted = [...sectionDefs].sort((a, b) => a.order - b.order);
+  const noSection = tasks.filter((t) => !getTaskSectionForProject(t, projectId));
+  const bySection = sorted.map((s) => ({
+    id: s.id,
+    label: s.name,
+    tasks: tasks.filter((t) => getTaskSectionForProject(t, projectId) === s.id),
+  }));
+  const buckets = noSection.length ? [{ id: "", label: "Sin sección", tasks: noSection }, ...bySection] : bySection;
+  return buckets.filter((b) => b.tasks.length);
+}
+
+/**
+ * Convierte los `groups` normales (tareas reales) en su versión agregada
+ * para el modo Secciones — ver el comentario de cabecera del archivo para
+ * el porqué de la diferencia entre los dos casos de abajo. `currentProjectId`
+ * solo hace falta en el caso "por proyecto" (para namespacear su única
+ * sectionKey); en el caso global cada grupo ya trae su propio id de
+ * proyecto (`g.id`), así que se ignora.
+ */
+function buildSectionModeGroups(groups, currentProjectId) {
+  const out = [];
+  groups.forEach((g) => {
+    if (!g.tasks.length) return;
+    if (Array.isArray(g.sections)) {
+      // Global: el grupo es un proyecto entero — la cabecera se conserva,
+      // y sus tareas se agregan una vez por cada sección de ESE proyecto.
+      const buckets = sectionBucketsForProject(g.tasks, g.id, g.sections);
+      if (!buckets.length) return;
+      out.push({
+        id: g.id, label: g.label, color: g.color, icon: g.icon,
+        tasks: buckets.map((b, i) => aggregateBucket(b.label, b.tasks, `${g.id}:${b.id || "none"}`, SECTION_ACCENT_COLORS[i % SECTION_ACCENT_COLORS.length])),
+      });
+    } else {
+      // Por proyecto: el grupo YA es una sección — se agrega entera en un
+      // único bloque, sin cabecera propia (esa fila hace las dos cosas).
+      // No hay índice de varias secciones aquí (el índice de color se
+      // decide fuera, en el bucle de abajo, con el índice del propio
+      // grupo dentro de `groups`, para que cada sección del proyecto
+      // tenga igualmente un color distinto entre sí).
+      out.push({ id: g.id, label: g.label, color: g.color, flat: true, _rawTasks: g.tasks });
+    }
+  });
+  // Color por índice DESPUÉS de filtrar los grupos vacíos, para que el
+  // ciclo de colores no "salte" un hueco por una sección sin tareas.
+  let flatIdx = 0;
+  out.forEach((g) => {
+    if (!g.flat) return;
+    const accentColor = SECTION_ACCENT_COLORS[flatIdx % SECTION_ACCENT_COLORS.length];
+    flatIdx++;
+    g.tasks = [aggregateBucket(g.label, g._rawTasks, `${currentProjectId}:${g.id || "none"}`, accentColor)];
+    delete g._rawTasks;
+  });
+  return out;
+}
+
+export function renderTimelineView(container, {
+  groups, zoom, onZoomChange, viewMode, onViewModeChange,
+  expandedSections, onToggleSectionExpand,
+  showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project,
+}) {
   const unit = zoom || "day";
+  const vm = viewMode || "tasks";
+  const expanded = expandedSections || new Set();
   const allTasks = groups.flatMap((g) => g.tasks);
+  const allTasksById = new Map(allTasks.map((t) => [t.id, t]));
   const withDates = allTasks.filter((t) => t.startDate || t.dueDate);
   const withoutDates = allTasks.length - withDates.length;
 
@@ -59,23 +261,46 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
   const columns = buildColumns(unit, rawMin, rawMax);
   const colWidth = ZOOM_CONFIG[unit].width;
   const todayIdx = columns.findIndex((c) => today >= c.start && today <= c.end);
+  const canShowHolidays = HOLIDAY_CAPABLE_ZOOMS.has(unit);
+  const canDrag = DRAGGABLE_ZOOMS.has(unit);
+
+  // Agregada una sola vez aquí — la misma `displayGroups` alimenta tanto
+  // las filas de abajo (con lo expandido añadido después) como el botón
+  // de exportar, para que lo descargado sea siempre justo la vista
+  // colapsada (ver cabecera del archivo sobre por qué expandir no entra
+  // en la exportación).
+  const displayGroups = vm === "sections" ? buildSectionModeGroups(groups, project && project.id) : groups;
 
   const rows = [];
-  groups.forEach((g) => {
+  displayGroups.forEach((g) => {
     if (!g.tasks.length) return;
-    rows.push({ type: "group", label: g.label, color: g.color, icon: g.icon });
-    g.tasks.forEach((t) => rows.push({ type: "task", task: t }));
+    if (!(vm === "sections" && g.flat)) {
+      rows.push({ type: "group", label: g.label, color: g.color, icon: g.icon });
+    }
+    g.tasks.forEach((t) => {
+      if (vm !== "sections") { rows.push({ type: "task", task: t }); return; }
+      const isExpanded = expanded.has(t.sectionKey);
+      rows.push({ type: "agg", task: t, dotColor: g.color, expanded: isExpanded });
+      if (isExpanded) {
+        t.sourceTasks.forEach((real) => rows.push({ type: "task", task: real, indent: true, accentColor: t.accentColor }));
+      }
+    });
   });
 
   const zoomButtons = Object.keys(ZOOM_CONFIG)
     .map((key) => `<button type="button" class="topbar__view-btn${key === unit ? " is-active" : ""}" data-zoom="${key}">${ZOOM_CONFIG[key].label}</button>`)
     .join("");
-  const holidayBtnHtml = `<button type="button" class="btn btn--ghost btn--sm${showHolidays ? " is-toggled" : ""}" id="tl-holidays-btn">🏖️ Vacaciones inhábiles</button>`;
+  const viewModeButtons = `
+    <button type="button" class="topbar__view-btn${vm === "sections" ? " is-active" : ""}" data-viewmode="sections">Secciones</button>
+    <button type="button" class="topbar__view-btn${vm === "tasks" ? " is-active" : ""}" data-viewmode="tasks">Tareas</button>
+  `;
+  const holidayBtnHtml = canShowHolidays ? `<button type="button" class="btn btn--ghost btn--sm${showHolidays ? " is-toggled" : ""}" id="tl-holidays-btn">🏖️ Vacaciones inhábiles</button>` : "";
 
   if (!rows.length) {
     container.innerHTML = `
       <div class="timeline">
         <div class="timeline__toolbar">
+          <div class="topbar__views" style="margin-left:0;">${viewModeButtons}</div>
           <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
           ${holidayBtnHtml}
         </div>
@@ -86,7 +311,8 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
         </div>
       </div>`;
     container.querySelectorAll("[data-zoom]").forEach((btn) => btn.addEventListener("click", () => onZoomChange(btn.dataset.zoom)));
-    container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
+    container.querySelectorAll("[data-viewmode]").forEach((btn) => btn.addEventListener("click", () => onViewModeChange(btn.dataset.viewmode)));
+    if (canShowHolidays) container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
     return;
   }
 
@@ -112,21 +338,52 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
       cells += `<div class="tl-group-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
       return;
     }
+    if (row.type === "agg") {
+      // Fila-bloque de una sección entera (modo Secciones) — mismo hueco
+      // que una fila de tarea, pero con look de cabecera (negrita, punto
+      // de color de sección/proyecto) y SIN abrir nada al pulsarla: no
+      // lleva `data-open`, porque no es una tarea real (ver aggregateBucket).
+      // Toda la etiqueta es el interruptor de expandir/contraer (v46).
+      const t = row.task;
+      const marker = `<span class="tl-group-dot" style="background:${row.dotColor || "var(--color-line-bright)"}"></span>`;
+      const chevron = `<span class="tl-agg-chevron">${row.expanded ? "▾" : "▸"}</span>`;
+      cells += `<div class="tl-group-label tl-group-label--toggle" data-toggle-section="${t.sectionKey}" title="${escapeHtml(t.title)}" style="grid-column:1;grid-row:${gridRow};${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${chevron}${marker}${escapeHtml(t.title)}</div>`;
+      cells += `<div class="tl-row-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
+
+      const span = taskSpan(t, columns);
+      if (span) {
+        const color = PRIORITY_COLORS[t.priority] || "var(--color-line-bright)";
+        cells += `<div class="tl-bar tl-bar--agg${t.isComplete ? " is-complete" : ""}" title="${escapeHtml(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};box-shadow:inset 6px 0 0 ${t.accentColor};"></div>`;
+      }
+      // Los hitos que quedaron dentro del bloque no se pierden: un rombo
+      // pequeño encima, en su fecha real — y ESE sí abre la tarea real
+      // (pero no se puede arrastrar: es un adorno del bloque, no una fila
+      // de tarea de verdad — ver cabecera del archivo).
+      (t.milestones || []).forEach((m) => {
+        const mSpan = taskSpan(m, columns);
+        if (!mSpan) return;
+        cells += `<div class="tl-milestone tl-milestone--mini" data-open="${m.id}" data-task-id="${m.id}" title="${plainTitleText(m.title)}" style="grid-column:${mSpan.e + 2};grid-row:${gridRow};"><span class="tl-milestone__diamond"></span></div>`;
+      });
+      return;
+    }
     const t = row.task;
-    cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:1;grid-row:${gridRow};${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${renderTitleHtml(t.title)}</div>`;
+    const indentPad = row.indent ? "padding-left:26px;" : "";
+    cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:1;grid-row:${gridRow};${indentPad}${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${renderTitleHtml(t.title)}</div>`;
     cells += `<div class="tl-row-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
 
     const span = taskSpan(t, columns);
     if (!span) return;
+    const dragAttr = canDrag ? ` data-drag-task="${t.id}"` : "";
     if (t.isMilestone) {
-      cells += `<div class="tl-milestone" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:${span.e + 2};grid-row:${gridRow};"><span class="tl-milestone__diamond"></span></div>`;
+      cells += `<div class="tl-milestone" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.e + 2};grid-row:${gridRow};"><span class="tl-milestone__diamond"></span></div>`;
     } else {
       const color = PRIORITY_COLORS[t.priority] || "var(--color-line-bright)";
-      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};"></div>`;
+      const accentShadow = row.indent && row.accentColor ? `box-shadow:inset 6px 0 0 ${row.accentColor};` : "";
+      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}"></div>`;
     }
   });
 
-  if (showHolidays) {
+  if (showHolidays && canShowHolidays) {
     columns.forEach((c, i) => {
       if (isHolidayColumn(c)) {
         cells += `<div class="tl-holiday-col" style="grid-column:${i + 2};grid-row:1 / ${totalRows + 1};"></div>`;
@@ -141,6 +398,7 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
   container.innerHTML = `
     <div class="timeline">
       <div class="timeline__toolbar">
+        <div class="topbar__views" style="margin-left:0;">${viewModeButtons}</div>
         <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
         <button class="btn btn--ghost btn--sm" id="tl-today-btn">Hoy</button>
         ${holidayBtnHtml}
@@ -156,6 +414,8 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
   `;
 
   container.querySelectorAll("[data-zoom]").forEach((btn) => btn.addEventListener("click", () => onZoomChange(btn.dataset.zoom)));
+  container.querySelectorAll("[data-viewmode]").forEach((btn) => btn.addEventListener("click", () => onViewModeChange(btn.dataset.viewmode)));
+  container.querySelectorAll("[data-toggle-section]").forEach((el) => el.addEventListener("click", () => onToggleSectionExpand(el.dataset.toggleSection)));
 
   const scrollBox = container.querySelector("#tl-scroll");
   const scrollToToday = () => {
@@ -163,28 +423,50 @@ export function renderTimelineView(container, { groups, zoom, onZoomChange, show
     scrollBox.scrollTo({ left: x, behavior: "smooth" });
   };
   container.querySelector("#tl-today-btn").addEventListener("click", scrollToToday);
-  container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
-  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups, exportTitle, groupLabel, teamMembers, project }));
+  if (canShowHolidays) container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
+  // Título con sufijo cuando se exporta en modo Secciones, para que el
+  // propio archivo descargado (nombre de fichero incluido, vía
+  // sanitizeFilename en gantt-export.js) se autodocumente en qué modo se
+  // generó — útil si se retoma más adelante sin recordar cuál era.
+  const modeExportTitle = vm === "sections" ? `${exportTitle} — por secciones` : exportTitle;
+  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups: displayGroups, exportTitle: modeExportTitle, groupLabel, teamMembers, project, viewMode: vm }));
   if (todayIdx >= 0) requestAnimationFrame(scrollToToday);
 
+  // `dragState.suppressClickFor`: cuando un arrastre de verdad termina en
+  // una tarea, se marca aquí su id para que el "click" nativo que el
+  // navegador dispara justo después del mouseup (siempre lo hace, haya
+  // habido arrastre o no, mientras mousedown y mouseup caigan en el mismo
+  // elemento) no vuelva a abrir esa tarea de inmediato. Un clic normal
+  // (sin arrastre real) nunca toca esto y sigue abriendo la tarea igual
+  // que siempre.
+  const dragState = { suppressClickFor: null };
+  if (canDrag) wireBarDragging(container, { unit, colWidth, allTasksById, dragState });
+
   container.querySelectorAll("[data-open]").forEach((elx) => {
-    elx.addEventListener("click", () => onOpenTask(elx.dataset.open));
+    elx.addEventListener("click", () => {
+      if (dragState.suppressClickFor === elx.dataset.taskId) {
+        dragState.suppressClickFor = null;
+        return;
+      }
+      onOpenTask(elx.dataset.open);
+    });
     elx.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const task = allTasks.find((t) => t.id === elx.dataset.taskId);
+      const task = allTasksById.get(elx.dataset.taskId);
       if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask);
     });
   });
 }
 
-function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMembers, project }) {
+function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMembers, project, viewMode }) {
   document.querySelectorAll(".export-popover").forEach((p) => p.remove());
   const rect = anchorBtn.getBoundingClientRect();
   const pop = document.createElement("div");
   pop.className = "export-popover filter-popover";
+  const modeNote = viewMode === "sections" ? " (secciones)" : "";
   pop.innerHTML = `
-    <button type="button" class="tag-suggest__item" data-export="excel">📊 Descargar Excel</button>
-    <button type="button" class="tag-suggest__item" data-export="pdf">📄 Descargar PDF</button>
+    <button type="button" class="tag-suggest__item" data-export="excel">📊 Descargar Excel${modeNote}</button>
+    <button type="button" class="tag-suggest__item" data-export="pdf">📄 Descargar PDF${modeNote}</button>
   `;
   document.body.appendChild(pop);
   const left = Math.min(rect.left, window.innerWidth - pop.offsetWidth - 20);
@@ -195,7 +477,7 @@ function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMem
     btn.disabled = true;
     btn.textContent = `${label}…`;
     try {
-      await fn({ groups, title: exportTitle, groupLabel, teamMembers, project });
+      await fn({ groups, title: exportTitle, groupLabel, teamMembers, project, viewMode });
     } catch (err) {
       console.error(err);
       showToast("No se pudo generar el archivo. Comprueba tu conexión e inténtalo de nuevo.");
@@ -220,9 +502,174 @@ function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMem
 }
 
 // --------------------------------------------------------------------
+// Arrastrar una barra o un hito para cambiar sus fechas (v46). Ver el
+// comentario de cabecera del archivo para el alcance (solo tareas reales,
+// solo zoom de día/semana). `allTasksById` para leer las fechas ACTUALES
+// de la tarea al empezar a arrastrar (data-drag-task solo lleva el id).
+// --------------------------------------------------------------------
+const DRAG_MOVE_THRESHOLD_PX = 4;
+const DRAG_EDGE_ZONE_PX = 7;
+
+function computeDragPatch(task, mode, dayDelta) {
+  if (!dayDelta) return null;
+  const start = task.startDate ? toDate(task.startDate) : null;
+  const due = task.dueDate ? toDate(task.dueDate) : null;
+  if (mode === "resize-start") {
+    if (!start) return null;
+    let ns = addDays(start, dayDelta);
+    if (due && ns > due) ns = due;
+    return { startDate: toDateInputValue(ns) };
+  }
+  if (mode === "resize-due") {
+    if (!due) return null;
+    let nd = addDays(due, dayDelta);
+    if (start && nd < start) nd = start;
+    return { dueDate: toDateInputValue(nd) };
+  }
+  const patch = {};
+  if (start) patch.startDate = toDateInputValue(addDays(start, dayDelta));
+  if (due) patch.dueDate = toDateInputValue(addDays(due, dayDelta));
+  return Object.keys(patch).length ? patch : null;
+}
+
+function fmtEsShort(isoDateStr) {
+  const [y, m, d] = isoDateStr.split("-");
+  return `${d}/${m}`;
+}
+
+let dragTooltipEl = null;
+function showDragTooltip(el, text) {
+  if (!dragTooltipEl) {
+    dragTooltipEl = document.createElement("div");
+    dragTooltipEl.className = "tl-drag-tooltip";
+    document.body.appendChild(dragTooltipEl);
+  }
+  const rect = el.getBoundingClientRect();
+  dragTooltipEl.textContent = text;
+  dragTooltipEl.style.left = `${rect.left + rect.width / 2}px`;
+  dragTooltipEl.style.top = `${rect.top - 10}px`;
+}
+function removeDragTooltip() {
+  if (dragTooltipEl) { dragTooltipEl.remove(); dragTooltipEl = null; }
+}
+
+function wireBarDragging(container, { unit, colWidth, allTasksById, dragState }) {
+  const pxPerDay = unit === "week" ? colWidth / 7 : colWidth;
+
+  container.querySelectorAll("[data-drag-task]").forEach((el) => {
+    const taskId = el.dataset.dragTask;
+    const task = allTasksById.get(taskId);
+    if (!task) return;
+    const isMilestoneEl = el.classList.contains("tl-milestone");
+    const canResize = !isMilestoneEl && !!task.startDate && !!task.dueDate;
+
+    if (canResize) {
+      el.addEventListener("mousemove", (e) => {
+        if (el.classList.contains("tl-bar--dragging")) return;
+        const rect = el.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        if (localX < DRAG_EDGE_ZONE_PX) el.style.cursor = "w-resize";
+        else if (localX > rect.width - DRAG_EDGE_ZONE_PX) el.style.cursor = "e-resize";
+        else el.style.cursor = "grab";
+      });
+    }
+
+    el.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return; // solo botón izquierdo del ratón
+      const rect = el.getBoundingClientRect();
+      const localX = e.clientX - rect.left;
+      let mode = "move";
+      if (canResize && localX < DRAG_EDGE_ZONE_PX) mode = "resize-start";
+      else if (canResize && localX > rect.width - DRAG_EDGE_ZONE_PX) mode = "resize-due";
+
+      const startX = e.clientX;
+      let dayDelta = 0;
+      let dragging = false;
+
+      function onMove(ev) {
+        const deltaPx = ev.clientX - startX;
+        if (!dragging && Math.abs(deltaPx) < DRAG_MOVE_THRESHOLD_PX) return;
+        if (!dragging) {
+          dragging = true;
+          document.body.style.cursor = mode === "resize-start" ? "w-resize" : mode === "resize-due" ? "e-resize" : "grabbing";
+        }
+        el.classList.add("tl-bar--dragging");
+        const nextDelta = Math.round(deltaPx / pxPerDay);
+        if (nextDelta === dayDelta && el.style.transform) return;
+        dayDelta = nextDelta;
+        el.style.transform = `translateX(${dayDelta * pxPerDay}px)`;
+        const patch = computeDragPatch(task, mode, dayDelta) || {};
+        const parts = [];
+        if (patch.startDate) parts.push(`Inicio ${fmtEsShort(patch.startDate)}`);
+        if (patch.dueDate) parts.push(`Fin ${fmtEsShort(patch.dueDate)}`);
+        showDragTooltip(el, parts.join(" · ") || "Sin cambios");
+      }
+
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        removeDragTooltip();
+        el.classList.remove("tl-bar--dragging");
+        el.style.transform = "";
+        el.style.cursor = "";
+        document.body.style.cursor = "";
+        if (!dragging) return; // clic normal, sin arrastre real: que abra la tarea como siempre
+
+        dragState.suppressClickFor = taskId;
+        const patch = computeDragPatch(task, mode, dayDelta);
+        if (!patch) return;
+        updateTask(taskId, patch)
+          .then(() => showToast("Fecha actualizada."))
+          .catch((err) => {
+            console.error(err);
+            showToast("No se pudo actualizar la fecha. Comprueba tu conexión e inténtalo de nuevo.");
+          });
+      }
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  });
+}
+
+// --------------------------------------------------------------------
 // Columnas según el zoom: cada una es { start, end, label, topLabel }
 // --------------------------------------------------------------------
 function buildColumns(unit, rawMin, rawMax) {
+  if (unit === "year") {
+    let cursor = new Date(rawMin.getFullYear() - 1, 0, 1);
+    const endYear = rawMax.getFullYear() + 1;
+    const cols = [];
+    while (cursor.getFullYear() <= endYear) {
+      cols.push({
+        start: new Date(cursor.getFullYear(), 0, 1),
+        end: new Date(cursor.getFullYear(), 11, 31),
+        label: String(cursor.getFullYear()),
+        topLabel: "",
+      });
+      cursor = new Date(cursor.getFullYear() + 1, 0, 1);
+    }
+    return cols;
+  }
+  if (unit === "quarter") {
+    const qStartMin = Math.floor(rawMin.getMonth() / 3) * 3;
+    let cursor = new Date(rawMin.getFullYear(), qStartMin - 3, 1);
+    const qStartMax = Math.floor(rawMax.getMonth() / 3) * 3;
+    const end = new Date(rawMax.getFullYear(), qStartMax + 6, 0);
+    const cols = [];
+    while (cursor <= end) {
+      const qEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 3, 0);
+      const qNum = Math.floor(cursor.getMonth() / 3) + 1;
+      cols.push({
+        start: new Date(cursor),
+        end: qEnd,
+        label: `T${qNum}`,
+        topLabel: qNum === 1 ? String(cursor.getFullYear()) : "",
+      });
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 3, 1);
+    }
+    return cols;
+  }
   if (unit === "week") {
     let cursor = mondayOf(addDays(rawMin, -7));
     const end = addDays(rawMax, 7);

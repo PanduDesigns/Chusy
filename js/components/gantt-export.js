@@ -22,6 +22,13 @@
 // Las librerías (SheetJS para el genérico, JSZip para rellenar la
 // plantilla, jsPDF para el PDF) se cargan solas desde un CDN la primera
 // vez que hace falta cada una — no en cada carga de la app.
+//
+// `viewMode` ("tasks" | "sections", v44): este archivo no sabe nada de
+// CÓMO se agregó una sección — timeline-view.js ya le manda `groups` con
+// una "tarea" (con `startDate`/`dueDate`/`priority`/`isComplete` de
+// verdad) por cada fila que se ve en pantalla, sea una tarea real o un
+// bloque agregado. `viewMode` solo se usa aquí para que las cabeceras y
+// los avisos digan "sección(es)" en vez de "tarea(s)" cuando corresponda.
 // ============================================================================
 import { toDate, addDays, daysBetween, isoWeekNumber, initials, showToast, plainTitleText } from "../utils.js";
 
@@ -138,12 +145,18 @@ function triggerDownload(blob, filename) {
 // depender de colorear celdas (poco fiable en la versión gratuita de
 // SheetJS, la única que se puede cargar desde un CDN sin licencia).
 // ============================================================================
-async function buildGenericExcel({ groups, title, groupLabel, teamMembers }) {
+async function buildGenericExcel({ groups, title, groupLabel, teamMembers, viewMode = "tasks" }) {
   await ensureXlsx();
   const allTasks = groups.flatMap((g) => g.tasks);
   const { min, max } = computeRange(allTasks);
   const totalDays = Math.max(1, daysBetween(min, max) + 1);
   const BAR_WIDTH = 40;
+  // En modo Secciones cada fila es un bloque agregado (ver
+  // buildSectionModeGroups en timeline-view.js), no una tarea suelta — la
+  // cabecera y el recuento del título lo dicen con su propia palabra en
+  // vez de seguir llamándolas "tareas".
+  const rowNounCap = viewMode === "sections" ? "Sección" : "Tarea";
+  const rowNoun = (n) => (viewMode === "sections" ? (n === 1 ? "sección" : "secciones") : n === 1 ? "tarea" : "tareas");
 
   function barText(t) {
     if (!t.startDate && !t.dueDate) return "(sin fecha)";
@@ -155,7 +168,7 @@ async function buildGenericExcel({ groups, title, groupLabel, teamMembers }) {
     return " ".repeat(sOff) + "█".repeat(Math.max(1, eOff - sOff + 1));
   }
 
-  const header = [groupLabel, "Tarea", "Responsables", "Prioridad", "Inicio", "Fin", "Días", "Estado", `Cronograma (${fmtDate(min)} – ${fmtDate(max)})`];
+  const header = [groupLabel, rowNounCap, "Responsables", "Prioridad", "Inicio", "Fin", "Días", "Estado", `Cronograma (${fmtDate(min)} – ${fmtDate(max)})`];
   const rows = [];
   groups.forEach((g) => {
     g.tasks.forEach((t) => {
@@ -177,7 +190,7 @@ async function buildGenericExcel({ groups, title, groupLabel, teamMembers }) {
   const wb = window.XLSX.utils.book_new();
   const wsData = [
     [title],
-    [`Generado el ${fmtDate(new Date())} · ${allTasks.length} ${allTasks.length === 1 ? "tarea" : "tareas"}`],
+    [`Generado el ${fmtDate(new Date())} · ${allTasks.length} ${rowNoun(allTasks.length)}`],
     [],
     header,
     ...rows,
@@ -259,27 +272,35 @@ async function buildGenericExcel({ groups, title, groupLabel, teamMembers }) {
 // correspondiente en el apartado 7 del README).
 // ============================================================================
 
-function checkMartechTemplateFit(groups) {
+function checkMartechTemplateFit(groups, viewMode = "tasks") {
+  // En modo Secciones, cada "tarea" que llega aquí es en realidad un
+  // bloque agregado por sección (ver buildSectionModeGroups en
+  // timeline-view.js) — los avisos lo dicen con su propia palabra, para
+  // no confundir a quien lee "50 tareas" cuando en realidad son 50
+  // secciones. El resto de la función no cambia: sigue viendo un objeto
+  // con `startDate`/`dueDate` por fila, le da igual si es real o agregado.
+  const noun = viewMode === "sections" ? "sección" : "tarea";
+  const nounPlural = viewMode === "sections" ? "secciones" : "tareas";
   const flat = groups.flatMap((g) => g.tasks.map((t) => ({ task: t, sectionLabel: g.label })));
   const dated = flat.filter((x) => x.task.startDate || x.task.dueDate);
   if (!dated.length) {
-    return { fits: false, reason: "Ninguna tarea tiene fecha de inicio o de entrega." };
+    return { fits: false, reason: `Ninguna ${noun} tiene fecha de inicio o de entrega.` };
   }
   if (dated.length > MARTECH_MAX_TASKS) {
-    return { fits: false, reason: `Hay ${dated.length} tareas con fecha y la plantilla de la empresa solo tiene sitio para ${MARTECH_MAX_TASKS}.` };
+    return { fits: false, reason: `Hay ${dated.length} ${nounPlural} con fecha y la plantilla de la empresa solo tiene sitio para ${MARTECH_MAX_TASKS}.` };
   }
   const starts = dated.map((x) => toDate(x.task.startDate || x.task.dueDate));
   const ends = dated.map((x) => toDate(x.task.dueDate || x.task.startDate));
   const minDate = new Date(Math.min(...starts));
   const maxDate = new Date(Math.max(...ends));
   if (minDate.getFullYear() !== maxDate.getFullYear()) {
-    return { fits: false, reason: "Las tareas abarcan más de un año natural y la plantilla de la empresa solo representa uno." };
+    return { fits: false, reason: `Las ${nounPlural} abarcan más de un año natural y la plantilla de la empresa solo representa uno.` };
   }
   const startWeek = isoWeekNumber(minDate);
   const endWeek = isoWeekNumber(maxDate);
   const spanWeeks = endWeek - startWeek + 1;
   if (spanWeeks < 1 || spanWeeks > MARTECH_MAX_WEEKS) {
-    return { fits: false, reason: `Las tareas abarcan ${Math.max(spanWeeks, 1)} semanas y la plantilla de la empresa solo tiene sitio para ${MARTECH_MAX_WEEKS}.` };
+    return { fits: false, reason: `Las ${nounPlural} abarcan ${Math.max(spanWeeks, 1)} semanas y la plantilla de la empresa solo tiene sitio para ${MARTECH_MAX_WEEKS}.` };
   }
   return { fits: true, dated, year: minDate.getFullYear(), startWeek };
 }
@@ -406,7 +427,7 @@ function extendMartechSheetRanges(xml, finalRow) {
   return xml;
 }
 
-async function buildMartechExcel({ project, groups, fit }) {
+async function buildMartechExcel({ project, groups, fit, viewMode = "tasks" }) {
   await ensureJsZip();
   const resp = await fetch(MARTECH_TEMPLATE_URL);
   if (!resp.ok) throw new Error("No se pudo cargar la plantilla de Excel de la empresa.");
@@ -507,7 +528,7 @@ async function buildMartechExcel({ project, groups, fit }) {
   }
 
   const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.ms-excel.sheet.macroEnabled.12" });
-  triggerDownload(blob, `${sanitizeFilename(project.name)}-cronograma.xlsm`);
+  triggerDownload(blob, `${sanitizeFilename(project.name)}-cronograma${viewMode === "sections" ? "-secciones" : ""}.xlsm`);
 }
 
 /**
@@ -520,12 +541,12 @@ async function buildMartechExcel({ project, groups, fit }) {
  * checkMartechTemplateFit), cae sola al genérico avisando por qué, en
  * vez de dejar sin archivo a quien exporta.
  */
-export async function exportTimelineToExcel({ groups, title, groupLabel, teamMembers, project }) {
+export async function exportTimelineToExcel({ groups, title, groupLabel, teamMembers, project, viewMode = "tasks" }) {
   if (project) {
-    const fit = checkMartechTemplateFit(groups);
+    const fit = checkMartechTemplateFit(groups, viewMode);
     if (fit.fits) {
       try {
-        await buildMartechExcel({ project, groups, fit });
+        await buildMartechExcel({ project, groups, fit, viewMode });
         return;
       } catch (err) {
         console.error("Plantilla Martech:", err);
@@ -535,7 +556,7 @@ export async function exportTimelineToExcel({ groups, title, groupLabel, teamMem
       showToast(`${fit.reason} Se genera un Excel genérico en su lugar.`);
     }
   }
-  await buildGenericExcel({ groups, title, groupLabel, teamMembers });
+  await buildGenericExcel({ groups, title, groupLabel, teamMembers, viewMode });
 }
 
 // ============================================================================
@@ -546,12 +567,13 @@ export async function exportTimelineToExcel({ groups, title, groupLabel, teamMem
 // Se pagina verticalmente si hay más tareas de las que caben en una
 // página, repitiendo el eje de fechas arriba de cada una nueva.
 // ============================================================================
-export async function exportTimelineToPdf({ groups, title, teamMembers }) {
+export async function exportTimelineToPdf({ groups, title, teamMembers, viewMode = "tasks" }) {
   await ensureJsPdf();
   const { jsPDF } = window.jspdf;
   const allTasks = groups.flatMap((g) => g.tasks);
   const { min, max } = computeRange(allTasks);
   const totalDays = Math.max(1, daysBetween(min, max) + 1);
+  const rowNoun = (n) => (viewMode === "sections" ? (n === 1 ? "sección" : "secciones") : n === 1 ? "tarea" : "tareas");
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const PAGE_W = doc.internal.pageSize.getWidth();
@@ -617,7 +639,7 @@ export async function exportTimelineToPdf({ groups, title, teamMembers }) {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       doc.setTextColor(120, 128, 134);
-      doc.text(`${fmtDate(min)} – ${fmtDate(max)} · ${allTasks.length} ${allTasks.length === 1 ? "tarea" : "tareas"} · generado el ${fmtDate(new Date())}`, MARGIN, 20);
+      doc.text(`${fmtDate(min)} – ${fmtDate(max)} · ${allTasks.length} ${rowNoun(allTasks.length)} · generado el ${fmtDate(new Date())}`, MARGIN, 20);
     }
     drawAxis();
   }
@@ -647,7 +669,13 @@ export async function exportTimelineToPdf({ groups, title, teamMembers }) {
       doc.setFontSize(8);
       doc.setTextColor(t.isComplete ? 170 : 30, t.isComplete ? 170 : 32, t.isComplete ? 170 : 36);
       const names = assigneeNames(t, teamMembers).map((n) => initials(n)).join(" ");
-      const label = `${t.isMilestone ? "◆ " : ""}${plainTitleText(t.title)}`;
+      // "◆ " (con este mismo doc.text/fuente Helvetica) salía como texto
+      // corrupto en el PDF -- la fuente base de jsPDF no tiene ese
+      // carácter (comprobado aparte, ver v44 en el historial del
+      // README). "•" sí lo soporta. El rombo DE VERDAD (vectorial, no
+      // texto) que marca la fecha del hito en la línea de tiempo, un
+      // poco más abajo, no le afecta y no cambia.
+      const label = `${t.isMilestone ? "• " : ""}${plainTitleText(t.title)}`;
       doc.text(doc.splitTextToSize(label, LABEL_W - (names ? 14 : 2))[0] || "", MARGIN, y + 3.2);
       if (names) {
         doc.setFontSize(6.5);
@@ -668,6 +696,20 @@ export async function exportTimelineToPdf({ groups, title, teamMembers }) {
           const x1 = Math.max(CHART_X, xForDate(s));
           const x2 = Math.min(PAGE_W - MARGIN, xForDate(e));
           doc.roundedRect(x1, y + 0.8, Math.max(1.5, x2 - x1), 3, 0.6, 0.6, "F");
+          // Modo Secciones: los hitos que quedaron dentro de este bloque
+          // (ver aggregateBucket en timeline-view.js) no se pierden — un
+          // triángulo pequeño en blanco, encima de la barra, en su fecha
+          // real. Mismo criterio que el rombo miniatura de la vista en
+          // pantalla: que se lea sobre cualquier color de prioridad.
+          (t.milestones || []).forEach((m) => {
+            const md = m.dueDate || m.startDate;
+            if (!md) return;
+            const mx = xForDate(toDate(md));
+            if (mx < CHART_X || mx > PAGE_W - MARGIN) return;
+            doc.setFillColor(255, 255, 255);
+            doc.triangle(mx - 1.0, y + 3.2, mx + 1.0, y + 3.2, mx, y + 1.3, "F");
+            doc.triangle(mx - 1.0, y + 3.2, mx + 1.0, y + 3.2, mx, y + 4.9, "F");
+          });
         }
       }
       y += ROW_H;

@@ -59,6 +59,12 @@ let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'metri
 let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
 let timelineShowHolidays = false;
+let timelineViewMode = "tasks"; // 'tasks' | 'sections' — compartido entre la línea de tiempo de un proyecto y la global, igual que el zoom
+// v46: qué secciones están desplegadas dentro del modo Secciones sin salir
+// de él (clave namespaceada con el id de proyecto, ver sectionKey en
+// timeline-view.js). Mismo criterio que el resto del estado del Gantt:
+// compartido entre las dos líneas de tiempo, se pierde al recargar.
+let timelineExpandedSections = new Set();
 let activeFilters = {}; // { [filterKey]: Set(valores) }
 let searchText = ""; // cuadro de búsqueda de la barra de filtros — transitorio, no se recuerda entre sesiones (se reinicia en cada selectProject/selectMyTasks/selectTimeline, igual que activeFilters salvo en Mis tareas)
 let sortState = { column: null, direction: "asc" };
@@ -369,6 +375,19 @@ function toggleTimelineHolidays() {
   else renderMain();
 }
 
+function setTimelineViewMode(viewMode) {
+  timelineViewMode = viewMode;
+  if (mode === "timeline") renderShell();
+  else renderMain();
+}
+
+function toggleTimelineSectionExpanded(sectionKey) {
+  if (timelineExpandedSections.has(sectionKey)) timelineExpandedSections.delete(sectionKey);
+  else timelineExpandedSections.add(sectionKey);
+  if (mode === "timeline") renderShell();
+  else renderMain();
+}
+
 function handleFilterChange(key, newSet) {
   activeFilters = { ...activeFilters, [key]: newSet };
   if (mode === "mytasks") saveMyTasksFilters(activeFilters);
@@ -544,10 +563,17 @@ function renderTimelineContent() {
     label: p.name,
     color: p.color,
     icon: p.icon,
+    // `sections` (además de `tasks`) para que en modo Secciones
+    // timeline-view.js pueda repartir las tareas de este proyecto entre
+    // sus propias secciones, en vez de agregar el proyecto entero de
+    // golpe — ver buildSectionModeGroups en ese archivo.
+    sections: p.sections,
     tasks: applyTaskFilters((globalTasksByProject[p.id] || []).filter((t) => !t.isComplete), activeFilters, searchText),
   }));
   renderTimelineView(mainContentEl, {
     groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
+    viewMode: timelineViewMode, onViewModeChange: setTimelineViewMode,
+    expandedSections: timelineExpandedSections, onToggleSectionExpand: toggleTimelineSectionExpanded,
     showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
     onOpenTask: openTask,
     exportTitle: "Chusy — Línea de tiempo global", groupLabel: "Proyecto", teamMembers,
@@ -631,6 +657,8 @@ function renderProjectContent() {
       : bySection;
     renderTimelineView(mainContentEl, {
       groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,
+      viewMode: timelineViewMode, onViewModeChange: setTimelineViewMode,
+      expandedSections: timelineExpandedSections, onToggleSectionExpand: toggleTimelineSectionExpanded,
       showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
       onOpenTask: openTask,
       exportTitle: `${currentProject.name} — Línea de tiempo`, groupLabel: "Sección", teamMembers, project: currentProject,
