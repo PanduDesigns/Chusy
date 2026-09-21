@@ -638,6 +638,10 @@ function renderProjectContent() {
       id: s.id,
       label: s.name,
       color: currentProject.color,
+      // Color propio de la sección (v47, sections-modal.js) — si no se ha
+      // elegido ninguno, timeline-view.js sigue asignando uno automático
+      // distinto por sección, como hacía antes de la v47.
+      sectionColor: s.color || null,
       // getTaskSectionForProject en vez de t.sectionId a secas: esta
       // tarea puede tener a currentProject como proyecto ADICIONAL (ver
       // extraProjectIds), en cuyo caso su sección aquí sale de
@@ -653,7 +657,7 @@ function renderProjectContent() {
     // sección" aparte, solo si hay alguna tarea así.
     const noSectionTasks = filteredTasks.filter((t) => !getTaskSectionForProject(t, currentProject.id));
     const groups = noSectionTasks.length
-      ? [{ id: "", label: "Sin sección", color: currentProject.color, tasks: noSectionTasks }, ...bySection]
+      ? [{ id: "", label: "Sin sección", color: currentProject.color, sectionColor: null, tasks: noSectionTasks }, ...bySection]
       : bySection;
     renderTimelineView(mainContentEl, {
       groups, zoom: timelineZoom, onZoomChange: setTimelineZoom,

@@ -941,6 +941,11 @@ body.is-col-resizing * { cursor: col-resize !important; }
 }
 .chip.is-selected { border-color: var(--color-signal-dim); color: var(--color-signal-text); background: var(--color-signal-soft); }
 .chip__dot { width: 7px; height: 7px; border-radius: 50%; }
+/* Punto de color de una sección (v47, sections-modal.js) — mismo tamaño y
+   trato que un chip de color normal, pero como botón redondo suelto
+   delante del nombre, ya que aquí no hace falta ningún texto al lado. */
+.sec-color-dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--color-line-bright); cursor: pointer; flex-shrink: 0; padding: 0; }
+.sec-color-dot:hover { transform: scale(1.12); }
 
 .appearance-picker { display: flex; gap: 12px; align-items: flex-start; }
 .appearance-picker__body { flex: 1; min-width: 0; }
@@ -1155,6 +1160,19 @@ body.is-col-resizing * { cursor: col-resize !important; }
    que el arrastre está en curso; sin transición, para que siga al cursor
    al milímetro en vez de ir a rebufo. */
 .tl-bar--dragging { opacity: 1; box-shadow: 0 0 0 2px var(--color-signal), 0 4px 10px rgba(0, 0, 0, 0.35); z-index: 5; transition: none; }
+/* Asas de redimensionar (v47): antes solo se sabía que un borde se podía
+   estirar por el cambio de cursor al pasar por encima — había que
+   encontrarlo a ciegas. Con estas marcas se ve dónde agarrar sin tener
+   que pasar el ratón exactamente por la franja de unos pocos píxeles. */
+.tl-bar--resizable { position: relative; }
+.tl-bar--resizable::before, .tl-bar--resizable::after {
+  content: ""; position: absolute; top: 15%; bottom: 15%; width: 3px;
+  background: rgba(255, 255, 255, 0.6); border-radius: 2px;
+  opacity: 0; transition: opacity var(--transition-fast);
+}
+.tl-bar--resizable::before { left: 2px; }
+.tl-bar--resizable::after { right: 2px; }
+.tl-bar--resizable:hover::before, .tl-bar--resizable:hover::after { opacity: 1; }
 .tl-drag-tooltip {
   position: fixed; transform: translate(-50%, -100%);
   background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);

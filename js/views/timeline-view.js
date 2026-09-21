@@ -182,6 +182,8 @@ function aggregateBucket(label, tasks, sectionKey, accentColor) {
  * el resto de la app desde la v34. Solo devuelve buckets con alguna tarea.
  * `id: ""` para "Sin sección" (igual que el resto de la app) — se usa para
  * construir la sectionKey namespaceada de expandir (ver buildSectionModeGroups).
+ * `color`: el color propio de la sección si se eligió uno (v47,
+ * sections-modal.js) — "Sin sección" nunca tiene, no es una sección real.
  */
 function sectionBucketsForProject(tasks, projectId, sectionDefs) {
   const sorted = [...sectionDefs].sort((a, b) => a.order - b.order);
@@ -189,9 +191,10 @@ function sectionBucketsForProject(tasks, projectId, sectionDefs) {
   const bySection = sorted.map((s) => ({
     id: s.id,
     label: s.name,
+    color: s.color || null,
     tasks: tasks.filter((t) => getTaskSectionForProject(t, projectId) === s.id),
   }));
-  const buckets = noSection.length ? [{ id: "", label: "Sin sección", tasks: noSection }, ...bySection] : bySection;
+  const buckets = noSection.length ? [{ id: "", label: "Sin sección", color: null, tasks: noSection }, ...bySection] : bySection;
   return buckets.filter((b) => b.tasks.length);
 }
 
@@ -202,6 +205,12 @@ function sectionBucketsForProject(tasks, projectId, sectionDefs) {
  * solo hace falta en el caso "por proyecto" (para namespacear su única
  * sectionKey); en el caso global cada grupo ya trae su propio id de
  * proyecto (`g.id`), así que se ignora.
+ *
+ * Color de sección (v47): si la sección tiene uno propio elegido a mano
+ * (sections-modal.js), se usa tal cual. Si no, se le asigna uno automático
+ * del ciclo — el índice del ciclo solo avanza para las secciones que SÍ
+ * necesitan uno automático, así que colorear una a mano no le quita a las
+ * demás la oportunidad de que les toquen los primeros tonos del ciclo.
  */
 function buildSectionModeGroups(groups, currentProjectId) {
   const out = [];
@@ -212,18 +221,22 @@ function buildSectionModeGroups(groups, currentProjectId) {
       // y sus tareas se agregan una vez por cada sección de ESE proyecto.
       const buckets = sectionBucketsForProject(g.tasks, g.id, g.sections);
       if (!buckets.length) return;
+      let autoIdx = 0;
       out.push({
         id: g.id, label: g.label, color: g.color, icon: g.icon,
-        tasks: buckets.map((b, i) => aggregateBucket(b.label, b.tasks, `${g.id}:${b.id || "none"}`, SECTION_ACCENT_COLORS[i % SECTION_ACCENT_COLORS.length])),
+        tasks: buckets.map((b) => {
+          const accentColor = b.color || SECTION_ACCENT_COLORS[autoIdx++ % SECTION_ACCENT_COLORS.length];
+          return aggregateBucket(b.label, b.tasks, `${g.id}:${b.id || "none"}`, accentColor);
+        }),
       });
     } else {
       // Por proyecto: el grupo YA es una sección — se agrega entera en un
       // único bloque, sin cabecera propia (esa fila hace las dos cosas).
-      // No hay índice de varias secciones aquí (el índice de color se
+      // `g.sectionColor` es el color propio de ESTA sección si lo tiene
+      // (añadido por app.js); si no, el índice de color automático se
       // decide fuera, en el bucle de abajo, con el índice del propio
-      // grupo dentro de `groups`, para que cada sección del proyecto
-      // tenga igualmente un color distinto entre sí).
-      out.push({ id: g.id, label: g.label, color: g.color, flat: true, _rawTasks: g.tasks });
+      // grupo dentro de `groups` (solo contando los que lo necesitan).
+      out.push({ id: g.id, label: g.label, color: g.color, flat: true, _rawTasks: g.tasks, _sectionColor: g.sectionColor || null });
     }
   });
   // Color por índice DESPUÉS de filtrar los grupos vacíos, para que el
@@ -231,10 +244,11 @@ function buildSectionModeGroups(groups, currentProjectId) {
   let flatIdx = 0;
   out.forEach((g) => {
     if (!g.flat) return;
-    const accentColor = SECTION_ACCENT_COLORS[flatIdx % SECTION_ACCENT_COLORS.length];
-    flatIdx++;
+    const accentColor = g._sectionColor || SECTION_ACCENT_COLORS[flatIdx % SECTION_ACCENT_COLORS.length];
+    if (!g._sectionColor) flatIdx++;
     g.tasks = [aggregateBucket(g.label, g._rawTasks, `${currentProjectId}:${g.id || "none"}`, accentColor)];
     delete g._rawTasks;
+    delete g._sectionColor;
   });
   return out;
 }
@@ -379,7 +393,12 @@ export function renderTimelineView(container, {
     } else {
       const color = PRIORITY_COLORS[t.priority] || "var(--color-line-bright)";
       const accentShadow = row.indent && row.accentColor ? `box-shadow:inset 6px 0 0 ${row.accentColor};` : "";
-      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}"></div>`;
+      // Asas de redimensionar (v47): solo se ven — y solo tiene sentido
+      // ofrecerlas — cuando la tarea tiene las dos fechas Y es arrastrable
+      // en este zoom; con una sola fecha no hay "borde" que estirar
+      // aparte del propio punto (ver canResize en wireBarDragging).
+      const resizable = canDrag && t.startDate && t.dueDate ? " tl-bar--resizable" : "";
+      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}${resizable}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}"></div>`;
     }
   });
 
@@ -508,7 +527,7 @@ function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMem
 // de la tarea al empezar a arrastrar (data-drag-task solo lleva el id).
 // --------------------------------------------------------------------
 const DRAG_MOVE_THRESHOLD_PX = 4;
-const DRAG_EDGE_ZONE_PX = 7;
+const DRAG_EDGE_ZONE_PX = 9;
 
 function computeDragPatch(task, mode, dayDelta) {
   if (!dayDelta) return null;
