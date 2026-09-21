@@ -3,13 +3,18 @@
 // por proyecto) o de proyectos (vista global) con sus tareas ya dentro, así
 // la misma vista sirve para los dos casos sin duplicar lógica.
 //
-// Zoom con un clic entre días / semanas / meses / trimestres / años (`zoom`,
-// controlado desde fuera vía `onZoomChange` para que se recuerde al cambiar
-// de vista). En semanas se indica el número de semana ISO del año. Las
-// vacaciones inhábiles (apartado más abajo) solo se pueden marcar en día,
-// semana o mes: en trimestre o año, prácticamente cualquier columna roza
-// agosto o la Navidad, así que resaltarlas ahí no distinguiría nada — el
-// botón se oculta en esos dos zooms en vez de mostrar un resaltado inútil.
+// Zoom con un clic entre días / semanas / meses (`zoom`, controlado desde
+// fuera vía `onZoomChange` para que se recuerde al cambiar de vista). En
+// semanas se indica el número de semana ISO del año. (v46 añadió también
+// trimestre/año para horizontes largos; se quitaron en v48 a petición de
+// Ramón — no tenía sentido esa escala para la duración real de sus
+// proyectos. Ver el historial del README si hiciera falta recuperarlos:
+// quedó documentado cómo se hicieron.)
+//
+// Vacaciones inhábiles (apartado más abajo): solo se pueden marcar en día,
+// semana o mes — a partir de un zoom más amplio que eso, prácticamente
+// cualquier columna rozaría agosto o la Navidad, así que resaltarlas
+// dejaría de distinguir nada.
 //
 // Cómo se calcula cada barra: si la tarea tiene fecha de inicio Y fecha
 // límite, la barra cubre todo ese rango (recortado a las columnas visibles
@@ -67,7 +72,7 @@
 // aggregateBucket), así que "arrastrarla" no tendría una tarea real a la
 // que escribirle la fecha. Solo con zoom de día o semana, porque a partir
 // de mes cada píxel ya representa demasiados días para arrastrar con
-// precisión (a trimestre, prácticamente todo un mes por pocos píxeles).
+// precisión.
 // Tirar del borde izquierdo cambia la fecha de inicio, del derecho la
 // fecha límite, y del cuerpo mueve las dos a la vez sin cambiar la
 // duración; un hito (un solo rombo) siempre se mueve entero, sea cual sea
@@ -86,6 +91,8 @@ import { escapeHtml, toDate, toDateInputValue, addDays, daysBetween, isoWeekNumb
 import { openTaskContextMenu } from "./list-view.js";
 import { exportTimelineToExcel, exportTimelineToPdf } from "../components/gantt-export.js";
 import { updateTask } from "../data/tasks.js";
+import { saveProjectSections } from "../data/projects.js";
+import { openSectionsModal } from "../components/sections-modal.js";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -112,15 +119,14 @@ const ZOOM_CONFIG = {
   day: { width: 32, label: "Días" },
   week: { width: 64, label: "Semanas" },
   month: { width: 96, label: "Meses" },
-  quarter: { width: 90, label: "Trimestres" },
-  year: { width: 110, label: "Años" },
 };
 // Arrastrar para cambiar fechas (ver wireBarDragging) solo tiene precisión
 // suficiente en estos dos: a partir de mes, cada píxel ya representa
 // demasiados días.
 const DRAGGABLE_ZOOMS = new Set(["day", "week"]);
-// Vacaciones inhábiles: idem, a partir de trimestre casi cualquier columna
-// roza agosto o Navidad, así que resaltarlas deja de distinguir nada.
+// Vacaciones inhábiles: solo tienen sentido hasta zoom de mes — a partir
+// de ahí (cuando existía trimestre/año, ver v46/v48) casi cualquier
+// columna rozaba agosto o Navidad, y resaltarlas dejaba de distinguir nada.
 const HOLIDAY_CAPABLE_ZOOMS = new Set(["day", "week", "month"]);
 
 /** Agosto completo, o del 22 de diciembre al 6 de enero (cierre de Navidad). */
@@ -309,6 +315,12 @@ export function renderTimelineView(container, {
     <button type="button" class="topbar__view-btn${vm === "tasks" ? " is-active" : ""}" data-viewmode="tasks">Tareas</button>
   `;
   const holidayBtnHtml = canShowHolidays ? `<button type="button" class="btn btn--ghost btn--sm${showHolidays ? " is-toggled" : ""}" id="tl-holidays-btn">🏖️ Vacaciones inhábiles</button>` : "";
+  // Solo en la línea de tiempo de UN proyecto (`project` viene informado) —
+  // en la global no hay un único conjunto de secciones al que abrir este
+  // modal, sería el de qué proyecto. Mismo modal que ya usa la Lista
+  // (sections-modal.js) — pedido para poder cambiar el color de una
+  // sección sin tener que salir a la Lista a buscar el botón de allí.
+  const sectionsBtnHtml = project ? `<button type="button" class="btn btn--ghost btn--sm" id="tl-sections-btn">🗂 Secciones</button>` : "";
 
   if (!rows.length) {
     container.innerHTML = `
@@ -317,6 +329,7 @@ export function renderTimelineView(container, {
           <div class="topbar__views" style="margin-left:0;">${viewModeButtons}</div>
           <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
           ${holidayBtnHtml}
+          ${sectionsBtnHtml}
         </div>
         <div class="empty-state">
           <span class="empty-state__eyebrow">— LÍNEA DE TIEMPO —</span>
@@ -327,6 +340,7 @@ export function renderTimelineView(container, {
     container.querySelectorAll("[data-zoom]").forEach((btn) => btn.addEventListener("click", () => onZoomChange(btn.dataset.zoom)));
     container.querySelectorAll("[data-viewmode]").forEach((btn) => btn.addEventListener("click", () => onViewModeChange(btn.dataset.viewmode)));
     if (canShowHolidays) container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
+    if (project) container.querySelector("#tl-sections-btn").addEventListener("click", () => openSectionsModal({ project, onSave: (sections) => saveProjectSections(project, sections) }));
     return;
   }
 
@@ -421,6 +435,7 @@ export function renderTimelineView(container, {
         <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
         <button class="btn btn--ghost btn--sm" id="tl-today-btn">Hoy</button>
         ${holidayBtnHtml}
+        ${sectionsBtnHtml}
         ${withoutDates > 0 ? `<span class="timeline__hint">${withoutDates} ${withoutDates === 1 ? "tarea sin fecha no se muestra" : "tareas sin fecha no se muestran"} aquí</span>` : ""}
         <button class="btn btn--ghost btn--sm" id="tl-export-btn" style="margin-left:auto;">⬇ Exportar</button>
       </div>
@@ -443,6 +458,7 @@ export function renderTimelineView(container, {
   };
   container.querySelector("#tl-today-btn").addEventListener("click", scrollToToday);
   if (canShowHolidays) container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
+  if (project) container.querySelector("#tl-sections-btn").addEventListener("click", () => openSectionsModal({ project, onSave: (sections) => saveProjectSections(project, sections) }));
   // Título con sufijo cuando se exporta en modo Secciones, para que el
   // propio archivo descargado (nombre de fichero incluido, vía
   // sanitizeFilename en gantt-export.js) se autodocumente en qué modo se
@@ -655,40 +671,6 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
 // Columnas según el zoom: cada una es { start, end, label, topLabel }
 // --------------------------------------------------------------------
 function buildColumns(unit, rawMin, rawMax) {
-  if (unit === "year") {
-    let cursor = new Date(rawMin.getFullYear() - 1, 0, 1);
-    const endYear = rawMax.getFullYear() + 1;
-    const cols = [];
-    while (cursor.getFullYear() <= endYear) {
-      cols.push({
-        start: new Date(cursor.getFullYear(), 0, 1),
-        end: new Date(cursor.getFullYear(), 11, 31),
-        label: String(cursor.getFullYear()),
-        topLabel: "",
-      });
-      cursor = new Date(cursor.getFullYear() + 1, 0, 1);
-    }
-    return cols;
-  }
-  if (unit === "quarter") {
-    const qStartMin = Math.floor(rawMin.getMonth() / 3) * 3;
-    let cursor = new Date(rawMin.getFullYear(), qStartMin - 3, 1);
-    const qStartMax = Math.floor(rawMax.getMonth() / 3) * 3;
-    const end = new Date(rawMax.getFullYear(), qStartMax + 6, 0);
-    const cols = [];
-    while (cursor <= end) {
-      const qEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 3, 0);
-      const qNum = Math.floor(cursor.getMonth() / 3) + 1;
-      cols.push({
-        start: new Date(cursor),
-        end: qEnd,
-        label: `T${qNum}`,
-        topLabel: qNum === 1 ? String(cursor.getFullYear()) : "",
-      });
-      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 3, 1);
-    }
-    return cols;
-  }
   if (unit === "week") {
     let cursor = mondayOf(addDays(rawMin, -7));
     const end = addDays(rawMax, 7);
