@@ -1164,15 +1164,25 @@ body.is-col-resizing * { cursor: col-resize !important; }
    estirar por el cambio de cursor al pasar por encima — había que
    encontrarlo a ciegas. Con estas marcas se ve dónde agarrar sin tener
    que pasar el ratón exactamente por la franja de unos pocos píxeles. */
-.tl-bar--resizable { position: relative; }
-.tl-bar--resizable::before, .tl-bar--resizable::after {
+.tl-bar--resizable, .tl-bar--extend-start, .tl-bar--extend-due { position: relative; }
+.tl-bar--resizable::before, .tl-bar--resizable::after,
+.tl-bar--extend-start::before, .tl-bar--extend-due::after {
   content: ""; position: absolute; top: 15%; bottom: 15%; width: 3px;
   background: rgba(255, 255, 255, 0.6); border-radius: 2px;
   opacity: 0; transition: opacity var(--transition-fast);
 }
-.tl-bar--resizable::before { left: 2px; }
-.tl-bar--resizable::after { right: 2px; }
-.tl-bar--resizable:hover::before, .tl-bar--resizable:hover::after { opacity: 1; }
+.tl-bar--resizable::before, .tl-bar--extend-start::before { left: 2px; }
+.tl-bar--resizable::after, .tl-bar--extend-due::after { right: 2px; }
+.tl-bar--resizable:hover::before, .tl-bar--resizable:hover::after,
+.tl-bar--extend-start:hover::before, .tl-bar--extend-due:hover::after { opacity: 1; }
+/* Bloquea la selección de texto de TODA la página mientras se arrastra
+   una barra (v49) — mismo mecanismo que body.is-col-resizing, que ya usa
+   el redimensionado de columnas de la Lista. Sin esto (y sin el
+   preventDefault/stopPropagation de wireBarDragging), el navegador podía
+   competir por la misma pulsación con su propia selección de texto, y
+   estirar un borde acababa moviendo la tarea entera en vez de cambiar
+   solo esa fecha. */
+body.tl-dragging-bar { user-select: none; }
 .tl-drag-tooltip {
   position: fixed; transform: translate(-50%, -100%);
   background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);

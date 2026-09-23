@@ -76,7 +76,18 @@
 // Tirar del borde izquierdo cambia la fecha de inicio, del derecho la
 // fecha límite, y del cuerpo mueve las dos a la vez sin cambiar la
 // duración; un hito (un solo rombo) siempre se mueve entero, sea cual sea
-// el punto exacto donde se pulse. Reutiliza tal cual updateTask() de
+// el punto exacto donde se pulse. Una tarea con una sola fecha (v49)
+// también se puede estirar por el lado que le falta, para CREARSELA —
+// tirar del otro lado sigue moviendo solo esa única fecha, sin crear
+// nada. mousedown lleva preventDefault()/stopPropagation() y, mientras
+// dura el arrastre, se bloquea la selección de texto de toda la página
+// (body.tl-dragging-bar, en css/styles.css) — sin esto, el navegador
+// competía por la misma pulsación con su propia selección de texto en
+// cuanto el arrastre pasaba cerca de cualquier texto, y el resultado
+// observable era que estirar un borde acababa moviendo la tarea entera en
+// vez de cambiar solo esa fecha (mismo mecanismo que ya usa
+// wireColumnResize en table-columns.js, comprobado que ahí nunca ha dado
+// ese problema). Reutiliza tal cual updateTask() de
 // tasks.js, la misma función que ya usa el modal de tarea, así que no
 // hay ningún permiso ni validación nuevos que mantener aparte.
 //
@@ -265,6 +276,20 @@ export function renderTimelineView(container, {
   showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project,
 }) {
   const unit = zoom || "day";
+  // Mantener el scroll horizontal entre repintados (v49): antes, CADA
+  // repintado —incluido el que dispara terminar de arrastrar una barra,
+  // ver wireBarDragging más abajo— volvía a "Hoy" sin más, así que
+  // arrastrar una tarea fuera de la zona de "hoy" te devolvía de golpe al
+  // punto de partida. Se guarda el scroll de ESTE contenedor antes de
+  // machacarlo, y se restaura en vez de recentrar en "Hoy" — pero SOLO si
+  // el contexto (mismo proyecto/global y mismo zoom) no ha cambiado desde
+  // el repintado anterior: cambiar de zoom sí tiene sentido que recentre
+  // (a otra escala, el mismo scroll en píxeles ya no apunta a lo mismo), y
+  // cambiar de proyecto no debe heredar un scroll que no significa nada ahí.
+  const scrollCtxKey = `${project ? project.id : "global"}:${unit}`;
+  const prevScrollBox = container.querySelector("#tl-scroll");
+  const prevScrollLeft = prevScrollBox && prevScrollBox.dataset.scrollCtx === scrollCtxKey ? prevScrollBox.scrollLeft : null;
+
   const vm = viewMode || "tasks";
   const expanded = expandedSections || new Set();
   const allTasks = groups.flatMap((g) => g.tasks);
@@ -320,7 +345,11 @@ export function renderTimelineView(container, {
   // modal, sería el de qué proyecto. Mismo modal que ya usa la Lista
   // (sections-modal.js) — pedido para poder cambiar el color de una
   // sección sin tener que salir a la Lista a buscar el botón de allí.
-  const sectionsBtnHtml = project ? `<button type="button" class="btn btn--ghost btn--sm" id="tl-sections-btn">🗂 Secciones</button>` : "";
+  // A la derecha, junto al de exportar (v49) — antes estaba junto al de
+  // vacaciones, a la izquierda, distinto del resto de sitios de la app
+  // donde los botones de "acción" (no de configurar la vista) van a la
+  // derecha.
+  const sectionsBtnHtml = project ? `<button type="button" class="btn btn--ghost btn--sm" id="tl-sections-btn" style="margin-left:auto;">🗂 Secciones</button>` : "";
 
   if (!rows.length) {
     container.innerHTML = `
@@ -407,11 +436,16 @@ export function renderTimelineView(container, {
     } else {
       const color = PRIORITY_COLORS[t.priority] || "var(--color-line-bright)";
       const accentShadow = row.indent && row.accentColor ? `box-shadow:inset 6px 0 0 ${row.accentColor};` : "";
-      // Asas de redimensionar (v47): solo se ven — y solo tiene sentido
-      // ofrecerlas — cuando la tarea tiene las dos fechas Y es arrastrable
-      // en este zoom; con una sola fecha no hay "borde" que estirar
-      // aparte del propio punto (ver canResize en wireBarDragging).
-      const resizable = canDrag && t.startDate && t.dueDate ? " tl-bar--resizable" : "";
+      // Asas de redimensionar (v47, ampliado en v49): con las dos fechas,
+      // las dos asas de siempre. Con una sola, un asa SOLO en el lado que
+      // crearía la que falta (ver wireBarDragging) — el otro lado sigue
+      // siendo simplemente "mover", no tiene sentido un asa ahí.
+      let resizable = "";
+      if (canDrag) {
+        if (t.startDate && t.dueDate) resizable = " tl-bar--resizable";
+        else if (t.dueDate && !t.startDate) resizable = " tl-bar--extend-start";
+        else if (t.startDate && !t.dueDate) resizable = " tl-bar--extend-due";
+      }
       cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}${resizable}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}"></div>`;
     }
   });
@@ -435,9 +469,9 @@ export function renderTimelineView(container, {
         <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
         <button class="btn btn--ghost btn--sm" id="tl-today-btn">Hoy</button>
         ${holidayBtnHtml}
-        ${sectionsBtnHtml}
         ${withoutDates > 0 ? `<span class="timeline__hint">${withoutDates} ${withoutDates === 1 ? "tarea sin fecha no se muestra" : "tareas sin fecha no se muestran"} aquí</span>` : ""}
-        <button class="btn btn--ghost btn--sm" id="tl-export-btn" style="margin-left:auto;">⬇ Exportar</button>
+        ${sectionsBtnHtml}
+        <button class="btn btn--ghost btn--sm" id="tl-export-btn">⬇ Exportar</button>
       </div>
       <div class="timeline__scroll" id="tl-scroll">
         <div class="timeline__grid" style="grid-template-columns:${gridTemplateColumns};grid-template-rows:40px repeat(${rows.length}, 34px);">
@@ -452,6 +486,7 @@ export function renderTimelineView(container, {
   container.querySelectorAll("[data-toggle-section]").forEach((el) => el.addEventListener("click", () => onToggleSectionExpand(el.dataset.toggleSection)));
 
   const scrollBox = container.querySelector("#tl-scroll");
+  scrollBox.dataset.scrollCtx = scrollCtxKey;
   const scrollToToday = () => {
     const x = Math.max(0, LABEL_W + todayIdx * colWidth - scrollBox.clientWidth / 2);
     scrollBox.scrollTo({ left: x, behavior: "smooth" });
@@ -465,7 +500,14 @@ export function renderTimelineView(container, {
   // generó — útil si se retoma más adelante sin recordar cuál era.
   const modeExportTitle = vm === "sections" ? `${exportTitle} — por secciones` : exportTitle;
   container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups: displayGroups, exportTitle: modeExportTitle, groupLabel, teamMembers, project, viewMode: vm }));
-  if (todayIdx >= 0) requestAnimationFrame(scrollToToday);
+  // Con el mismo contexto que el repintado anterior (mismo proyecto/global,
+  // mismo zoom), se restaura justo donde estaba en vez de recentrar en
+  // "Hoy" — así, terminar de arrastrar una barra (que repinta al guardar)
+  // ya no manda de vuelta al punto de partida. Sin ese contexto previo
+  // (primer repintado, cambio de zoom, o de proyecto), sigue recentrando
+  // en "Hoy" como siempre.
+  if (prevScrollLeft !== null) scrollBox.scrollLeft = prevScrollLeft;
+  else if (todayIdx >= 0) requestAnimationFrame(scrollToToday);
 
   // `dragState.suppressClickFor`: cuando un arrastre de verdad termina en
   // una tarea, se marca aquí su id para que el "click" nativo que el
@@ -561,6 +603,23 @@ function computeDragPatch(task, mode, dayDelta) {
     if (start && nd < start) nd = start;
     return { dueDate: toDateInputValue(nd) };
   }
+  if (mode === "extend-start") {
+    // Solo tenía dueDate: se CREA startDate en la nueva posición. dueDate
+    // se queda tal cual (es el otro extremo, fijo) — igual que resize-start,
+    // sin pasarse de él.
+    if (!due || start) return null;
+    let ns = addDays(due, dayDelta);
+    if (ns > due) ns = due;
+    return { startDate: toDateInputValue(ns) };
+  }
+  if (mode === "extend-due") {
+    // Solo tenía startDate: se CREA dueDate en la nueva posición. startDate
+    // se queda tal cual, sin quedar la nueva dueDate por delante de él.
+    if (!start || due) return null;
+    let nd = addDays(start, dayDelta);
+    if (nd < start) nd = start;
+    return { dueDate: toDateInputValue(nd) };
+  }
   const patch = {};
   if (start) patch.startDate = toDateInputValue(addDays(start, dayDelta));
   if (due) patch.dueDate = toDateInputValue(addDays(due, dayDelta));
@@ -596,26 +655,50 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
     const task = allTasksById.get(taskId);
     if (!task) return;
     const isMilestoneEl = el.classList.contains("tl-milestone");
-    const canResize = !isMilestoneEl && !!task.startDate && !!task.dueDate;
+    const hasStart = !!task.startDate;
+    const hasDue = !!task.dueDate;
+    // Con las dos fechas: las asas de siempre, una en cada borde. Con solo
+    // una (v49): un asa SOLA en el lado que crearía la que falta — tirar
+    // del otro lado sigue siendo simplemente "mover" esa única fecha, ver
+    // computeDragPatch.
+    const canResizeBoth = !isMilestoneEl && hasStart && hasDue;
+    const canExtendStart = !isMilestoneEl && hasDue && !hasStart;
+    const canExtendDue = !isMilestoneEl && hasStart && !hasDue;
+    const hasEdgeZones = canResizeBoth || canExtendStart || canExtendDue;
 
-    if (canResize) {
+    if (hasEdgeZones) {
       el.addEventListener("mousemove", (e) => {
         if (el.classList.contains("tl-bar--dragging")) return;
         const rect = el.getBoundingClientRect();
         const localX = e.clientX - rect.left;
-        if (localX < DRAG_EDGE_ZONE_PX) el.style.cursor = "w-resize";
-        else if (localX > rect.width - DRAG_EDGE_ZONE_PX) el.style.cursor = "e-resize";
+        const nearLeft = localX < DRAG_EDGE_ZONE_PX;
+        const nearRight = localX > rect.width - DRAG_EDGE_ZONE_PX;
+        if (nearLeft && (canResizeBoth || canExtendStart)) el.style.cursor = "w-resize";
+        else if (nearRight && (canResizeBoth || canExtendDue)) el.style.cursor = "e-resize";
         else el.style.cursor = "grab";
       });
     }
 
     el.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return; // solo botón izquierdo del ratón
+      // Sin esto, el navegador competía por la misma pulsación (empezaba
+      // su propia selección de texto en cuanto el arrastre cruzaba la
+      // etiqueta u otro texto cercano) y el resultado era justo el fallo
+      // reportado: el borde mostraba el cursor de redimensionar pero al
+      // soltar solo se había movido la tarea entera. Mismo mecanismo que
+      // ya usa wireColumnResize (table-columns.js) para las columnas de la
+      // Lista, que nunca ha tenido este problema — comprobado ahí.
+      e.preventDefault();
+      e.stopPropagation();
       const rect = el.getBoundingClientRect();
       const localX = e.clientX - rect.left;
+      const nearLeft = localX < DRAG_EDGE_ZONE_PX;
+      const nearRight = localX > rect.width - DRAG_EDGE_ZONE_PX;
       let mode = "move";
-      if (canResize && localX < DRAG_EDGE_ZONE_PX) mode = "resize-start";
-      else if (canResize && localX > rect.width - DRAG_EDGE_ZONE_PX) mode = "resize-due";
+      if (nearLeft && canResizeBoth) mode = "resize-start";
+      else if (nearRight && canResizeBoth) mode = "resize-due";
+      else if (nearLeft && canExtendStart) mode = "extend-start";
+      else if (nearRight && canExtendDue) mode = "extend-due";
 
       const startX = e.clientX;
       let dayDelta = 0;
@@ -626,7 +709,11 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
         if (!dragging && Math.abs(deltaPx) < DRAG_MOVE_THRESHOLD_PX) return;
         if (!dragging) {
           dragging = true;
-          document.body.style.cursor = mode === "resize-start" ? "w-resize" : mode === "resize-due" ? "e-resize" : "grabbing";
+          // Refuerzo del preventDefault de arriba: bloquea la selección de
+          // texto en TODA la página mientras dura el arrastre, no solo en
+          // esta barra (mismo criterio que body.is-col-resizing).
+          document.body.classList.add("tl-dragging-bar");
+          document.body.style.cursor = mode === "resize-start" || mode === "extend-start" ? "w-resize" : mode === "resize-due" || mode === "extend-due" ? "e-resize" : "grabbing";
         }
         el.classList.add("tl-bar--dragging");
         const nextDelta = Math.round(deltaPx / pxPerDay);
@@ -648,13 +735,15 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
         el.style.transform = "";
         el.style.cursor = "";
         document.body.style.cursor = "";
+        document.body.classList.remove("tl-dragging-bar");
         if (!dragging) return; // clic normal, sin arrastre real: que abra la tarea como siempre
 
         dragState.suppressClickFor = taskId;
         const patch = computeDragPatch(task, mode, dayDelta);
         if (!patch) return;
+        const toastMsg = mode === "extend-start" ? "Fecha de inicio añadida." : mode === "extend-due" ? "Fecha límite añadida." : "Fecha actualizada.";
         updateTask(taskId, patch)
-          .then(() => showToast("Fecha actualizada."))
+          .then(() => showToast(toastMsg))
           .catch((err) => {
             console.error(err);
             showToast("No se pudo actualizar la fecha. Comprueba tu conexión e inténtalo de nuevo.");
