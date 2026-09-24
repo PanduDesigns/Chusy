@@ -436,16 +436,13 @@ export function renderTimelineView(container, {
     } else {
       const color = PRIORITY_COLORS[t.priority] || "var(--color-line-bright)";
       const accentShadow = row.indent && row.accentColor ? `box-shadow:inset 6px 0 0 ${row.accentColor};` : "";
-      // Asas de redimensionar (v47, ampliado en v49): con las dos fechas,
-      // las dos asas de siempre. Con una sola, un asa SOLO en el lado que
-      // crearía la que falta (ver wireBarDragging) — el otro lado sigue
-      // siendo simplemente "mover", no tiene sentido un asa ahí.
-      let resizable = "";
-      if (canDrag) {
-        if (t.startDate && t.dueDate) resizable = " tl-bar--resizable";
-        else if (t.dueDate && !t.startDate) resizable = " tl-bar--extend-start";
-        else if (t.startDate && !t.dueDate) resizable = " tl-bar--extend-due";
-      }
+      // Asas de redimensionar (v47, ampliado en v49, simetrizado en v50):
+      // los dos bordes se marcan siempre igual, tenga la tarea una fecha o
+      // las dos — ver el porqué en wireBarDragging (el borde de la fecha
+      // que falta la crea, el de la que ya tiene la redimensiona o la
+      // mueve según haya o no ancla al otro lado, pero visualmente los dos
+      // se agarran igual desde el principio).
+      const resizable = canDrag && (t.startDate || t.dueDate) ? " tl-bar--resizable" : "";
       cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}${resizable}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}"></div>`;
     }
   });
@@ -657,24 +654,27 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
     const isMilestoneEl = el.classList.contains("tl-milestone");
     const hasStart = !!task.startDate;
     const hasDue = !!task.dueDate;
-    // Con las dos fechas: las asas de siempre, una en cada borde. Con solo
-    // una (v49): un asa SOLA en el lado que crearía la que falta — tirar
-    // del otro lado sigue siendo simplemente "mover" esa única fecha, ver
-    // computeDragPatch.
-    const canResizeBoth = !isMilestoneEl && hasStart && hasDue;
-    const canExtendStart = !isMilestoneEl && hasDue && !hasStart;
-    const canExtendDue = !isMilestoneEl && hasStart && !hasDue;
-    const hasEdgeZones = canResizeBoth || canExtendStart || canExtendDue;
+    // Cualquier tarea con al menos una fecha tiene los DOS bordes activos
+    // (v50): el izquierdo siempre actúa sobre startDate, el derecho sobre
+    // dueDate. Si la fecha de ese lado ya existe, el borde la REDIMENSIONA
+    // (modo resize-*); si no existe todavía, la CREA (modo extend-*) — ver
+    // computeDragPatch. Antes (v49) el lado de la fecha que ya existía en
+    // una tarea de una sola fecha no tenía asa ni modo propio y cala en
+    // "mover": mismo resultado práctico (con una sola fecha no hay otro
+    // extremo fijo al que anclarse, así que redimensionar y mover son la
+    // misma operación), pero ahora los dos bordes se ven y se agarran
+    // igual desde el principio, sin esperar a que la tarea tenga las dos.
+    const canDragEdges = !isMilestoneEl && (hasStart || hasDue);
 
-    if (hasEdgeZones) {
+    if (canDragEdges) {
       el.addEventListener("mousemove", (e) => {
         if (el.classList.contains("tl-bar--dragging")) return;
         const rect = el.getBoundingClientRect();
         const localX = e.clientX - rect.left;
         const nearLeft = localX < DRAG_EDGE_ZONE_PX;
         const nearRight = localX > rect.width - DRAG_EDGE_ZONE_PX;
-        if (nearLeft && (canResizeBoth || canExtendStart)) el.style.cursor = "w-resize";
-        else if (nearRight && (canResizeBoth || canExtendDue)) el.style.cursor = "e-resize";
+        if (nearLeft) el.style.cursor = "w-resize";
+        else if (nearRight) el.style.cursor = "e-resize";
         else el.style.cursor = "grab";
       });
     }
@@ -695,14 +695,28 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
       const nearLeft = localX < DRAG_EDGE_ZONE_PX;
       const nearRight = localX > rect.width - DRAG_EDGE_ZONE_PX;
       let mode = "move";
-      if (nearLeft && canResizeBoth) mode = "resize-start";
-      else if (nearRight && canResizeBoth) mode = "resize-due";
-      else if (nearLeft && canExtendStart) mode = "extend-start";
-      else if (nearRight && canExtendDue) mode = "extend-due";
+      if (nearLeft && canDragEdges) mode = hasStart ? "resize-start" : "extend-start";
+      else if (nearRight && canDragEdges) mode = hasDue ? "resize-due" : "extend-due";
+
+      // Si el extremo CONTRARIO al que se agarra ya existe, ese extremo
+      // queda fijo y el arrastre es un redimensionado de verdad (cambia el
+      // ancho de la barra en vivo). Si no existe, esta tarea solo tiene la
+      // fecha de este lado: no hay nada fijo enfrente, así que arrastrar
+      // — se agarre el borde que se agarre — es un simple desplazamiento
+      // del punto, igual que mover la tarea entera (bug corregido, v50:
+      // antes SIEMPRE se desplazaba la barra entera con translateX, nunca
+      // se veía cambiar el ancho mientras se arrastraba un borde con los
+      // dos extremos puestos, aunque el resultado final al soltar sí
+      // redimensionaba de verdad).
+      const isLeftEdgeMode = mode === "resize-start" || mode === "extend-start";
+      const isRightEdgeMode = mode === "resize-due" || mode === "extend-due";
+      const trueResize = (isLeftEdgeMode && hasDue) || (isRightEdgeMode && hasStart);
+      const baseWidthPx = rect.width;
 
       const startX = e.clientX;
       let dayDelta = 0;
       let dragging = false;
+      let painted = false;
 
       function onMove(ev) {
         const deltaPx = ev.clientX - startX;
@@ -717,9 +731,28 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
         }
         el.classList.add("tl-bar--dragging");
         const nextDelta = Math.round(deltaPx / pxPerDay);
-        if (nextDelta === dayDelta && el.style.transform) return;
+        if (painted && nextDelta === dayDelta) return;
         dayDelta = nextDelta;
-        el.style.transform = `translateX(${dayDelta * pxPerDay}px)`;
+        painted = true;
+        const shiftPx = dayDelta * pxPerDay;
+        // Redimensionado de verdad: cambia el ANCHO en vivo, con un mínimo
+        // para no invertirse visualmente si se arrastra de más (el tope
+        // real, que no deja cruzar la otra fecha, se aplica sobre la fecha
+        // ya calculada al soltar — ver computeDragPatch — no aquí). Tirar
+        // del borde izquierdo, además, tiene que desplazar la posición a
+        // la vez que encoge/agranda el ancho lo mismo hacia el lado
+        // contrario, para que el borde derecho (el ancla) no se mueva ni
+        // un píxel. Un simple desplazamiento (mover la tarea entera, o
+        // mover la única fecha de un borde sin ancla enfrente) sigue
+        // usando translateX tal cual, sin tocar el ancho.
+        if (trueResize && isLeftEdgeMode) {
+          el.style.width = `${Math.max(4, baseWidthPx - shiftPx)}px`;
+          el.style.transform = `translateX(${shiftPx}px)`;
+        } else if (trueResize && isRightEdgeMode) {
+          el.style.width = `${Math.max(4, baseWidthPx + shiftPx)}px`;
+        } else {
+          el.style.transform = `translateX(${shiftPx}px)`;
+        }
         const patch = computeDragPatch(task, mode, dayDelta) || {};
         const parts = [];
         if (patch.startDate) parts.push(`Inicio ${fmtEsShort(patch.startDate)}`);
@@ -733,6 +766,7 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
         removeDragTooltip();
         el.classList.remove("tl-bar--dragging");
         el.style.transform = "";
+        el.style.width = "";
         el.style.cursor = "";
         document.body.style.cursor = "";
         document.body.classList.remove("tl-dragging-bar");
