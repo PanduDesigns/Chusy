@@ -590,14 +590,27 @@ function computeDragPatch(task, mode, dayDelta) {
   const due = task.dueDate ? toDate(task.dueDate) : null;
   if (mode === "resize-start") {
     if (!start) return null;
-    let ns = addDays(start, dayDelta);
-    if (due && ns > due) ns = due;
+    const ns = addDays(start, dayDelta);
+    if (due) return { startDate: toDateInputValue(ns > due ? due : ns) };
+    // Una sola fecha (esta tarea no tiene dueDate): el propio borde de la
+    // fecha que ya existe, tirado hacia FUERA (más atrás, dayDelta<0),
+    // también amplía de verdad — v51, antes solo desplazaba el punto sin
+    // crear nada, asimétrico con el otro borde. La fecha ORIGINAL (antes
+    // de arrastrar) se queda fija y pasa a ser dueDate; la posición
+    // arrastrada es la nueva startDate. Tirado hacia DENTRO (dayDelta>0,
+    // hacia donde no hay nada que anclar) se queda como estaba: simple
+    // desplazamiento de esta única fecha, sin inventar una dueDate.
+    if (dayDelta < 0) return { startDate: toDateInputValue(ns), dueDate: toDateInputValue(start) };
     return { startDate: toDateInputValue(ns) };
   }
   if (mode === "resize-due") {
     if (!due) return null;
-    let nd = addDays(due, dayDelta);
-    if (start && nd < start) nd = start;
+    const nd = addDays(due, dayDelta);
+    if (start) return { dueDate: toDateInputValue(nd < start ? start : nd) };
+    // Simétrico al caso de arriba: hacia FUERA (más tarde, dayDelta>0)
+    // crea el rango, con la fecha original como startDate; hacia DENTRO,
+    // simple desplazamiento.
+    if (dayDelta > 0) return { startDate: toDateInputValue(due), dueDate: toDateInputValue(nd) };
     return { dueDate: toDateInputValue(nd) };
   }
   if (mode === "extend-start") {
@@ -700,17 +713,25 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
 
       // Si el extremo CONTRARIO al que se agarra ya existe, ese extremo
       // queda fijo y el arrastre es un redimensionado de verdad (cambia el
-      // ancho de la barra en vivo). Si no existe, esta tarea solo tiene la
-      // fecha de este lado: no hay nada fijo enfrente, así que arrastrar
-      // — se agarre el borde que se agarre — es un simple desplazamiento
-      // del punto, igual que mover la tarea entera (bug corregido, v50:
-      // antes SIEMPRE se desplazaba la barra entera con translateX, nunca
-      // se veía cambiar el ancho mientras se arrastraba un borde con los
-      // dos extremos puestos, aunque el resultado final al soltar sí
-      // redimensionaba de verdad).
+      // ancho de la barra en vivo) — pase lo que pase, en las dos
+      // direcciones. Si no existe (una tarea de una sola fecha, tirando de
+      // su PROPIO borde — el que ya tenía la fecha, no el que la crea),
+      // depende de hacia qué lado se tire (v51, ver computeDragPatch):
+      // hacia FUERA (alejándose de la fecha que ya tiene) también
+      // redimensiona de verdad, porque de esa dirección sale un rango
+      // nuevo con la fecha original como ancla; hacia DENTRO sigue siendo
+      // un simple desplazamiento de esa única fecha, porque no hay nada
+      // que crear en esa dirección. Por eso `trueResize` no se puede fijar
+      // una sola vez al pulsar (como si se hacía hasta la v50): depende de
+      // `dayDelta`, así que se recalcula en cada `onMove` con el valor de
+      // ese momento — ver `trueResizeFor` más abajo.
       const isLeftEdgeMode = mode === "resize-start" || mode === "extend-start";
       const isRightEdgeMode = mode === "resize-due" || mode === "extend-due";
-      const trueResize = (isLeftEdgeMode && hasDue) || (isRightEdgeMode && hasStart);
+      function trueResizeFor(delta) {
+        if (isLeftEdgeMode) return hasDue || delta < 0;
+        if (isRightEdgeMode) return hasStart || delta > 0;
+        return false;
+      }
       const baseWidthPx = rect.width;
 
       const startX = e.clientX;
@@ -735,6 +756,7 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
         dayDelta = nextDelta;
         painted = true;
         const shiftPx = dayDelta * pxPerDay;
+        const trueResize = trueResizeFor(dayDelta);
         // Redimensionado de verdad: cambia el ANCHO en vivo, con un mínimo
         // para no invertirse visualmente si se arrastra de más (el tope
         // real, que no deja cruzar la otra fecha, se aplica sobre la fecha
@@ -743,14 +765,20 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
         // la vez que encoge/agranda el ancho lo mismo hacia el lado
         // contrario, para que el borde derecho (el ancla) no se mueva ni
         // un píxel. Un simple desplazamiento (mover la tarea entera, o
-        // mover la única fecha de un borde sin ancla enfrente) sigue
-        // usando translateX tal cual, sin tocar el ancho.
+        // mover la única fecha de un borde sin ancla enfrente, tirando
+        // hacia dentro) sigue usando translateX tal cual, sin tocar el
+        // ancho. Como `trueResize` puede cambiar A MEDIO ARRASTRE (si se
+        // invierte la dirección sin soltar), cada rama fija explícitamente
+        // TANTO width COMO transform — nunca se deja un valor de una rama
+        // anterior colgando si el arrastre cambia de sentido.
         if (trueResize && isLeftEdgeMode) {
           el.style.width = `${Math.max(4, baseWidthPx - shiftPx)}px`;
           el.style.transform = `translateX(${shiftPx}px)`;
         } else if (trueResize && isRightEdgeMode) {
           el.style.width = `${Math.max(4, baseWidthPx + shiftPx)}px`;
+          el.style.transform = "";
         } else {
+          el.style.width = "";
           el.style.transform = `translateX(${shiftPx}px)`;
         }
         const patch = computeDragPatch(task, mode, dayDelta) || {};
@@ -775,7 +803,15 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
         dragState.suppressClickFor = taskId;
         const patch = computeDragPatch(task, mode, dayDelta);
         if (!patch) return;
-        const toastMsg = mode === "extend-start" ? "Fecha de inicio añadida." : mode === "extend-due" ? "Fecha límite añadida." : "Fecha actualizada.";
+        // v51: resize-start/resize-due sobre una tarea de una sola fecha,
+        // tirando hacia fuera, ahora también puede crear las DOS fechas de
+        // golpe (ver computeDragPatch) — un caso que antes no existía y
+        // que "Fecha actualizada." describiría mal.
+        const createdRange = (mode === "resize-start" || mode === "resize-due") && "startDate" in patch && "dueDate" in patch;
+        const toastMsg = mode === "extend-start" ? "Fecha de inicio añadida."
+          : mode === "extend-due" ? "Fecha límite añadida."
+          : createdRange ? "Rango de fechas creado."
+          : "Fecha actualizada.";
         updateTask(taskId, patch)
           .then(() => showToast(toastMsg))
           .catch((err) => {
