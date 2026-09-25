@@ -24,7 +24,7 @@ import {
   mergeTasks,
 } from "../data/tasks.js";
 import { celebrateBulk } from "./celebration.js";
-import { notifyNewAssignees } from "../data/notifications.js";
+import { notifyBulkAssignment } from "../data/notifications.js";
 
 export function removeBulkToolbar() {
   document.querySelectorAll(".bulk-toolbar-anchor").forEach((a) => a.remove());
@@ -140,17 +140,7 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
           try {
             await bulkAssignSingle(selectedTasks, m.uid);
             showToast(`Asignadas a ${m.name}.`);
-            newlyAssignedTasks.forEach((t) => {
-              notifyNewAssignees({
-                newAssigneeUids: [m.uid],
-                taskId: t.id,
-                taskTitle: t.title,
-                projectId: t.projectId || null,
-                projectName: t.projectId ? (projects.find((p) => p.id === t.projectId)?.name || null) : null,
-                fromUser: currentUser,
-                teamMembers,
-              }).catch((err) => console.error("notifyNewAssignees:", err));
-            });
+            notifyBulkForPerson(m.uid, newlyAssignedTasks, { currentUser, teamMembers, projects });
           } catch (err) {
             console.error(err);
             showToast("No se pudo aplicar el cambio. Inténtalo de nuevo.", "error");
@@ -175,6 +165,44 @@ function sortedMembers(teamMembers) {
   // pero esto es una acción masiva sobre varias tareas a la vez, así que
   // no hay un "ya asignado" único que pueda hacer de excepción).
   return (teamMembers || []).filter((m) => !m.isImported && !m.deleted);
+}
+
+/**
+ * Avisa a UNA persona de que se le acaban de asignar `tasks` de golpe
+ * desde esta barra — "Asignar" o "Añadir colaboradores" (v53; antes cada
+ * una mandaba su propio `notifyNewAssignees`, un aviso por tarea: asignar
+ * 20 tareas de golpe eran 20 avisos sueltos, que además chocaban con el
+ * límite de 20 por persona de la autolimpieza — ver notifications.js).
+ *
+ * Reutiliza notifyBulkAssignment() (la misma función del resumen de
+ * "Nueva cabina"), UNA vez por cada proyecto distinto entre `tasks`: en
+ * Lista siempre hay uno solo (todas comparten proyecto), y en Mis tareas
+ * suele serlo también, así que lo normal es un único aviso, con el total
+ * y el proyecto — justo lo pedido. Si la selección de Mis tareas mezclara
+ * proyectos (o alguna tarea personal, sin proyecto), esa persona recibe
+ * como mucho un aviso por cada proyecto distinto, nunca uno "sin
+ * proyecto" que en realidad mezclara varios: cada aviso nombra siempre un
+ * proyecto real, o ninguno si de verdad era una tarea personal.
+ * notifyBulkAssignment ya se encarga de no avisarte a ti mismo/a ni a un
+ * usuario ficticio de Asana, y de mandar un aviso normal (no un resumen)
+ * si a esa persona solo le toca una tarea en ese grupo.
+ */
+function notifyBulkForPerson(uid, tasks, { currentUser, teamMembers, projects }) {
+  const byProject = new Map(); // projectId (o null, tarea personal) -> tareas de ese grupo
+  (tasks || []).forEach((t) => {
+    const key = t.projectId || null;
+    if (!byProject.has(key)) byProject.set(key, []);
+    byProject.get(key).push(t);
+  });
+  byProject.forEach((groupTasks, projectId) => {
+    notifyBulkAssignment({
+      createdTasks: groupTasks.map((t) => ({ id: t.id, title: t.title, assigneeIds: [uid] })),
+      projectId,
+      projectName: projectId ? (projects || []).find((p) => p.id === projectId)?.name || null : null,
+      fromUser: currentUser,
+      teamMembers,
+    }).catch((err) => console.error("notifyBulkAssignment:", err));
+  });
 }
 
 async function runAction(promise, successMsg) {
@@ -342,17 +370,7 @@ function openCollabPopover(anchorRect, { ids, teamMembers, selectedTasks, curren
         const newlyAssignedTasks = selectedTasks.filter((t) => !(t.assigneeIds || []).includes(uid));
         try {
           await bulkAddAssignees(ids, [uid]);
-          newlyAssignedTasks.forEach((t) => {
-            notifyNewAssignees({
-              newAssigneeUids: [uid],
-              taskId: t.id,
-              taskTitle: t.title,
-              projectId: t.projectId || null,
-              projectName: t.projectId ? (projects.find((p) => p.id === t.projectId)?.name || null) : null,
-              fromUser: currentUser,
-              teamMembers,
-            }).catch((err) => console.error("notifyNewAssignees:", err));
-          });
+          notifyBulkForPerson(uid, newlyAssignedTasks, { currentUser, teamMembers, projects });
         } catch (err) {
           console.error(err);
           showToast("No se pudo aplicar el cambio. Inténtalo de nuevo.", "error");

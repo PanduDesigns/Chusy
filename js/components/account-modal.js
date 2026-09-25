@@ -6,6 +6,12 @@ import { el, escapeHtml, initials, colorFromString, formatDateLong, showToast } 
 import { updateDisplayName, changePassword } from "../auth.js";
 import { updateUserProfile } from "../data/users.js";
 import { applyTheme } from "../theme.js";
+import {
+  getBrowserNotificationPermission,
+  isBrowserNotificationsEnabled,
+  enableBrowserNotifications,
+  disableBrowserNotifications,
+} from "../browser-notifications.js";
 
 export function openAccountModal({ userProfile }) {
   const root = document.getElementById("modal-root");
@@ -59,6 +65,15 @@ export function openAccountModal({ userProfile }) {
 
           <div style="border-top:1px solid var(--color-line);"></div>
 
+          <span class="field__label" style="font-size:13px;">Avisos del navegador</span>
+          <label class="acc-switch-row">
+            <input type="checkbox" id="acc-browser-notifs">
+            <span>Avisarme con una notificación del navegador cuando me asignen una tarea</span>
+          </label>
+          <p class="field__hint" id="acc-browser-notifs-hint"></p>
+
+          <div style="border-top:1px solid var(--color-line);"></div>
+
           <span class="field__label" style="font-size:13px;">Cambiar contraseña</span>
           <label class="field">
             <span class="field__label">Contraseña actual</span>
@@ -109,6 +124,44 @@ export function openAccountModal({ userProfile }) {
         showToast("No se pudo guardar el tema en tu cuenta (sí se aplicó en este navegador).", "error");
       }
     });
+  });
+
+  // Avisos del navegador (v52, ver browser-notifications.js). El casillero
+  // refleja el estado REAL en este navegador: activado solo si la persona lo
+  // pidió Y el permiso sigue concedido. Al marcarlo se pide el permiso (tiene
+  // que ser desde este clic, o el navegador lo ignora); si lo deniega, o el
+  // navegador no lo soporta, se desmarca y se explica por qué debajo.
+  const browserNotifsCheckbox = overlay.querySelector("#acc-browser-notifs");
+  const browserNotifsHint = overlay.querySelector("#acc-browser-notifs-hint");
+  const BROWSER_NOTIFS_INFO =
+    "Sale en la esquina de la pantalla cuando te asignan algo y no estás mirando Chusy. Solo llega con Chusy abierto en alguna pestaña (aunque sea en segundo plano): con el navegador cerrado no puede avisar. Se activa por navegador, no por cuenta — hay que marcarlo en cada ordenador donde lo quieras.";
+  const BROWSER_NOTIFS_BLOCKED =
+    "El navegador tiene bloqueadas las notificaciones de este sitio. Para activarlas, pulsa el candado junto a la dirección de la página, permite las notificaciones y vuelve a abrir esta ventana.";
+
+  function refreshBrowserNotifsControl() {
+    const permission = getBrowserNotificationPermission();
+    browserNotifsCheckbox.checked = isBrowserNotificationsEnabled(userProfile.uid);
+    browserNotifsCheckbox.disabled = permission === "unsupported" || permission === "denied";
+    browserNotifsHint.textContent =
+      permission === "unsupported"
+        ? "Este navegador no admite avisos del sistema."
+        : permission === "denied"
+        ? BROWSER_NOTIFS_BLOCKED
+        : BROWSER_NOTIFS_INFO;
+  }
+  refreshBrowserNotifsControl();
+
+  browserNotifsCheckbox.addEventListener("change", async () => {
+    if (!browserNotifsCheckbox.checked) {
+      disableBrowserNotifications(userProfile.uid);
+      return;
+    }
+    browserNotifsCheckbox.disabled = true; // mientras el navegador enseña su petición de permiso
+    const permission = await enableBrowserNotifications(userProfile.uid);
+    refreshBrowserNotifsControl();
+    if (permission === "granted") showToast("Avisos del navegador activados.");
+    else if (permission === "default") browserNotifsHint.textContent = "No se concedió el permiso, así que los avisos siguen desactivados.";
+    else if (permission === "unsupported") browserNotifsHint.textContent = "Este navegador no permite mostrar avisos del sistema desde una página web (pasa, por ejemplo, con Chrome en el móvil), así que no se han podido activar. Sí seguirás viendo el aviso grande dentro de Chusy.";
   });
 
   overlay.querySelector("#acc-save-name").addEventListener("click", async () => {

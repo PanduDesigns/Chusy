@@ -10,7 +10,15 @@ import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
 import { subscribeToNotifications } from "./data/notifications.js";
 import { subscribeToQuickCreateConfig } from "./data/quick-create.js";
-import { updateNotifBell, openNotifPanel, showAssignedTaskToast } from "./components/notification-bell.js";
+import {
+  updateNotifBell,
+  toggleNotifPanel,
+  openNotifPanel,
+  showNewAssignmentsPopup,
+  runNewAssignmentsPrimaryAction,
+  resetNotificationUi,
+} from "./components/notification-bell.js";
+import { showAssignmentSystemNotification } from "./browser-notifications.js";
 import { renderSidebar } from "./components/sidebar.js";
 import { renderTopbar } from "./components/topbar.js";
 import { renderListView } from "./views/list-view.js";
@@ -32,7 +40,7 @@ import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal
 import { openQuickCreateModal } from "./components/quick-create-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { removeBulkToolbar } from "./components/bulk-toolbar.js";
-import { showToast, getTaskSectionForProject } from "./utils.js";
+import { showToast, getTaskSectionForProject, debounce } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
 const authScreen = document.getElementById("auth-screen");
@@ -186,7 +194,37 @@ function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.
 
 // La campana es un elemento fijo (ver index.html) que nunca se repinta por
 // modo, así que su clic se conecta una sola vez aquí — no en renderShell().
-notifBellEl.addEventListener("click", () => openNotifPanel(notifBellEl, { notifications, onOpenTask: openTask }));
+notifBellEl.addEventListener("click", () => toggleNotifPanel(notifBellEl, notifPanelOptions()));
+
+// Lo que necesita el panel de notificaciones (y, desde el aviso grande, su
+// botón "Ver notificaciones") para abrir cosas — se lee `notifications` en
+// el momento de llamar, no ahora, para que sea siempre la lista actual.
+function notifPanelOptions() {
+  return { notifications, onOpenTask: openTask, onOpenProject: openProjectFromNotification };
+}
+
+// El aviso del sistema (browser-notifications.js) espera un instante a que
+// termine una racha de llegadas antes de salir: asignar 15 tareas a mano con
+// la selección múltiple crea 15 avisos sueltos, que pueden llegar de uno en
+// uno en menos de un segundo, y sin esta espera el sistema sonaría 15 veces
+// — así suena una, ya con el total. (El aviso grande de dentro de la app no
+// lo necesita: se actualiza en su sitio, sin sonido.)
+const showSystemNotificationSoon = debounce((uid, items) => {
+  if (currentUser && currentUser.uid === uid) showAssignmentSystemNotification(uid, items, { onClick: runNewAssignmentsPrimaryAction });
+}, 800);
+
+/**
+ * Ir al proyecto de un aviso de "Nueva cabina" (varias tareas de golpe, ver
+ * notifyBulkAssignment en notifications.js). Si el proyecto ya no existe o
+ * se archivó desde entonces, en vez de dejar la pantalla en blanco se avisa.
+ */
+function openProjectFromNotification(projectId) {
+  if (!projects.find((p) => p.id === projectId)) {
+    showToast("Ese proyecto ya no está disponible.", "error");
+    return;
+  }
+  selectProject(projectId);
+}
 
 // El script embebido al principio de index.html ya pinta el tema cacheado
 // de este navegador antes del primer fotograma (para no dar un parpadeo);
@@ -221,6 +259,7 @@ function cleanup() {
   quickCreateEnabled = false;
   hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
   removeBulkToolbar();
+  resetNotificationUi();
   notifBellEl.hidden = true;
 }
 
@@ -237,10 +276,16 @@ function bootstrap() {
       updateNotifBell(notifDotEl, notifications);
     },
     (newOnes) => {
-      showAssignedTaskToast(newOnes, {
+      // Aviso grande dentro de la app (siempre) + aviso del sistema fuera de
+      // ella (solo si la persona lo activó en "Mi cuenta" y no tiene Chusy
+      // delante) — con la lista ACUMULADA del aviso grande, para que varias
+      // llegadas seguidas se resuman en uno en vez de apilarse.
+      const shown = showNewAssignmentsPopup(newOnes, {
         onOpenTask: openTask,
-        onOpenPanel: () => openNotifPanel(notifBellEl, { notifications, onOpenTask: openTask }),
+        onOpenProject: openProjectFromNotification,
+        onOpenPanel: () => openNotifPanel(notifBellEl, notifPanelOptions()),
       });
+      if (currentUser) showSystemNotificationSoon(currentUser.uid, shown);
     }
   );
 

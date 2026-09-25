@@ -933,6 +933,10 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .field__label-row { display: flex; align-items: center; gap: 8px; }
 .field__label-icon { color: var(--color-text-faint); font-family: var(--font-mono); font-size: 12px; width: 16px; text-align: center; }
 
+/* v52 — casillero de "Avisos del navegador" en Mi cuenta. */
+.acc-switch-row { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--color-text-hi); cursor: pointer; }
+.acc-switch-row input[type="checkbox"] { accent-color: var(--color-signal); width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+.acc-switch-row input[type="checkbox"]:disabled { cursor: not-allowed; }
 .chip-select { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   font-size: 12px; padding: 5px 11px; border-radius: 20px;
@@ -1337,19 +1341,6 @@ body.tl-dragging-bar { user-select: none; }
   max-width: 320px;
 }
 .toast--error { border-left-color: var(--color-danger); }
-/* El toast de "te han asignado una tarea" — más llamativo que el de
-   confirmaciones: icono, dos líneas, y es un <button> (clicable, con
-   estado :hover) en vez de un <div> inerte. */
-.toast--notify {
-  display: flex; align-items: flex-start; gap: 10px; text-align: left;
-  cursor: pointer; font: inherit; color: inherit; width: 100%;
-}
-.toast--notify:hover { background: var(--color-panel); }
-.toast--notify__icon { font-size: 18px; line-height: 1.2; flex-shrink: 0; }
-.toast--notify__body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.toast--notify__title { font-size: 13px; color: var(--color-text-hi); line-height: 1.3; }
-.toast--notify__title b { font-weight: 600; }
-.toast--notify__task { font-size: 12px; color: var(--color-text-faint); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
 
 /* ==========================================================================
@@ -1558,8 +1549,8 @@ body.tl-dragging-bar { user-select: none; }
   padding: 10px 14px; border-bottom: 1px solid var(--color-line);
   font-size: 13px; font-weight: 600; flex-shrink: 0;
 }
-.notif-panel__mark-read { background: none; border: none; color: var(--color-text-faint); font-size: 11.5px; font-weight: 400; }
-.notif-panel__mark-read:hover { color: var(--color-signal); }
+/* v52: ya no hay botón de "marcar todas como leídas" — se marcan solas al cerrar el panel; esto solo lo cuenta, mientras haya alguna sin leer a la vista. */
+.notif-panel__hint { font-size: 11px; font-weight: 400; color: var(--color-text-faint); }
 .notif-panel__list { overflow-y: auto; flex: 1; }
 .notif-panel__empty { padding: 28px 16px; text-align: center; color: var(--color-text-faint); font-size: 12.5px; }
 
@@ -1586,6 +1577,67 @@ body.tl-dragging-bar { user-select: none; }
 .notif-row__time { font-size: 11px; color: var(--color-text-faint); margin-top: 2px; }
 
 /* ==========================================================================
+   Aviso grande de "te han asignado una tarea" (v52, notification-bell.js).
+   Sustituye al toast pequeño de la esquina, que se iba solo a los 6
+   segundos y se pasaba por alto: esto tapa la pantalla, se queda hasta que
+   se pulsa un botón, y la campana no para de sonar. Va por encima de todo
+   lo demás (modales 100, toasts 200, menús y panel 300) salvo la pantalla
+   de carga inicial (500). Todo con los tokens del tema, así que se ve bien
+   en oscuro, claro y clásico sin ningún caso especial.
+   ========================================================================== */
+.notif-alert-overlay {
+  position: fixed; inset: 0; z-index: 450;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: rgba(5, 8, 12, 0.74); backdrop-filter: blur(3px);
+  animation: notif-alert-fade 200ms ease;
+}
+.notif-alert {
+  width: 100%; max-width: 440px; max-height: 90vh; overflow-y: auto; text-align: center;
+  background: var(--color-panel); border: 2px solid var(--color-signal);
+  border-radius: var(--radius-lg); padding: 28px 28px 22px;
+  box-shadow: var(--shadow-raised), 0 0 0 6px var(--color-signal-soft);
+  animation: notif-alert-pop 340ms cubic-bezier(.2, .9, .3, 1.2), notif-alert-glow 1.8s ease-in-out 340ms infinite;
+}
+.notif-alert__icon {
+  width: 68px; height: 68px; margin: 0 auto 14px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-signal); color: var(--color-ink);
+  transform-origin: 50% 14%;
+  animation: notif-alert-ring 2.4s ease-in-out 250ms infinite;
+}
+.notif-alert__title { font-family: var(--font-display); font-size: 23px; font-weight: 700; line-height: 1.2; color: var(--color-text-hi); margin: 0 0 14px; }
+.notif-alert__who { font-size: 13.5px; color: var(--color-text-lo); margin: 0 0 8px; }
+.notif-alert__who b { color: var(--color-text-hi); font-weight: 600; }
+.notif-alert__task {
+  font-size: 15px; font-weight: 600; color: var(--color-text-hi); line-height: 1.35;
+  background: var(--color-signal-soft); border-radius: var(--radius-sm); padding: 10px 14px; margin: 0;
+  overflow-wrap: anywhere;
+}
+.notif-alert__project { font-size: 12.5px; color: var(--color-text-faint); margin: 8px 0 0; }
+.notif-alert__list { list-style: none; margin: 0; padding: 0; text-align: left; font-size: 13px; color: var(--color-text-hi); }
+.notif-alert__list li { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--color-signal-soft); overflow-wrap: anywhere; }
+.notif-alert__list li + li { margin-top: 6px; }
+.notif-alert__list b { font-weight: 600; }
+.notif-alert__list .notif-alert__more { background: none; color: var(--color-text-faint); text-align: center; padding: 2px 12px; }
+.notif-alert__actions { display: flex; justify-content: center; gap: 10px; margin-top: 22px; }
+.notif-alert__actions .btn { min-width: 132px; }
+@keyframes notif-alert-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes notif-alert-pop { from { opacity: 0; transform: scale(0.86); } to { opacity: 1; transform: scale(1); } }
+@keyframes notif-alert-glow {
+  0%, 100% { box-shadow: var(--shadow-raised), 0 0 0 6px var(--color-signal-soft); }
+  50% { box-shadow: var(--shadow-raised), 0 0 0 10px var(--color-signal-soft), 0 0 34px 6px var(--color-signal-soft); }
+}
+/* La campana suena en la primera quinta parte de cada ciclo y descansa el resto, en vez de agitarse sin parar. */
+@keyframes notif-alert-ring {
+  0%, 24%, 100% { transform: rotate(0); }
+  3% { transform: rotate(16deg); } 6% { transform: rotate(-14deg); } 9% { transform: rotate(11deg); }
+  12% { transform: rotate(-8deg); } 16% { transform: rotate(4deg); } 20% { transform: rotate(-2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notif-alert, .notif-alert__icon { animation: none; }
+}
+
+/* ==========================================================================
    Creación Rápida — panel de admin (quick-create-admin-modal.js) y selector
    "Nueva cabina" de un proyecto (quick-create-modal.js). Ver el apartado 3
    del README.
@@ -1602,6 +1654,10 @@ body.tl-dragging-bar { user-select: none; }
    o checkbox (grupo "Varias opciones"), decidido por el propio input. */
 .qc-option-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border-radius: var(--radius-sm); cursor: pointer; transition: var(--transition-fast); }
 .qc-option-row:hover { background: var(--color-panel-raised); }
+/* v52 — paso "asignación rápida": las tareas de cada persona van agrupadas por producto, con el botón de marcar/desmarcar todas a la altura del nombre. */
+.qc-assign-group + .qc-assign-group { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--color-line); }
+.qc-assign-group__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 3px; }
+.qc-assign-group__name { font-size: 12px; font-weight: 600; color: var(--color-text-lo); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qc-option-row input[type="radio"], .qc-option-row input[type="checkbox"] { accent-color: var(--color-signal); margin-top: 2px; flex-shrink: 0; width: 15px; height: 15px; cursor: pointer; }
 
 /* Fila de "elegir un producto" (paso 1 del selector) — mismo espíritu que

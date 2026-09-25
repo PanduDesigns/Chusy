@@ -17,7 +17,14 @@
 //     pierde lo ya rellenado de otro producto.
 //  3. 'assign' — asignación rápida (opcional), UNA sola vez para TODAS las
 //     tareas de TODOS los productos elegidos a la vez, en vez de repetirla
-//     producto por producto. "Crear tareas" los crea todos de golpe.
+//     producto por producto. Cada persona marcada tiene su lista de tareas,
+//     agrupada por producto, y cada producto lleva un botón "Marcar todas /
+//     Desmarcar todas" (v52): lo normal es que un producto entero lo haga una
+//     sola persona, y así no hay que marcar las tareas una a una — luego se
+//     desmarcan o marcan las que haga falta a mano. "Crear tareas" los crea
+//     todos de golpe, y AVISA a cada persona asignada (v52 — antes esta vía
+//     no notificaba a nadie): un único aviso por persona, con el total de
+//     tareas que le tocaron, ver notifyBulkAssignment en notifications.js.
 //
 // La "tarea principal": por cada producto elegido (no una sola para todo
 // el conjunto), además de las tareas de su plantilla (base + las de las
@@ -39,6 +46,7 @@
 import { el, escapeHtml, badgeHtml, showToast, uid, toDate, toDateInputValue, addDays, colorFromString, initials, PRIORITY_LABELS } from "../utils.js";
 import { getQuickCreateProducts, resolveQuickCreateTasks, createTasksFromQuickCreateInsertion } from "../data/quick-create.js";
 import { setProjectSections } from "../data/projects.js";
+import { notifyBulkAssignment } from "../data/notifications.js";
 import { openQuickCreateAdminModal } from "./quick-create-admin-modal.js";
 
 const NEW_SECTION_VALUE = "__new_section__"; // valor especial del desplegable de sección para "crear una nueva con este nombre"
@@ -278,7 +286,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       </fieldset>`;
   }
 
-  /** Todas las tareas de TODOS los productos elegidos — para el paso 3 (asignación rápida) y para el recuento final. Cada una lleva `productName` para poder distinguirlas cuando hay más de un producto. */
+  /** Todas las tareas de TODOS los productos elegidos — para el paso 3 (asignación rápida) y para el recuento final. Cada una lleva `productId`/`productName` para poder agruparlas por producto en el paso 3 (y marcar/desmarcar un producto entero de una vez). */
   function buildAllAssignableTasks() {
     const result = [];
     state.selectedProductIds.forEach((productId) => {
@@ -286,9 +294,9 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       const config = state.configs[productId];
       if (!product || !config) return;
       const mainLabel = config.instanceName.trim() || product.name;
-      result.push({ id: mainTaskIdFor(productId), title: mainLabel, isMain: true, productName: product.name });
+      result.push({ id: mainTaskIdFor(productId), title: mainLabel, isMain: true, productId, productName: product.name });
       resolveQuickCreateTasks(product, config.selections).forEach((t) => {
-        result.push({ id: t.id, title: t.title, productName: product.name });
+        result.push({ id: t.id, title: t.title, productId, productName: product.name });
       });
     });
     return result;
@@ -313,29 +321,59 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     const blocks = state.assignPeople
       .map((personUid) => assignableMembers.find((m) => m.uid === personUid))
       .filter(Boolean)
-      .map((m) => assignBlockHtml(m, assignableTasks, multi))
+      .map((m) => assignBlockHtml(m, assignableTasks))
       .join("");
 
     return `
       <div>
         <span class="field__label" style="font-size:13px;">Asignación rápida (opcional)</span>
-        <p class="field__hint">${assignableTasks.length} tarea${assignableTasks.length === 1 ? "" : "s"} en total${multi ? ` de ${state.selectedProductIds.length} productos` : ""}. Marca a quién quieres asignarle algo — para cada persona podrás elegir cuáles, y se les asignarán al crear las tareas.</p>
+        <p class="field__hint">${assignableTasks.length} tarea${assignableTasks.length === 1 ? "" : "s"} en total${multi ? ` de ${state.selectedProductIds.length} productos` : ""}. Marca a quién quieres asignarle algo — para cada persona puedes marcar un producto entero de una vez ("Marcar todas") y luego quitar o añadir tareas sueltas. Se les asignarán y se les avisará al crear las tareas.</p>
         ${assignableMembers.length ? `<div class="chip-select" style="margin-top:8px;">${peopleChips}</div>` : `<p class="field__hint">No hay nadie más en el equipo todavía.</p>`}
         ${blocks}
       </div>`;
   }
 
-  function assignBlockHtml(member, assignableTasks, showProduct) {
+  /** Texto del botón de un producto en el bloque de una persona: "Desmarcar todas" si ya lo tiene TODO marcado, "Marcar todas" en cualquier otro caso. */
+  function assignToggleLabel(personUid, productTaskIds) {
+    const checked = state.assignments[personUid] || new Set();
+    return productTaskIds.length > 0 && productTaskIds.every((id) => checked.has(id)) ? "Desmarcar todas" : "Marcar todas";
+  }
+
+  function assignBlockHtml(member, assignableTasks) {
     const checked = state.assignments[member.uid] || new Set();
-    const rows = assignableTasks
-      .map(
-        (t) => `
+    // Las tareas van agrupadas por producto (en el orden en que se eligieron),
+    // cada grupo con su propio botón de marcar/desmarcar todas — con un solo
+    // producto hay un único grupo, con el mismo botón.
+    const groups = state.selectedProductIds
+      .map((productId) => {
+        const product = state.products.find((p) => p.id === productId);
+        const tasks = assignableTasks.filter((t) => t.productId === productId);
+        return product && tasks.length ? { product, tasks } : null;
+      })
+      .filter(Boolean);
+
+    const groupsHtml = groups
+      .map(({ product, tasks }) => {
+        const rows = tasks
+          .map(
+            (t) => `
       <label class="qc-option-row" style="padding:5px 8px;">
-        <input type="checkbox" data-assign-uid="${member.uid}" data-assign-task="${t.id}" ${checked.has(t.id) ? "checked" : ""}>
-        <span style="font-size:12.5px;color:var(--color-text-hi);">${escapeHtml(t.title)}${t.isMain ? ` <span style="color:var(--color-text-faint);">(tarea principal)</span>` : ""}${showProduct ? ` <span style="color:var(--color-text-faint);">— ${escapeHtml(t.productName)}</span>` : ""}</span>
+        <input type="checkbox" data-assign-uid="${member.uid}" data-assign-task="${t.id}" data-assign-product="${product.id}" ${checked.has(t.id) ? "checked" : ""}>
+        <span style="font-size:12.5px;color:var(--color-text-hi);">${escapeHtml(t.title)}${t.isMain ? ` <span style="color:var(--color-text-faint);">(tarea principal)</span>` : ""}</span>
       </label>`
-      )
+          )
+          .join("");
+        return `
+      <div class="qc-assign-group">
+        <div class="qc-assign-group__head">
+          <span class="qc-assign-group__name">${escapeHtml(product.name)} <span style="font-weight:400;color:var(--color-text-faint);">· ${tasks.length} tarea${tasks.length === 1 ? "" : "s"}</span></span>
+          <button type="button" class="btn btn--ghost btn--sm" data-assign-all-uid="${member.uid}" data-assign-all-product="${product.id}">${assignToggleLabel(member.uid, tasks.map((t) => t.id))}</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;max-height:150px;overflow-y:auto;">${rows}</div>
+      </div>`;
+      })
       .join("");
+
     return `
       <div style="margin-top:10px;border:1px solid var(--color-line);border-radius:var(--radius-sm);padding:8px 10px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
@@ -345,7 +383,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
           </span>
           <button type="button" class="subtask-row__remove" data-assign-remove="${member.uid}" title="Quitar">✕</button>
         </div>
-        <div style="display:flex;flex-direction:column;gap:1px;max-height:150px;overflow-y:auto;">${rows}</div>
+        ${groupsHtml}
       </div>`;
   }
 
@@ -496,12 +534,43 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
         const current = new Set(state.assignments[personUid] || []);
         input.checked ? current.add(taskId) : current.delete(taskId);
         state.assignments = { ...state.assignments, [personUid]: current };
-        // Sin render(): el propio checkbox ya refleja su estado marcado, y
-        // nada más en pantalla depende de esto hasta el momento de confirmar.
+        // Sin render() (perdería la posición de scroll de todo el paso): el
+        // propio checkbox ya refleja su estado, solo hay que poner al día el
+        // texto del botón de "todas" de su producto — que pasa a decir
+        // "Desmarcar todas" al marcar la última, y "Marcar todas" al quitar
+        // cualquiera.
+        syncAssignToggle(personUid, input.dataset.assignProduct);
+      });
+    });
+
+    // "Marcar todas / Desmarcar todas" de un producto, para una persona.
+    // Igual que arriba, se actualizan los checkboxes en su sitio en vez de
+    // repintar el paso entero.
+    overlay.querySelectorAll("[data-assign-all-uid]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const personUid = btn.dataset.assignAllUid;
+        const productId = btn.dataset.assignAllProduct;
+        const productTaskIds = buildAllAssignableTasks().filter((t) => t.productId === productId).map((t) => t.id);
+        const current = new Set(state.assignments[personUid] || []);
+        const markAll = assignToggleLabel(personUid, productTaskIds) === "Marcar todas";
+        productTaskIds.forEach((id) => (markAll ? current.add(id) : current.delete(id)));
+        state.assignments = { ...state.assignments, [personUid]: current };
+        overlay.querySelectorAll("input[data-assign-uid][data-assign-task]").forEach((cb) => {
+          if (cb.dataset.assignUid === personUid && cb.dataset.assignProduct === productId) cb.checked = markAll;
+        });
+        syncAssignToggle(personUid, productId);
       });
     });
 
     overlay.querySelector("#qc-confirm-all")?.addEventListener("click", handleConfirmAll);
+  }
+
+  /** Pone al día el texto del botón de "todas" de UN producto en el bloque de UNA persona, sin repintar. */
+  function syncAssignToggle(personUid, productId) {
+    const productTaskIds = buildAllAssignableTasks().filter((t) => t.productId === productId).map((t) => t.id);
+    overlay.querySelectorAll("[data-assign-all-uid]").forEach((btn) => {
+      if (btn.dataset.assignAllUid === personUid && btn.dataset.assignAllProduct === productId) btn.textContent = assignToggleLabel(personUid, productTaskIds);
+    });
   }
 
   function assignedUidsFor(taskId) {
@@ -573,9 +642,26 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       });
 
       // 3) Crear todo de golpe.
-      await createTasksFromQuickCreateInsertion(allTasks, { projectId: project.id, createdBy: currentUser.uid });
+      const createdTasks = await createTasksFromQuickCreateInsertion(allTasks, { projectId: project.id, createdBy: currentUser.uid });
       const productCount = state.selectedProductIds.length;
-      showToast(`${allTasks.length} tarea${allTasks.length === 1 ? "" : "s"} creada${allTasks.length === 1 ? "" : "s"}${productCount > 1 ? ` en ${productCount} productos` : ""}.`);
+      showToast(`${createdTasks.length} tarea${createdTasks.length === 1 ? "" : "s"} creada${createdTasks.length === 1 ? "" : "s"}${productCount > 1 ? ` en ${productCount} productos` : ""}.`);
+
+      // 4) Avisar a quien se acaba de asignar — DESPUÉS de crear las tareas
+      // con éxito (nunca antes: si la creación falla, no debe salir ningún
+      // aviso de algo que no ha pasado), y sin esperar a que termine para
+      // cerrar el selector: si falla, las tareas ya están creadas, solo se
+      // avisa de que a la gente no le llegó el aviso.
+      notifyBulkAssignment({
+        createdTasks,
+        projectId: project.id,
+        projectName: project.name,
+        fromUser: currentUser,
+        teamMembers,
+      }).catch((err) => {
+        console.error("notifyBulkAssignment:", err);
+        showToast("Tareas creadas, pero no se pudo avisar a las personas asignadas.", "error");
+      });
+
       state.busy = false;
       close();
     } catch (e) {

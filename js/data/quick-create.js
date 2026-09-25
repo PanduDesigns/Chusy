@@ -171,13 +171,25 @@ const BATCH_CHUNK = 450; // por debajo del límite de 500 escrituras/lote de Fir
  * límite que ya respeta tasks.js), con `order` creciente para que salgan
  * en Lista/Tablero en el mismo orden en que venían en `tasks` (la tarea
  * principal de cada producto, antes que las suyas).
+ *
+ * Devuelve la lista de tareas CREADAS, en ese mismo orden, como
+ * `{id, title, assigneeIds}` (v52 — antes devolvía solo cuántas eran): el id
+ * de cada una solo existe desde que se reserva aquí dentro, y hace falta
+ * fuera para poder avisar a quien se acaba de asignar (ver
+ * notifyBulkAssignment en notifications.js). Si un lote falla, la función
+ * lanza y quien la llama no llega a recibir ninguna lista — solo puede
+ * pasar con más de 450 tareas de golpe (más de un lote), un caso teórico:
+ * los lotes anteriores ya escritos se quedarían sin avisar a nadie.
  */
 export async function createTasksFromQuickCreateInsertion(tasks, { projectId, createdBy }) {
   const baseOrder = Date.now();
+  const created = [];
   for (let i = 0; i < tasks.length; i += BATCH_CHUNK) {
     const batch = writeBatch(db);
+    const chunkCreated = [];
     tasks.slice(i, i + BATCH_CHUNK).forEach((t, j) => {
       const ref = doc(collection(db, "tasks"));
+      chunkCreated.push({ id: ref.id, title: t.title, assigneeIds: t.assigneeIds || [] });
       batch.set(ref, {
         projectId,
         ownerId: null,
@@ -205,6 +217,7 @@ export async function createTasksFromQuickCreateInsertion(tasks, { projectId, cr
       });
     });
     await batch.commit();
+    created.push(...chunkCreated);
   }
-  return tasks.length;
+  return created;
 }
