@@ -1,16 +1,17 @@
 // ============================================================================
 // Panel de métricas — apuntado en el apartado 6 del README como mejora a
 // futuro ("completadas, vencidas, carga por persona"), ahora hecho
-// realidad. Solo para administradores por ahora (la barra lateral no
-// muestra el enlace a nadie más, ver sidebar.js — es una limitación de
-// interfaz, no de las reglas de Firestore: los datos en sí ya eran
-// legibles para todo el equipo, ver el aviso de más abajo).
+// realidad. Para administradores y, desde la v54, también para el rol
+// Revisor (la barra lateral no muestra el enlace a nadie más, ver
+// sidebar.js — es una limitación de interfaz, no de las reglas de
+// Firestore: los datos en sí ya eran legibles para todo el equipo,
+// Revisor incluido, ver el aviso de más abajo).
 //
 // A propósito, solo cuenta tareas DE PROYECTO, nunca las personales de
 // "Mis tareas" de cada quien: esas son privadas por diseño (solo las ve su
 // dueño/a y quien conste como responsable, ver firestore.rules), así que
-// ni siquiera un admin puede reunirlas todas de golpe sin romper ese
-// límite — quien llama a renderMetricsView() (app.js) ya se encarga de
+// ni siquiera un admin o Revisor puede reunirlas todas de golpe sin romper
+// ese límite — quien llama a renderMetricsView() (app.js) ya se encarga de
 // pasar solo tareas de proyecto.
 // ============================================================================
 import { escapeHtml, toDate, initials, colorFromString, textColorFor, projectIcon, isOverdue, renderTitleHtml } from "../utils.js";

@@ -93,7 +93,8 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
           </span>
         </span>
         <select class="field__select acc-role-select" data-uid="${m.uid}">
-          <option value="miembro" ${m.role !== "admin" ? "selected" : ""}>Miembro</option>
+          <option value="miembro" ${m.role !== "admin" && m.role !== "revisor" ? "selected" : ""}>Miembro</option>
+          <option value="revisor" ${m.role === "revisor" ? "selected" : ""}>Revisor</option>
           <option value="admin" ${m.role === "admin" ? "selected" : ""}>Admin</option>
         </select>
         ${m.uid === currentUser.uid
@@ -135,6 +136,11 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
         const newRole = select.value;
         const member = members.find((m) => m.uid === uid);
         const adminCount = members.filter((m) => !m.deleted && m.role === "admin").length;
+        // newRole !== "admin" cubre tanto bajar a "miembro" como a
+        // "revisor" (v54): las dos cuentan igual como democión a efectos
+        // de esta protección, solo existe para no quedarse sin ningún
+        // admin en el equipo — Revisor no tiene un mínimo propio, se puede
+        // quitar del último Revisor sin ningún aviso.
         const isSelfDemotion = uid === currentUser.uid && newRole !== "admin";
 
         if (isSelfDemotion && adminCount <= 1) {

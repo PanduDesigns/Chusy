@@ -17,13 +17,24 @@ export function openAccountModal({ userProfile }) {
   const root = document.getElementById("modal-root");
 
   // --color-ink/--color-text-hi en vez de hexadecimales sueltos: la
-  // insignia de admin va sobre --color-signal (dorado) y la de miembro
-  // sobre --color-panel-raised — las dos cambian de valor entre modo claro
-  // y oscuro, así que el texto tiene que ser la variable pensada para
-  // seguir contrastando en los dos casos, no un color fijo copiado del
-  // aspecto que tenía en un solo tema.
-  const roleBg = userProfile.role === "admin" ? "var(--color-signal)" : "var(--color-panel-raised)";
-  const roleFg = userProfile.role === "admin" ? "var(--color-ink)" : "var(--color-text-hi)";
+  // insignia de admin va sobre --color-signal (dorado sólido) y la de
+  // miembro sobre --color-panel-raised — las dos cambian de valor entre
+  // modo claro y oscuro, así que el texto tiene que ser la variable
+  // pensada para seguir contrastando en los dos casos, no un color fijo
+  // copiado del aspecto que tenía en un solo tema. La de Revisor (v54)
+  // reutiliza el mismo dorado pero en su variante suave (fondo
+  // --color-signal-soft, texto --color-signal) — mismo acento que admin,
+  // para marcarlo como un rol con algo más de acceso que Miembro, pero sin
+  // confundirse con el sólido de admin; es la misma pareja de variables
+  // que ya usa la etiqueta "🔒 Personal" de Mis tareas (my-tasks-view.js).
+  const roleBg =
+    userProfile.role === "admin" ? "var(--color-signal)" :
+    userProfile.role === "revisor" ? "var(--color-signal-soft)" :
+    "var(--color-panel-raised)";
+  const roleFg =
+    userProfile.role === "admin" ? "var(--color-ink)" :
+    userProfile.role === "revisor" ? "var(--color-signal)" :
+    "var(--color-text-hi)";
   const memberSince = userProfile.createdAt ? formatDateLong(userProfile.createdAt) : "";
   const themeAttr = document.documentElement.dataset.theme;
   const currentTheme = themeAttr === "light" ? "light" : themeAttr === "classic" ? "classic" : "dark";
@@ -41,7 +52,7 @@ export function openAccountModal({ userProfile }) {
             <span class="avatar" style="width:44px;height:44px;font-size:15px;background:${colorFromString(userProfile.uid)}">${initials(userProfile.name)}</span>
             <div style="min-width:0;">
               <div style="font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(userProfile.email || "")}</div>
-              <span class="tag-pill" style="margin-top:4px;display:inline-block;background:${roleBg};color:${roleFg};">${userProfile.role === "admin" ? "Admin" : "Miembro"}</span>
+              <span class="tag-pill" style="margin-top:4px;display:inline-block;background:${roleBg};color:${roleFg};">${userProfile.role === "admin" ? "Admin" : userProfile.role === "revisor" ? "Revisor" : "Miembro"}</span>
               ${memberSince ? `<div style="font-size:11px;color:var(--color-text-faint);margin-top:4px;">Miembro desde ${memberSince}</div>` : ""}
             </div>
           </div>

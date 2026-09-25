@@ -398,11 +398,11 @@ function selectArchive() {
 /**
  * Único punto de entrada al modo "metrics" — restoreLastLocation() y el
  * clic del botón de la barra lateral (que ya solo existe en el DOM para
- * un admin, ver sidebar.js) pasan los dos por aquí, así que la
+ * admin y Revisor, ver sidebar.js) pasan los dos por aquí, así que la
  * comprobación de rol solo hace falta escribirla una vez.
  */
 function selectMetrics() {
-  if (!currentUser || currentUser.role !== "admin") { selectMyTasks(); return; }
+  if (!currentUser || (currentUser.role !== "admin" && currentUser.role !== "revisor")) { selectMyTasks(); return; }
   mode = "metrics";
   saveLastLocation({ mode: "metrics" });
   renderShell();
@@ -529,11 +529,11 @@ function renderShell() {
   if (mode === "metrics") {
     // selectMetrics() ya comprueba el rol antes de fijar este modo, pero
     // se repite aquí (segunda comprobación, barata) por si esta cuenta
-    // dejó de ser admin en mitad de una sesión ya abierta — sidebarEl se
-    // repinta más arriba con userProfile.role actualizado en cuanto
-    // cambie, así que el botón habría desaparecido, pero el modo en sí
-    // podría seguir activo un instante más sin este segundo aviso.
-    if (currentUser.role !== "admin") { selectMyTasks(); return; }
+    // dejó de ser admin/Revisor en mitad de una sesión ya abierta —
+    // sidebarEl se repinta más arriba con userProfile.role actualizado en
+    // cuanto cambie, así que el botón habría desaparecido, pero el modo en
+    // sí podría seguir activo un instante más sin este segundo aviso.
+    if (currentUser.role !== "admin" && currentUser.role !== "revisor") { selectMyTasks(); return; }
     topbarEl.innerHTML = `<span class="topbar__title">Métricas</span><span class="topbar__count">todos los proyectos</span>`;
     filterbarEl.innerHTML = ""; // resumen global, no una lista que filtrar
     renderMetricsView(mainContentEl, { tasks: getAllProjectTasksDeduped(), teamMembers, projects, onOpenTask: openTask });

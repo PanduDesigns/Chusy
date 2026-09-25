@@ -5,11 +5,14 @@
 // navegador, no afecta a nadie más ni a otras sesiones.
 //
 // El menú que se abre al clicar el propio usuario (pie de la barra) aloja,
-// además de "Mi cuenta" y las herramientas de administración de siempre,
-// dos entradas más solo para admins: "Métricas" (antes un botón fijo aparte
-// en esta misma barra) y "Creación Rápida" — el panel, a propósito
-// "escondido" aquí y en ningún otro sitio, para habilitar/configurar el
-// botón "Nueva cabina" de los proyectos (ver quick-create-admin-modal.js).
+// además de "Mi cuenta", tres entradas más solo para admins ("Administrar
+// equipo", "Importar desde Asana" y "Creación Rápida" — este último panel,
+// a propósito "escondido" aquí y en ningún otro sitio, para habilitar/
+// configurar el botón "Nueva cabina" de los proyectos, ver
+// quick-create-admin-modal.js) y una más, "Métricas" (antes un botón fijo
+// aparte en esta misma barra), que desde la v54 también ve el rol Revisor
+// — mismo permiso que Miembro más esta entrada, ver el apartado 3 del
+// README.
 // ============================================================================
 import { initials, colorFromString, escapeHtml, projectBadgeHtml } from "../utils.js";
 import { openContextMenu } from "./context-menu.js";
@@ -70,7 +73,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
         <span class="avatar" style="background:${colorFromString(userProfile.uid)}">${initials(userProfile.name)}</span>
         <div class="sidebar__label" style="min-width:0;">
           <div class="sidebar__user-name">${escapeHtml(userProfile.name || userProfile.email)}</div>
-          <div class="sidebar__user-role">${userProfile.role === "admin" ? "Admin" : "Miembro"}</div>
+          <div class="sidebar__user-role">${userProfile.role === "admin" ? "Admin" : userProfile.role === "revisor" ? "Revisor" : "Miembro"}</div>
         </div>
       </button>
       <button class="sidebar__logout" title="Cerrar sesión" id="btn-logout">⏻</button>
@@ -126,11 +129,20 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     if (userProfile.role === "admin") {
       items.push({ label: "Administrar equipo", icon: "🛠️", onClick: onOpenTeamAdmin });
       items.push({ label: "Importar desde Asana", icon: "📥", onClick: onOpenAsanaImport });
+    }
+    // Métricas (v54): admin Y Revisor — el único permiso que distingue a
+    // Revisor de Miembro, así que va en su propia comprobación en vez de
+    // colgar del bloque de arriba (estrictamente admin) o del de abajo
+    // (estrictamente admin también).
+    if (userProfile.role === "admin" || userProfile.role === "revisor") {
       items.push({ label: "Métricas", icon: "📊", onClick: onSelectMetrics });
+    }
+    if (userProfile.role === "admin") {
       // "Secreta" en el sentido de que solo vive aquí: nadie que no sea
-      // admin ve siquiera esta entrada, y no hay ningún botón fijo en el
-      // resto de la interfaz que la señale (a diferencia de Métricas,
-      // arriba, que hasta la v41 sí tenía uno) — ver quick-create-admin-modal.js.
+      // admin ve siquiera esta entrada (ni Revisor), y no hay ningún botón
+      // fijo en el resto de la interfaz que la señale (a diferencia de
+      // Métricas, arriba, que hasta la v41 sí tenía uno) — ver
+      // quick-create-admin-modal.js.
       items.push({ label: "Creación Rápida", icon: "⚡", onClick: onOpenQuickCreateAdmin });
     }
     items.push({ divider: true });
