@@ -26,8 +26,21 @@ const DEFAULT_SECTIONS = [
   { id: "hecho", name: "Hecho", order: 2 },
 ];
 
-/** Crea un proyecto nuevo. El creador queda como miembro automáticamente. */
-export async function createProject({ name, description, color, icon, creatorUid, sections }) {
+/**
+ * Crea un proyecto nuevo. El creador queda como miembro automáticamente.
+ *
+ * Los últimos cuatro parámetros (customFieldDefs/exclusive/exclusiveKey/
+ * allowedDepartments) son v55 y solo los rellena
+ * ensureExclusiveProjectsSeeded() más abajo, para crear una "sección
+ * exclusiva" como Ofertas ya lista de fábrica (secciones + campos
+ * personalizados + a qué departamentos se ve) — "+ Nuevo proyecto"
+ * (project-modal.js) nunca los manda, así que un proyecto normal ni los
+ * pregunta ni los guarda. Se añaden con spread condicional (no con `|| valor
+ * por defecto` como el resto de campos) a propósito: Firestore rechaza
+ * escribir una clave con valor `undefined`, así que un proyecto normal no
+ * debe ni mencionar estas claves, no vale con dejarlas "vacías".
+ */
+export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments }) {
   const ref = await addDoc(collection(db, "projects"), {
     name,
     description: description || "",
@@ -44,6 +57,8 @@ export async function createProject({ name, description, color, icon, creatorUid
     createdBy: creatorUid,
     createdAt: serverTimestamp(),
     archived: false,
+    ...(customFieldDefs ? { customFieldDefs } : {}),
+    ...(exclusive ? { exclusive: true, exclusiveKey, allowedDepartments: allowedDepartments || [] } : {}),
   });
   return ref.id;
 }
@@ -158,6 +173,95 @@ export async function saveProjectSections(project, newSections) {
     }
   }
   return setProjectSections(project.id, newSections);
+}
+
+/**
+ * ¿Puede esta persona VER este proyecto? Para uno normal, siempre sí — el
+ * modelo de "todo el departamento ve todo" (ver la cabecera de
+ * firestore.rules) no cambia con la v55. Solo entra en juego para un
+ * proyecto EXCLUSIVO (`exclusive: true`, ver EXCLUSIVE_PROJECT_SEEDS más
+ * abajo): un admin siempre; el resto, solo si su departamento
+ * (users/{uid}.department) está entre los `allowedDepartments` de ESTE
+ * proyecto en concreto — configurable desde "Accesos por departamento"
+ * (department-access-modal.js).
+ *
+ * Se aplica en app.js, en el único sitio donde `projects` sale de
+ * subscribeToAllProjects (ver bootstrap()) — así que todo lo que se
+ * alimenta de esa variable (barra lateral, buscador global, línea de
+ * tiempo global, los filtros por proyecto...) queda ya filtrado sin tocar
+ * nada más. Ojo: esto decide qué aparece en la INTERFAZ, no es una regla
+ * de seguridad de Firestore — las reglas siguen dejando leer/escribir
+ * cualquier proyecto a cualquier cuenta activa, mismo criterio ya usado
+ * para Métricas/Revisor en la v54 (ver el porqué en su historial, y
+ * Limitaciones en el README).
+ */
+export function isProjectVisibleToUser(project, user) {
+  if (!project.exclusive) return true;
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  return !!user.department && (project.allowedDepartments || []).includes(user.department);
+}
+
+/**
+ * "Secciones exclusivas" (v55): proyectos especiales que funcionan como
+ * cualquier otro por debajo (tareas, secciones propias, campos
+ * personalizados, Lista/Tablero/Calendario/Línea de tiempo...) pero no
+ * aparecen en la lista "Proyectos" de la barra lateral — tienen su propio
+ * botón fijo, como "Mis tareas" o "Archivo" (ver sidebar.js) — ni son
+ * visibles para quien no tenga acceso (ver isProjectVisibleToUser arriba).
+ *
+ * Esta lista es lo único que hace falta tocar para que una FUTURA sección
+ * exclusiva se cree sola: ensureExclusiveProjectsSeeded() (llamada una vez
+ * por sesión desde bootstrap() en app.js, solo si currentUser es admin)
+ * crea el proyecto que falte, ya con sus secciones y campos personalizados
+ * listos — así nadie tiene que montarlo a mano desde la consola de
+ * Firebase ni desde la propia interfaz la primera vez que se publique esta
+ * versión.
+ *
+ * Importante: la comprobación de "ya existe" solo mira proyectos NO
+ * archivados (subscribeToAllProjects no trae los archivados) — si alguna
+ * vez se archiva o se borra una de estas secciones, la próxima vez que un
+ * admin entre se crea una nueva desde cero, vacía. Ver Limitaciones en el
+ * README.
+ */
+const EXCLUSIVE_PROJECT_SEEDS = [
+  {
+    exclusiveKey: "ofertas",
+    name: "Ofertas",
+    icon: "💼",
+    color: "#8B85C4",
+    sections: [
+      { id: "nuevas", name: "Nuevas", order: 0, color: null },
+      { id: "revisiones", name: "Revisiones", order: 1, color: null },
+    ],
+    customFieldDefs: [
+      { id: "comercial", name: "Comercial", type: "texto", options: [] },
+      { id: "version", name: "Versión", type: "texto", options: [] },
+    ],
+    allowedDepartments: ["diseno"],
+  },
+];
+
+export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid) {
+  const existingKeys = new Set(currentProjects.map((p) => p.exclusiveKey).filter(Boolean));
+  for (const seed of EXCLUSIVE_PROJECT_SEEDS) {
+    if (existingKeys.has(seed.exclusiveKey)) continue;
+    try {
+      await createProject({
+        name: seed.name,
+        icon: seed.icon,
+        color: seed.color,
+        sections: seed.sections,
+        customFieldDefs: seed.customFieldDefs,
+        exclusive: true,
+        exclusiveKey: seed.exclusiveKey,
+        allowedDepartments: seed.allowedDepartments,
+        creatorUid,
+      });
+    } catch (e) {
+      console.error("ensureExclusiveProjectsSeeded:", seed.exclusiveKey, e);
+    }
+  }
 }
 
 /**

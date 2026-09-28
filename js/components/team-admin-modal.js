@@ -4,7 +4,8 @@
 // el registro. Se abre desde el pie de la barra lateral.
 // ============================================================================
 import { el, escapeHtml, initials, colorFromString, showToast } from "../utils.js";
-import { updateUserRole, setUserDeleted, getTeamConfig, updateTeamConfig } from "../data/users.js";
+import { updateUserRole, updateUserDepartment, setUserDeleted, getTeamConfig, updateTeamConfig } from "../data/users.js";
+import { DEPARTMENTS } from "../departments.js";
 
 /**
  * Cuentas ficticias (isImported, del importador de Asana — nunca un UID de
@@ -32,9 +33,10 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
         <div class="modal__body">
           <div>
             <span class="field__label" style="font-size:13px;" id="admin-active-count">Cuentas registradas</span>
-            <div class="list-table__header" style="grid-template-columns:1fr 140px 32px;margin-top:10px;">
+            <div class="list-table__header" style="grid-template-columns:1fr 110px 150px 32px;margin-top:10px;">
               <span class="list-table__col" style="cursor:default;">Persona</span>
               <span class="list-table__col" style="cursor:default;">Rol</span>
+              <span class="list-table__col" style="cursor:default;">Departamento</span>
               <span></span>
             </div>
             <div id="admin-users-list" style="display:flex;flex-direction:column;gap:4px;"></div>
@@ -84,7 +86,7 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
     overlay.querySelector("#admin-users-list").innerHTML = active
       .map(
         (m) => `
-      <div class="list-row" style="grid-template-columns:1fr 140px 32px;align-items:center;">
+      <div class="list-row" style="grid-template-columns:1fr 110px 150px 32px;align-items:center;">
         <span class="list-row__title-cell">
           <span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}">${initials(m.name)}</span>
           <span style="min-width:0;">
@@ -96,6 +98,10 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
           <option value="miembro" ${m.role !== "admin" && m.role !== "revisor" ? "selected" : ""}>Miembro</option>
           <option value="revisor" ${m.role === "revisor" ? "selected" : ""}>Revisor</option>
           <option value="admin" ${m.role === "admin" ? "selected" : ""}>Admin</option>
+        </select>
+        <select class="field__select acc-dept-select" data-uid="${m.uid}">
+          <option value="" ${!m.department ? "selected" : ""}>Sin departamento</option>
+          ${DEPARTMENTS.map((d) => `<option value="${d.value}" ${m.department === d.value ? "selected" : ""}>${d.label}</option>`).join("")}
         </select>
         ${m.uid === currentUser.uid
           ? `<span></span>`
@@ -124,6 +130,7 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
       .join("");
 
     wireRoleSelects();
+    wireDeptSelects();
     wireDeleteButtons();
     wireReactivateButtons();
   }
@@ -155,6 +162,30 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
         } catch (e) {
           showToast("No se pudo cambiar el rol.", "error");
           select.value = member ? member.role : "miembro";
+        }
+      });
+    });
+  }
+
+  // ---- departamento (v55) ----
+  // Sin la protección de "no te quedes sin admins": un departamento, a
+  // diferencia del rol, no controla ningún acceso general de la app por sí
+  // solo — como mucho, quita o da acceso a alguna sección exclusiva
+  // concreta (ver department-access-modal.js) — así que no hace falta
+  // ningún mínimo que proteger, ni para el último Diseño ni para nadie.
+  function wireDeptSelects() {
+    overlay.querySelectorAll(".acc-dept-select").forEach((select) => {
+      select.addEventListener("change", async () => {
+        const uid = select.dataset.uid;
+        const newDept = select.value || null;
+        const member = members.find((m) => m.uid === uid);
+        try {
+          await updateUserDepartment(uid, newDept);
+          if (member) member.department = newDept;
+          showToast("Departamento actualizado.");
+        } catch (e) {
+          showToast("No se pudo cambiar el departamento.", "error");
+          select.value = member ? member.department || "" : "";
         }
       });
     });

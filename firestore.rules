@@ -15,12 +15,20 @@ rules_version = '2';
 //    Solo lectura para todos, escritura solo para admins.
 //  - users/{uid}: perfil de cada persona. Cualquier cuenta ACTIVA (ver
 //    isActiveUser() más abajo) puede leer la lista entera (para asignar
-//    tareas); solo un admin puede cambiar el rol de otra persona, o
-//    eliminarla (campo `deleted`, ver "Eliminar usuario" del panel de
-//    administración) — ni el rol ni `deleted` se pueden tocar en el
+//    tareas); solo un admin puede cambiar el rol de otra persona, su
+//    departamento (campo `department`, v55 — ver más abajo), o eliminarla
+//    (campo `deleted`, ver "Eliminar usuario" del panel de administración)
+//    — ni el rol, ni el departamento, ni `deleted` se pueden tocar en el
 //    documento propio, ni siquiera dejándolos igual que ya estaban.
 //  - projects/{id}: cualquier cuenta activa puede leer, crear y editar
-//    cualquier proyecto. Solo quien lo creó (o un admin) puede borrarlo.
+//    cualquier proyecto — esto incluye, desde la v55, los campos
+//    `exclusive`/`exclusiveKey`/`allowedDepartments` de una "sección
+//    exclusiva" como Ofertas: A PROPÓSITO no llevan una regla más estricta
+//    que el resto del documento, mismo criterio que ya se usó para
+//    Métricas/Revisor en la v54 — el acceso por departamento es una
+//    comprobación de interfaz (ver isProjectVisibleToUser en
+//    data/projects.js), no una regla de seguridad de datos. Solo quien
+//    creó el proyecto (o un admin) puede borrarlo.
 //  - tasks/{id}: igual que proyectos si tienen projectId (cualquier cuenta
 //    activa del equipo puede leerlas y editarlas — incluye también las que
 //    solo tienen ese proyecto como ADICIONAL, ver extraProjectIds en el
@@ -121,19 +129,22 @@ service cloud.firestore {
          (isAdmin() &&
           request.resource.data.role == 'miembro' &&
           request.resource.data.isImported == true));
-      // El rol y `deleted` de un documento AJENO solo los toca un admin
-      // (cubre tanto "Administrar equipo" como "Eliminar usuario"/
-      // "Reactivar"). Sobre el documento PROPIO: cualquier cuenta activa
-      // puede actualizar el resto de campos (nombre, tema, columnas...)
-      // libremente, pero ni su propio rol ni su propio `deleted` — ni
-      // siquiera dejándolos igual que ya estaban, de ahí comparar contra
-      // el valor anterior en vez de solo prohibir escribir esas claves; y
-      // una cuenta YA eliminada no puede escribir nada en absoluto, ni
-      // siquiera un cambio que no toque ninguna de las dos.
+      // El rol, el departamento (v55) y `deleted` de un documento AJENO
+      // solo los toca un admin (cubre "Administrar equipo", "Eliminar
+      // usuario"/"Reactivar" y, desde la v55, el selector de departamento
+      // del mismo panel). Sobre el documento PROPIO: cualquier cuenta
+      // activa puede actualizar el resto de campos (nombre, tema,
+      // columnas...) libremente, pero ni su propio rol, ni su propio
+      // departamento, ni su propio `deleted` — ni siquiera dejándolos
+      // igual que ya estaban, de ahí comparar contra el valor anterior en
+      // vez de solo prohibir escribir esas claves; y una cuenta YA
+      // eliminada no puede escribir nada en absoluto, ni siquiera un
+      // cambio que no toque ninguna de las tres.
       allow update: if isAdmin() ||
         (isActiveUser() && request.auth.uid == userId &&
          request.resource.data.role == resource.data.role &&
-         request.resource.data.get('deleted', false) == resource.data.get('deleted', false));
+         request.resource.data.get('deleted', false) == resource.data.get('deleted', false) &&
+         request.resource.data.get('department', null) == resource.data.get('department', null));
       allow delete: if isAdmin();
     }
 

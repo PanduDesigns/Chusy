@@ -24,6 +24,16 @@ export function updateUserRole(uid, role) {
   return updateDoc(doc(db, "users", uid), { role });
 }
 
+/**
+ * Solo administradores (lo exigen las reglas de Firestore, igual que el
+ * rol): asigna el departamento de alguien (v55, ver ../departments.js).
+ * `department` es uno de los `value` de DEPARTMENTS, o null para dejarla
+ * sin departamento.
+ */
+export function updateUserDepartment(uid, department) {
+  return updateDoc(doc(db, "users", uid), { department: department || null });
+}
+
 /** Configuración del equipo: por ahora, los dominios de correo permitidos al registrarse. */
 export async function getTeamConfig() {
   const snap = await getDoc(doc(db, "meta", "config"));

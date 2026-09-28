@@ -4,15 +4,26 @@
 // (redondo, en el borde derecho) — queda como preferencia de este
 // navegador, no afecta a nadie más ni a otras sesiones.
 //
+// Secciones exclusivas (v55, ver EXCLUSIVE_PROJECT_SEEDS en
+// data/projects.js): un proyecto con `exclusive: true` (Ofertas, de
+// momento) NO entra en la lista "Proyectos" de abajo — sale como un botón
+// fijo más, junto a "Mis tareas"/"Línea de tiempo"/"Archivo", reutilizando
+// exactamente la misma plantilla y el mismo cableado de clic/clic derecho
+// que ya tenía cualquier proyecto normal (mismo `data-project-id`, así que
+// "Editar proyecto"/"Campos personalizados"/"Archivar"/"Eliminar" del menú
+// contextual siguen funcionando igual). `projects` ya llega aquí filtrado
+// por quién puede ver qué (ver bootstrap() en app.js) — este archivo solo
+// decide DÓNDE se pinta cada uno, no quién lo ve.
+//
 // El menú que se abre al clicar el propio usuario (pie de la barra) aloja,
 // además de "Mi cuenta", tres entradas más solo para admins ("Administrar
-// equipo", "Importar desde Asana" y "Creación Rápida" — este último panel,
-// a propósito "escondido" aquí y en ningún otro sitio, para habilitar/
-// configurar el botón "Nueva cabina" de los proyectos, ver
-// quick-create-admin-modal.js) y una más, "Métricas" (antes un botón fijo
-// aparte en esta misma barra), que desde la v54 también ve el rol Revisor
-// — mismo permiso que Miembro más esta entrada, ver el apartado 3 del
-// README.
+// equipo", "Accesos por departamento" —v55— e "Importar desde Asana" — y
+// "Creación Rápida", este último panel, a propósito "escondido" aquí y en
+// ningún otro sitio, para habilitar/configurar el botón "Nueva cabina" de
+// los proyectos, ver quick-create-admin-modal.js) y una más, "Métricas"
+// (antes un botón fijo aparte en esta misma barra), que desde la v54
+// también ve el rol Revisor — mismo permiso que Miembro más esta entrada,
+// ver el apartado 3 del README.
 // ============================================================================
 import { initials, colorFromString, escapeHtml, projectBadgeHtml } from "../utils.js";
 import { openContextMenu } from "./context-menu.js";
@@ -20,15 +31,23 @@ import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/p
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 import { openEditProjectModal } from "./edit-project-modal.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenAsanaImport, onOpenQuickCreateAdmin, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenAsanaImport, onOpenQuickCreateAdmin, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
-  const items = projects.map((p) => `
-    <button class="sidebar__item${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}" title="${escapeHtml(p.name)}">
+  const regularProjects = projects.filter((p) => !p.exclusive);
+  const exclusiveProjects = projects.filter((p) => p.exclusive);
+
+  function projectItemHtml(p, extraClass = "") {
+    return `
+    <button class="sidebar__item${extraClass}${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}" title="${escapeHtml(p.name)}">
       ${projectBadgeHtml(p)}
       <span class="sidebar__item-name sidebar__label">${escapeHtml(p.name)}</span>
     </button>
-  `).join("");
+  `;
+  }
+
+  const items = regularProjects.map((p) => projectItemHtml(p)).join("");
+  const exclusiveItems = exclusiveProjects.map((p) => projectItemHtml(p, " sidebar__item--pinned")).join("");
 
   container.innerHTML = `
     <div class="sidebar__brand">
@@ -59,6 +78,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       <span class="sidebar__item-icon">🗄️</span>
       <span class="sidebar__item-name sidebar__label">Archivo</span>
     </button>
+    ${exclusiveItems}
 
     <span class="sidebar__section-label sidebar__label">Proyectos</span>
     <div class="sidebar__list">
@@ -128,6 +148,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     const items = [{ label: "Mi cuenta", icon: "👤", onClick: onOpenAccount }];
     if (userProfile.role === "admin") {
       items.push({ label: "Administrar equipo", icon: "🛠️", onClick: onOpenTeamAdmin });
+      items.push({ label: "Accesos por departamento", icon: "🔐", onClick: onOpenDepartmentAccess });
       items.push({ label: "Importar desde Asana", icon: "📥", onClick: onOpenAsanaImport });
     }
     // Métricas (v54): admin Y Revisor — el único permiso que distingue a

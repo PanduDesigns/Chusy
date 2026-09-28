@@ -4,7 +4,7 @@
 // ============================================================================
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
-import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks } from "./data/projects.js";
+import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
 import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
@@ -35,6 +35,7 @@ import { applyTaskFilters, buildFilterDefs, sortTasks } from "./task-filters.js"
 import { openSearchModal } from "./components/search-modal.js";
 import { openAccountModal } from "./components/account-modal.js";
 import { openTeamAdminModal } from "./components/team-admin-modal.js";
+import { openDepartmentAccessModal } from "./components/department-access-modal.js";
 import { openAsanaImportModal } from "./components/asana-import-modal.js";
 import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal.js";
 import { openQuickCreateModal } from "./components/quick-create-modal.js";
@@ -188,6 +189,7 @@ let unsubCurrentTasks = null;
 let unsubNotifications = null;
 let unsubQuickCreateConfig = null;
 let hasRestoredLocation = false; // solo se restaura la sección al arrancar una vez por sesión — ver restoreLastLocation()
+let hasSeededExclusiveProjects = false; // mismo criterio (v55): el sembrado de secciones exclusivas se intenta como mucho una vez por sesión — ver ensureExclusiveProjectsSeeded()
 
 function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
 function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.add("hidden"); authScreen.classList.remove("hidden"); }
@@ -258,6 +260,7 @@ function cleanup() {
   activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
   quickCreateEnabled = false;
   hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
+  hasSeededExclusiveProjects = false;
   removeBulkToolbar();
   resetNotificationUi();
   notifBellEl.hidden = true;
@@ -303,14 +306,35 @@ function bootstrap() {
 
   if (unsubProjects) unsubProjects();
   unsubProjects = subscribeToAllProjects((allProjects) => {
-    projects = allProjects;
+    // v55: filtrado por departamento ANTES de guardarlo en `projects` — el
+    // único sitio donde se hace esta comprobación, así que todo lo que se
+    // alimenta de esta variable (barra lateral, buscador, línea de tiempo
+    // global, filtros por proyecto...) ya solo ve las secciones
+    // exclusivas a las que esta cuenta tiene acceso, sin repetir la
+    // comprobación en cada uno de esos sitios — ver isProjectVisibleToUser
+    // en data/projects.js.
+    projects = allProjects.filter((p) => isProjectVisibleToUser(p, currentUser));
     syncGlobalTimelineSubscriptions();
     if (mode === "project" && currentProjectId && !projects.find((p) => p.id === currentProjectId)) {
       // La sección recordada (o la que se acaba de seleccionar) ya no
-      // existe — se borró o se archivó. Igual que si no hubiera nada
-      // guardado, el destino por defecto es "Mis tareas".
+      // existe, se archivó, o (v55) es una sección exclusiva a la que esta
+      // cuenta ya no tiene acceso — los tres casos caen en lo mismo:
+      // "projects" (ya filtrado arriba) no la tiene. Igual que si no
+      // hubiera nada guardado, el destino por defecto es "Mis tareas".
       selectMyTasks();
       return;
+    }
+    // Sembrado de secciones exclusivas (v55) — como mucho una vez por
+    // sesión, y solo si esta cuenta es admin (así dos admins con sesión
+    // abierta a la vez no intentan crear cada uno su propia copia de
+    // Ofertas con el mismo primer snapshot). Se comprueba contra
+    // allProjects SIN filtrar: cualquier cuenta activa ya puede LEER un
+    // proyecto exclusivo aunque su departamento no la deje VERLO en la
+    // interfaz (ver isProjectVisibleToUser), así que mirar la lista sin
+    // filtrar es lo correcto para decidir si ya existe.
+    if (!hasSeededExclusiveProjects && currentUser.role === "admin") {
+      hasSeededExclusiveProjects = true;
+      ensureExclusiveProjectsSeeded(allProjects, currentUser.uid).catch((e) => console.error("ensureExclusiveProjectsSeeded:", e));
     }
     renderShell();
   });
@@ -501,6 +525,7 @@ function renderShell() {
     onOpenSearch: () => openSearch(),
     onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
+    onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive) }),
     onOpenAsanaImport: () => openAsanaImportModal({ teamMembers, currentUser }),
     onOpenQuickCreateAdmin: () => openQuickCreateAdminModal({ currentUser, quickCreateEnabled }),
     onCreateProject: () =>
