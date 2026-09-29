@@ -5,6 +5,7 @@
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
 import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
+import { isOffersProject } from "./offers.js";
 import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
@@ -755,7 +756,7 @@ function openNewProjectTask(sectionId, presetDueDate) {
     allProjects: projects,
     tagsRegistry,
     currentUserProfile: currentUser,
-    onSaved: () => showToast("Tarea creada."),
+    onSaved: () => showToast(isOffersProject(currentProject) ? "Oferta creada." : "Tarea creada."),
     onClosed: () => {},
   });
 }

@@ -1,7 +1,7 @@
 // ============================================================================
-// Modal "Nueva cabina": se abre desde el botón del topbar de un proyecto
+// Modal "Insertar producto" (hasta la v55, "Nueva cabina"): se abre desde el botón del topbar de un proyecto
 // (ver topbar.js) — visible para todo el mundo, pero solo pulsable por
-// administradores hasta que uno de ellos active "Nueva cabina" para todo el
+// administradores hasta que uno de ellos active "Insertar producto" para todo el
 // equipo desde el panel "Creación Rápida" (quick-create-admin-modal.js).
 //
 // Asistente de tres pasos (uno o varios productos de una sola pasada):
@@ -93,7 +93,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     <div class="modal-overlay">
       <div class="modal">
         <div class="modal__header">
-          <h3 style="font-size:16px;">⚡ Nueva cabina</h3>
+          <h3 style="font-size:16px;">⚡ Insertar producto</h3>
           <button class="modal__close" id="close">✕</button>
         </div>
         <div class="modal__body" id="qc-body"></div>

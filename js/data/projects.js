@@ -2,6 +2,7 @@
 // Acceso a datos: proyectos.
 // ============================================================================
 import { db } from "../firebase-init.js";
+import { OFFERS_KEY, normalizeName } from "../offers.js";
 import {
   collection,
   doc,
@@ -29,8 +30,8 @@ const DEFAULT_SECTIONS = [
 /**
  * Crea un proyecto nuevo. El creador queda como miembro automáticamente.
  *
- * Los últimos cuatro parámetros (customFieldDefs/exclusive/exclusiveKey/
- * allowedDepartments) son v55 y solo los rellena
+ * Los últimos cinco parámetros (customFieldDefs/exclusive/exclusiveKey/
+ * allowedDepartments, v55, y seedVersion, v56) solo los rellena
  * ensureExclusiveProjectsSeeded() más abajo, para crear una "sección
  * exclusiva" como Ofertas ya lista de fábrica (secciones + campos
  * personalizados + a qué departamentos se ve) — "+ Nuevo proyecto"
@@ -40,7 +41,7 @@ const DEFAULT_SECTIONS = [
  * escribir una clave con valor `undefined`, así que un proyecto normal no
  * debe ni mencionar estas claves, no vale con dejarlas "vacías".
  */
-export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments }) {
+export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments, seedVersion }) {
   const ref = await addDoc(collection(db, "projects"), {
     name,
     description: description || "",
@@ -59,6 +60,7 @@ export async function createProject({ name, description, color, icon, creatorUid
     archived: false,
     ...(customFieldDefs ? { customFieldDefs } : {}),
     ...(exclusive ? { exclusive: true, exclusiveKey, allowedDepartments: allowedDepartments || [] } : {}),
+    ...(seedVersion ? { seedVersion } : {}),
   });
   return ref.id;
 }
@@ -218,6 +220,18 @@ export function isProjectVisibleToUser(project, user) {
  * Firebase ni desde la propia interfaz la primera vez que se publique esta
  * versión.
  *
+ * `seedVersion` + `fieldsAddedIn` (v56): cómo se AÑADE algo a una sección
+ * que ya existe en Firestore. Crear el proyecto de cero solo ocurre una
+ * vez, así que un campo nuevo en `customFieldDefs` no le llegaría nunca a
+ * uno ya creado. Cada proyecto guarda la `seedVersion` con la que se creó
+ * o se puso al día (ausente = 1, la de la v55); si aquí es mayor, se le
+ * añaden los campos listados en `fieldsAddedIn[versión]` de cada versión
+ * intermedia (por id) — UNA sola vez: al terminar se guarda la nueva
+ * `seedVersion`, así que un campo que alguien borre a mano después NO
+ * vuelve a aparecer solo. Un campo nuevo, por tanto, se añade en dos
+ * sitios: a `customFieldDefs` (para los proyectos que se creen de cero) y
+ * a `fieldsAddedIn` de la versión que lo trae (para los ya creados).
+ *
  * Importante: la comprobación de "ya existe" solo mira proyectos NO
  * archivados (subscribeToAllProjects no trae los archivados) — si alguna
  * vez se archiva o se borra una de estas secciones, la próxima vez que un
@@ -226,7 +240,9 @@ export function isProjectVisibleToUser(project, user) {
  */
 const EXCLUSIVE_PROJECT_SEEDS = [
   {
-    exclusiveKey: "ofertas",
+    exclusiveKey: OFFERS_KEY,
+    seedVersion: 2,
+    fieldsAddedIn: { 2: ["ubicacion"] }, // v56: Ubicación
     name: "Ofertas",
     icon: "💼",
     color: "#8B85C4",
@@ -237,16 +253,43 @@ const EXCLUSIVE_PROJECT_SEEDS = [
     customFieldDefs: [
       { id: "comercial", name: "Comercial", type: "texto", options: [] },
       { id: "version", name: "Versión", type: "texto", options: [] },
+      { id: "ubicacion", name: "Ubicación", type: "texto", options: [] },
     ],
     allowedDepartments: ["diseno"],
   },
 ];
 
+/**
+ * Pone al día un proyecto exclusivo YA creado con lo que trajeron las
+ * versiones de su seed posteriores a la suya (ver `seedVersion` arriba).
+ * No toca nada más de lo que el equipo haya cambiado a mano (nombre,
+ * color, secciones, otros campos...): solo AÑADE los campos que falten, y
+ * si ya hay uno con ese mismo nombre (alguien lo creó a mano antes, con
+ * otro id) no lo duplica — solo da la migración por hecha.
+ */
+async function migrateSeededProject(project, seed) {
+  const have = project.seedVersion || 1;
+  if (have >= seed.seedVersion) return;
+  const defs = [...(project.customFieldDefs || [])];
+  for (let v = have + 1; v <= seed.seedVersion; v++) {
+    for (const fieldId of (seed.fieldsAddedIn && seed.fieldsAddedIn[v]) || []) {
+      const def = seed.customFieldDefs.find((f) => f.id === fieldId);
+      if (!def) continue;
+      const alreadyThere = defs.some((d) => d.id === def.id || normalizeName(d.name) === normalizeName(def.name));
+      if (!alreadyThere) defs.push({ ...def });
+    }
+  }
+  await updateProject(project.id, { customFieldDefs: defs, seedVersion: seed.seedVersion });
+}
+
 export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid) {
-  const existingKeys = new Set(currentProjects.map((p) => p.exclusiveKey).filter(Boolean));
   for (const seed of EXCLUSIVE_PROJECT_SEEDS) {
-    if (existingKeys.has(seed.exclusiveKey)) continue;
+    const existing = currentProjects.find((p) => p.exclusiveKey === seed.exclusiveKey);
     try {
+      if (existing) {
+        await migrateSeededProject(existing, seed);
+        continue;
+      }
       await createProject({
         name: seed.name,
         icon: seed.icon,
@@ -256,6 +299,7 @@ export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid)
         exclusive: true,
         exclusiveKey: seed.exclusiveKey,
         allowedDepartments: seed.allowedDepartments,
+        seedVersion: seed.seedVersion,
         creatorUid,
       });
     } catch (e) {

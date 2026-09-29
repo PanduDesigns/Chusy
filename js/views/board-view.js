@@ -3,6 +3,7 @@
 // columnas y para reordenar dentro de la misma columna.
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, getTaskSectionForProject, renderTitleHtml } from "../utils.js";
+import { isOffersProject } from "../offers.js";
 import { moveTask } from "../data/tasks.js";
 import { openTaskContextMenu } from "./list-view.js";
 
@@ -57,7 +58,7 @@ export function renderBoardView(container, { project, tasks, teamMembers, tagsRe
           <div class="board-col__body" data-drop-section="${section.id}">
             ${colTasks.map((task) => cardHtml(task, teamMembers, tagsRegistry)).join("")}
           </div>
-          <button class="board-col__add" data-add-section="${section.id}">+ Tarea</button>
+          <button class="board-col__add" data-add-section="${section.id}">+ ${isOffersProject(project) ? "Oferta" : "Tarea"}</button>
         </div>`;
       })
       .join("")}

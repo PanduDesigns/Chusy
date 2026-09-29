@@ -1006,6 +1006,21 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .project-assign-row__name { flex: 1; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-assign-row__section { max-width: 150px; flex-shrink: 0; font-size: 12px; padding: 5px 8px; }
 
+/* Histórico de revisiones de una oferta (v56) — task-modal.js, solo en las
+   tareas de Ofertas. Tabla de tres columnas (versión, cambios, quitar) con
+   el mismo look de caja que .project-assign-row; los campos de dentro
+   reutilizan .field__input/.field__textarea con el relleno recortado, y el
+   botón de quitar reutiliza .attachment-row__remove. */
+.revision-table { display: flex; flex-direction: column; border: 1px solid var(--color-line); border-radius: var(--radius-sm); overflow: hidden; }
+.revision-row { display: grid; grid-template-columns: 84px 1fr 24px; gap: 10px; align-items: start; padding: 8px 10px; background: var(--color-void-raised); border-top: 1px solid var(--color-line); }
+.revision-row:first-child { border-top: none; }
+.revision-row--head { align-items: center; padding: 6px 10px; background: transparent; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; color: var(--color-text-faint); text-transform: uppercase; }
+.revision-row__version { display: flex; flex-direction: column; gap: 3px; }
+.revision-row__version .field__input { font-family: var(--font-mono); font-weight: 600; font-size: 13px; padding: 6px 8px; }
+.revision-row__date { font-size: 10.5px; color: var(--color-text-faint); padding-left: 2px; }
+.revision-row__changes { min-height: 52px; padding: 7px 9px; font-size: 13px; }
+.revision-row .attachment-row__remove { padding-top: 6px; }
+
 .section-divider { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .section-divider__label { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; color: var(--color-text-faint); text-transform: uppercase; white-space: nowrap; }
 .section-divider::after { content: ''; flex: 1; height: 1px; background: var(--color-line); }

@@ -13,7 +13,10 @@
 // "Editar proyecto"/"Campos personalizados"/"Archivar"/"Eliminar" del menú
 // contextual siguen funcionando igual). `projects` ya llega aquí filtrado
 // por quién puede ver qué (ver bootstrap() en app.js) — este archivo solo
-// decide DÓNDE se pinta cada uno, no quién lo ve.
+// decide DÓNDE se pinta cada uno, no quién lo ve. Desde la v56 su icono va
+// suelto (el emoji, sin el cuadradito de color de un proyecto normal), como
+// el de los otros botones fijos, y el pie de la barra añade al rol el
+// departamento de quien mira ("Admin · Diseño").
 //
 // El menú que se abre al clicar el propio usuario (pie de la barra) aloja,
 // además de "Mi cuenta", tres entradas más solo para admins ("Administrar
@@ -25,7 +28,8 @@
 // también ve el rol Revisor — mismo permiso que Miembro más esta entrada,
 // ver el apartado 3 del README.
 // ============================================================================
-import { initials, colorFromString, escapeHtml, projectBadgeHtml } from "../utils.js";
+import { initials, colorFromString, escapeHtml, projectBadgeHtml, projectIcon } from "../utils.js";
+import { DEPARTMENTS } from "../departments.js";
 import { openContextMenu } from "./context-menu.js";
 import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/projects.js";
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
@@ -37,17 +41,31 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   const regularProjects = projects.filter((p) => !p.exclusive);
   const exclusiveProjects = projects.filter((p) => p.exclusive);
 
-  function projectItemHtml(p, extraClass = "") {
+  // `plainIcon` (v56): el emoji suelto, igual que el de "Mis tareas"/
+  // "Línea de tiempo"/"Archivo", en vez del cuadradito de color de un
+  // proyecto normal — es lo que se usa para las secciones exclusivas, que
+  // se pintan como uno de esos botones fijos y no como un proyecto más.
+  function projectItemHtml(p, extraClass = "", plainIcon = false) {
+    const icon = plainIcon
+      ? `<span class="sidebar__item-icon">${escapeHtml(projectIcon(p))}</span>`
+      : projectBadgeHtml(p);
     return `
     <button class="sidebar__item${extraClass}${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}" title="${escapeHtml(p.name)}">
-      ${projectBadgeHtml(p)}
+      ${icon}
       <span class="sidebar__item-name sidebar__label">${escapeHtml(p.name)}</span>
     </button>
   `;
   }
 
   const items = regularProjects.map((p) => projectItemHtml(p)).join("");
-  const exclusiveItems = exclusiveProjects.map((p) => projectItemHtml(p, " sidebar__item--pinned")).join("");
+  const exclusiveItems = exclusiveProjects.map((p) => projectItemHtml(p, " sidebar__item--pinned", true)).join("");
+
+  // Pie de la barra (v56): rol y, si tiene uno asignado, su departamento —
+  // "Admin · Diseño". Un valor que ya no esté en DEPARTMENTS (departamento
+  // quitado del registro) se ignora en vez de pintar algo raro.
+  const roleLabel = userProfile.role === "admin" ? "Admin" : userProfile.role === "revisor" ? "Revisor" : "Miembro";
+  const department = DEPARTMENTS.find((d) => d.value === userProfile.department);
+  const roleLine = department ? `${roleLabel} · ${department.label}` : roleLabel;
 
   container.innerHTML = `
     <div class="sidebar__brand">
@@ -93,7 +111,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
         <span class="avatar" style="background:${colorFromString(userProfile.uid)}">${initials(userProfile.name)}</span>
         <div class="sidebar__label" style="min-width:0;">
           <div class="sidebar__user-name">${escapeHtml(userProfile.name || userProfile.email)}</div>
-          <div class="sidebar__user-role">${userProfile.role === "admin" ? "Admin" : userProfile.role === "revisor" ? "Revisor" : "Miembro"}</div>
+          <div class="sidebar__user-role" title="${escapeHtml(roleLine)}">${escapeHtml(roleLine)}</div>
         </div>
       </button>
       <button class="sidebar__logout" title="Cerrar sesión" id="btn-logout">⏻</button>

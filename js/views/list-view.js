@@ -14,6 +14,7 @@ import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../da
 import { celebrateTask } from "../components/celebration.js";
 import { updateProject, saveProjectSections } from "../data/projects.js";
 import { openContextMenu } from "../components/context-menu.js";
+import { isOffersProject } from "../offers.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
 import { openSectionsModal } from "../components/sections-modal.js";
 import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, wireColumnReorder, openColumnsMenu } from "../components/table-columns.js";
@@ -84,6 +85,10 @@ export function renderListView(container, opts) {
    * (sectionId null) — misma pinta, pero éste no se puede eliminar ni
    * renombrar desde aquí (no es una sección de verdad, es solo dónde
    * "aparcan" las tareas que se quedan sin una al borrarla). */
+  // En Ofertas (v56, ver offers.js) el vocabulario es el de una oferta.
+  const nounOne = isOffersProject(project) ? "oferta" : "tarea";
+  const nounMany = isOffersProject(project) ? "ofertas" : "tareas";
+
   function sectionBlockHtml(sectionId, sectionName, sectionTasks) {
     const rows = sectionTasks
       .map((task) => {
@@ -130,9 +135,9 @@ export function renderListView(container, opts) {
       <div class="section-header">
         <span class="section-header__name">${escapeHtml(sectionName)}</span>
         <span class="section-header__count">${sectionTasks.length}</span>
-        <button class="section-header__add" data-add-section="${sectionId || ""}">+ Añadir tarea</button>
+        <button class="section-header__add" data-add-section="${sectionId || ""}">+ Añadir ${nounOne}</button>
       </div>
-      ${rows || `<p style="color:var(--color-text-faint);font-size:12.5px;padding:8px 10px;">Sin tareas en esta sección.</p>`}
+      ${rows || `<p style="color:var(--color-text-faint);font-size:12.5px;padding:8px 10px;">Sin ${nounMany} en esta sección.</p>`}
     </div>`;
   }
 

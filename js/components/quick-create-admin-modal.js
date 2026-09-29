@@ -1,7 +1,7 @@
 // ============================================================================
 // Modal (solo administradores, escondido en el menú de usuario — ver
 // sidebar.js): panel de "Creación Rápida". Dos cosas en un mismo sitio:
-//  1. El interruptor que decide si el botón "Nueva cabina" (topbar de
+//  1. El interruptor que decide si el botón "Insertar producto" (antes "Nueva cabina", topbar de
 //     cualquier proyecto) está abierto a todo el equipo o reservado a
 //     administradores — se aplica al momento, igual que el tema en "Mi
 //     cuenta" (account-modal.js).
@@ -248,20 +248,20 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
   function renderListScreen() {
     const productRows = state.products.length
       ? state.products.map(productRowHtml).join("")
-      : `<p style="color:var(--color-text-faint);font-size:12.5px;">Todavía no hay ningún producto. Crea el primero para que el equipo pueda usarlo desde "Nueva cabina".</p>`;
+      : `<p style="color:var(--color-text-faint);font-size:12.5px;">Todavía no hay ningún producto. Crea el primero para que el equipo pueda usarlo desde "Insertar producto".</p>`;
 
     return `
       <div>
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
           <input type="checkbox" id="qc-enabled-toggle" ${state.enabled ? "checked" : ""} style="width:17px;height:17px;accent-color:var(--color-signal);cursor:pointer;flex-shrink:0;">
-          <span style="font-size:13.5px;color:var(--color-text-hi);font-weight:500;">Activar «Nueva cabina» para todo el equipo</span>
+          <span style="font-size:13.5px;color:var(--color-text-hi);font-weight:500;">Activar «Insertar producto» para todo el equipo</span>
         </label>
-        <p class="field__hint" style="margin-top:6px;">Mientras esté desactivado, el botón "Nueva cabina" se ve en cualquier proyecto pero solo tú (como admin) puedes pulsarlo — para dejarlo todo preparado antes de anunciarlo al equipo.</p>
+        <p class="field__hint" style="margin-top:6px;">Mientras esté desactivado, el botón "Insertar producto" se ve en cada proyecto (menos en Ofertas, donde nunca aparece) pero solo tú (como admin) puedes pulsarlo — para dejarlo todo preparado antes de anunciarlo al equipo.</p>
       </div>
       <div style="border-top:1px solid var(--color-line);"></div>
       <div>
         <span class="field__label" style="font-size:13px;">Productos (${state.products.length})</span>
-        <p class="field__hint">Cada producto puede llevar tareas base (siempre se crean) y grupos de opciones — p. ej. "Tipo de flujo" — donde cada opción añade sus propias tareas al elegirla. Así se configuran variantes de un mismo producto. Arrastra el ⠿ de cada fila para cambiar el orden en que aparecen en "Nueva cabina".</p>
+        <p class="field__hint">Cada producto puede llevar tareas base (siempre se crean) y grupos de opciones — p. ej. "Tipo de flujo" — donde cada opción añade sus propias tareas al elegirla. Así se configuran variantes de un mismo producto. Arrastra el ⠿ de cada fila para cambiar el orden en que aparecen en "Insertar producto".</p>
         <div id="qc-product-list" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">${productRows}</div>
         <button class="btn btn--ghost btn--sm" id="qc-new-product" type="button" style="width:fit-content;margin-top:10px;">+ Nuevo producto</button>
       </div>`;
@@ -445,7 +445,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
       try {
         await setQuickCreateEnabled(next);
         state.enabled = next;
-        showToast(next ? "«Nueva cabina» activada para todo el equipo." : "«Nueva cabina» vuelve a estar reservada a administradores.");
+        showToast(next ? "«Insertar producto» activado para todo el equipo." : "«Insertar producto» vuelve a estar reservado a administradores.");
       } catch (e) {
         toggle.checked = !next;
         showToast("No se pudo guardar el cambio.", "error");
@@ -488,7 +488,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
       btn.addEventListener("click", async () => {
         const product = state.products.find((p) => p.id === btn.dataset.deleteProduct);
         if (!product) return;
-        const ok = confirm(`¿Eliminar el producto "${product.name}"? No afecta a las tareas que ya se hayan creado a partir de él — solo deja de estar disponible en "Nueva cabina".`);
+        const ok = confirm(`¿Eliminar el producto "${product.name}"? No afecta a las tareas que ya se hayan creado a partir de él — solo deja de estar disponible en "Insertar producto".`);
         if (!ok) return;
         btn.disabled = true;
         try {

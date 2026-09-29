@@ -19,6 +19,15 @@
 // Comentarios: solo se muestran editando una tarea ya existente (una
 // tarea nueva todavía no tiene id al que colgar comentarios), y esos sí
 // se envían al momento — no forman parte del "draft".
+//
+// Ofertas (v56, ver offers.js): si la tarea pertenece al proyecto Ofertas
+// (como principal o como adicional) el modal añade, justo debajo de los
+// campos personalizados, el histórico de revisiones y el botón "Nueva
+// versión". Ese botón, como todo lo demás aquí, solo toca el formulario
+// (versión, sección, completada y una fila nueva en el histórico) — no
+// se guarda nada hasta "Aceptar". Una oferta nueva nace en "Nuevas" con
+// versión A1, salvo que se haya abierto desde el "+ Añadir oferta" de otra
+// sección.
 // ============================================================================
 import { createTask, updateTask, getTask, nextPersonalOwnerId } from "../data/tasks.js";
 import { notifyNewAssignees } from "../data/notifications.js";
@@ -35,13 +44,23 @@ import {
   projectBadgeHtml,
   renderTitleHtml,
   plainTitleText,
+  showToast,
   PRIORITY_LABELS,
 } from "../utils.js";
+import { isOffersProject, findOffersSection, findOfferVersionField, nextOfferVersion, OFFER_FIRST_VERSION } from "../offers.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
 
 const PRIORITIES = ["urgente", "alta", "media", "baja"];
 let lastPickedTagColor = TAG_COLOR_PALETTE[0];
+
+/** Fecha corta (dd/mm/aa) de una fila del histórico de revisiones; "" si no hay fecha. */
+function formatRevisionDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getFullYear()).slice(-2)}`;
+}
 
 function emptyDraft({ project, isPersonal, defaultSectionId, presetDueDate, currentUserId }) {
   return {
@@ -92,6 +111,15 @@ export function openTaskModal({
   let comments = [];
   let unsubComments = null;
   let descriptionEditor = null;
+  // Histórico de revisiones (v56, solo tareas de Ofertas). Igual que el
+  // resto del formulario, vive aquí hasta pulsar "Aceptar"; no forma parte
+  // de `draft` porque solo se guarda cuando la tarea ES una oferta (ver
+  // handleAccept) y `draft` se vuelca entero en Firestore.
+  let revisions = [];
+  // Filas añadidas con "Nueva versión" en ESTA apertura del modal: solo
+  // por esas se avisa al guardar si siguen sin explicar qué cambió, no por
+  // una fila antigua que alguien dejó en blanco hace semanas.
+  const newRevisionIds = new Set();
 
   const overlay = el(`<div class="modal-overlay"><div class="modal"><div style="padding:40px;text-align:center;color:var(--color-text-lo);">Cargando…</div></div></div>`);
   root.appendChild(overlay);
@@ -99,6 +127,7 @@ export function openTaskModal({
   document.addEventListener("keydown", onKeydown);
 
   if (isNew) {
+    applyOfferDefaults();
     buildForm();
   } else {
     getTask(taskId).then((t) => {
@@ -109,6 +138,12 @@ export function openTaskModal({
       Object.entries(t.extraSections || {}).forEach(([pid, sid]) => { sectionByProject[pid] = sid || null; });
       loadedOwnerId = t.ownerId || null;
       loadedAssigneeIds = t.assigneeIds || [];
+      revisions = (t.revisions || []).map((r) => ({
+        id: r.id || uid(),
+        version: String(r.version ?? ""),
+        changes: String(r.changes ?? ""),
+        createdAt: r.createdAt || null,
+      }));
       draft = {
         title: t.title, description: t.description,
         projectIds, sectionByProject,
@@ -152,7 +187,7 @@ export function openTaskModal({
       <div class="modal">
         <div class="modal__header">
           <button class="task-row__check${draft.isComplete ? " is-checked" : ""}" id="t-complete" title="Marcar como completada" style="width:22px;height:22px;">${draft.isComplete ? "✓" : ""}</button>
-          <input class="modal__title-input" id="t-title" value="${escapeHtml(draft.title)}" placeholder="Título de la tarea">
+          <input class="modal__title-input" id="t-title" value="${escapeHtml(draft.title)}" placeholder="Título de la ${offersProject() ? "oferta" : "tarea"}">
           <button type="button" class="modal__title-bold-btn" id="t-title-bold" title="Negrita: selecciona texto del título y pulsa (o Ctrl/Cmd+B)">B</button>
           <button class="modal__close" id="t-close">✕</button>
         </div>
@@ -210,6 +245,8 @@ export function openTaskModal({
 
           <div id="t-customfields"></div>
 
+          <div id="t-revisions"></div>
+
           <div class="field">
             <span class="field__label">Descripción</span>
             <div id="t-description-mount"></div>
@@ -252,6 +289,7 @@ export function openTaskModal({
     wireStaticListeners();
     renderProjectRows();
     renderCustomFields();
+    renderRevisions();
     renderTagChips();
     renderSubtasks();
     renderAttachments();
@@ -372,6 +410,7 @@ export function openTaskModal({
         markDirty();
         renderProjectRows();
         renderCustomFields();
+        renderRevisions();
       });
     });
   }
@@ -415,6 +454,7 @@ export function openTaskModal({
         markDirty();
         renderProjectRows();
         renderCustomFields();
+        renderRevisions();
         closePopover();
       });
     });
@@ -471,6 +511,142 @@ export function openTaskModal({
         markDirty();
       });
     });
+  }
+
+  // --------------------------------------------------------------------
+  // Ofertas (v56, ver offers.js)
+  // --------------------------------------------------------------------
+
+  /** El proyecto Ofertas de esta tarea AHORA MISMO (principal o adicional), o null si no pertenece a él. */
+  function offersProject() {
+    for (const pid of draft.projectIds) {
+      const p = projects.find((x) => x.id === pid);
+      if (isOffersProject(p)) return p;
+    }
+    return null;
+  }
+
+  /**
+   * Valores de partida de una oferta NUEVA: sección "Nuevas" (salvo que se
+   * haya abierto desde el "+ Añadir oferta" de una sección concreta, que
+   * manda) y versión A1. Solo si el proyecto sigue teniendo esa sección o
+   * ese campo — si alguien los borró, se deja el formulario como estaba.
+   */
+  function applyOfferDefaults() {
+    const offers = offersProject();
+    if (!offers) return;
+    if (!defaultSectionId) {
+      const nuevas = findOffersSection(offers, "nuevas");
+      if (nuevas) draft.sectionByProject = { ...draft.sectionByProject, [offers.id]: nuevas.id };
+    }
+    const versionField = findOfferVersionField(offers);
+    if (versionField && !draft.customFields[versionField.id]) {
+      draft.customFields = { ...draft.customFields, [versionField.id]: OFFER_FIRST_VERSION };
+    }
+  }
+
+  /**
+   * Histórico de revisiones + botón "Nueva versión" — solo si la tarea es
+   * una oferta (si no, el hueco #t-revisions se queda vacío). Se vuelve a
+   * pintar al añadir/quitar un proyecto y al añadir/quitar una fila, pero
+   * NO al escribir en una de sus casillas (perdería el foco a mitad de
+   * frase): ahí solo se actualiza la fila correspondiente de `revisions`.
+   */
+  function renderRevisions() {
+    const mount = overlay.querySelector("#t-revisions");
+    if (!mount) return;
+    if (!offersProject()) { mount.innerHTML = ""; return; }
+
+    mount.innerHTML = `
+      <div class="field">
+        <span class="field__label-row">
+          <span class="field__label">Histórico de revisiones</span>
+          ${isNew ? "" : `<button type="button" class="btn btn--ghost btn--sm" id="t-new-version" style="margin-left:auto;">+ Nueva versión</button>`}
+        </span>
+        ${revisions.length
+          ? `<div class="revision-table">
+              <div class="revision-row revision-row--head"><span>Versión</span><span>Cambios</span><span></span></div>
+              ${revisions
+                .map(
+                  (r) => `
+              <div class="revision-row" data-revision="${r.id}">
+                <div class="revision-row__version">
+                  <input class="field__input" type="text" data-rev-version="${r.id}" value="${escapeHtml(r.version)}" aria-label="Versión">
+                  <span class="revision-row__date">${formatRevisionDate(r.createdAt)}</span>
+                </div>
+                <textarea class="field__textarea revision-row__changes" data-rev-changes="${r.id}" rows="2" placeholder="¿Qué ha cambiado y por qué?">${escapeHtml(r.changes)}</textarea>
+                <button type="button" class="attachment-row__remove" data-rev-remove="${r.id}" title="Quitar esta fila del histórico">✕</button>
+              </div>`
+                )
+                .join("")}
+            </div>`
+          : `<p class="field__hint" style="margin:0;">${isNew ? "Podrás crear nuevas versiones después de guardar la oferta." : "Sin revisiones todavía. Cuando el comercial pida un cambio, pulsa «Nueva versión»."}</p>`}
+      </div>`;
+
+    const newVersionBtn = mount.querySelector("#t-new-version");
+    if (newVersionBtn) newVersionBtn.addEventListener("click", startNewVersion);
+    mount.querySelectorAll("[data-rev-version]").forEach((input) => {
+      input.addEventListener("input", (e) => {
+        const row = revisions.find((r) => r.id === input.dataset.revVersion);
+        if (row) { row.version = e.target.value; markDirty(); }
+      });
+    });
+    mount.querySelectorAll("[data-rev-changes]").forEach((ta) => {
+      ta.addEventListener("input", (e) => {
+        const row = revisions.find((r) => r.id === ta.dataset.revChanges);
+        if (row) { row.changes = e.target.value; markDirty(); }
+      });
+    });
+    mount.querySelectorAll("[data-rev-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        revisions = revisions.filter((r) => r.id !== btn.dataset.revRemove);
+        newRevisionIds.delete(btn.dataset.revRemove);
+        markDirty();
+        renderRevisions();
+      });
+    });
+  }
+
+  /**
+   * "Nueva versión": la oferta vuelve a quedar sin completar, pasa a la
+   * sección Revisiones, sube de versión (A1 → A2) y se apunta una fila
+   * nueva en el histórico para escribir qué cambia y por qué. Todo sobre el
+   * formulario — se guarda al pulsar "Aceptar", como cualquier otro cambio.
+   */
+  function startNewVersion() {
+    const offers = offersProject();
+    if (!offers) return;
+    const versionField = findOfferVersionField(offers);
+    const lastRevisionVersion = revisions.length ? revisions[revisions.length - 1].version : "";
+    const current = (versionField && draft.customFields[versionField.id]) || lastRevisionVersion;
+    const next = nextOfferVersion(current);
+
+    draft.isComplete = false;
+    const completeBtn = overlay.querySelector("#t-complete");
+    completeBtn.classList.remove("is-checked");
+    completeBtn.textContent = "";
+
+    const revisionsSection = findOffersSection(offers, "revisiones");
+    if (revisionsSection) {
+      draft.sectionByProject = { ...draft.sectionByProject, [offers.id]: revisionsSection.id };
+    } else {
+      showToast('Ofertas no tiene ninguna sección "Revisiones": la oferta se queda donde estaba.', "error");
+    }
+    if (versionField) draft.customFields = { ...draft.customFields, [versionField.id]: next };
+
+    const row = { id: uid(), version: next, changes: "", createdAt: new Date().toISOString() };
+    revisions = [...revisions, row];
+    newRevisionIds.add(row.id);
+    markDirty();
+
+    renderProjectRows();
+    renderCustomFields();
+    renderRevisions();
+    const changesBox = overlay.querySelector(`[data-rev-changes="${row.id}"]`);
+    if (changesBox) {
+      changesBox.focus();
+      if (typeof changesBox.scrollIntoView === "function") changesBox.scrollIntoView({ block: "nearest" });
+    }
   }
 
   // --------------------------------------------------------------------
@@ -792,6 +968,17 @@ export function openTaskModal({
     // pasaría la comprobación de "no está vacío" si se mirara la cadena
     // en crudo, aunque en pantalla no se vería ningún texto.
     if (!plainTitleText(draft.title).trim()) { titleInputEl.focus(); return; }
+    // Ofertas (v56): una versión recién creada sin explicar qué cambió no
+    // bloquea el guardado, pero se avisa una vez — de eso va el histórico.
+    const offers = offersProject();
+    if (offers) {
+      const unexplained = revisions.filter((r) => newRevisionIds.has(r.id) && !r.changes.trim());
+      if (unexplained.length && !confirm("Has creado una versión nueva sin explicar qué ha cambiado. ¿Guardar igualmente?")) {
+        const box = overlay.querySelector(`[data-rev-changes="${unexplained[0].id}"]`);
+        if (box) box.focus();
+        return;
+      }
+    }
     const acceptBtn = overlay.querySelector("#t-accept");
     acceptBtn.disabled = true;
     acceptBtn.textContent = "Guardando…";
@@ -836,6 +1023,13 @@ export function openTaskModal({
           extraProjectIds: extraIds,
           extraSections,
           ownerId,
+          // Solo si la tarea ES una oferta: una tarea normal no debe ganar
+          // un `revisions: []` vacío cada vez que se guarda. Quitar una
+          // tarea de Ofertas en este modal tampoco borra su histórico (no
+          // se manda, así que Firestore lo deja como estaba).
+          ...(offers
+            ? { revisions: revisions.map((r) => ({ id: r.id, version: r.version.trim(), changes: r.changes.trim(), createdAt: r.createdAt })) }
+            : {}),
         });
         onSaved(taskId);
         // Tarea existente: solo avisa a quien esté en la lista nueva pero
