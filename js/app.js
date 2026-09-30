@@ -4,9 +4,10 @@
 // ============================================================================
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
-import { createProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
-import { isOffersProject } from "./offers.js";
-import { subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
+import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
+import { isOffersProject, findOfferCommercialField, collectSuggestions } from "./offers.js";
+import { convertOfferToProject } from "./data/offer-conversion.js";
+import { getTask, subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
 import { subscribeToNotifications } from "./data/notifications.js";
@@ -31,6 +32,7 @@ import { renderArchiveView } from "./views/archive-view.js";
 import { renderMetricsView } from "./views/metrics-view.js";
 import { openProjectModal } from "./components/project-modal.js";
 import { openTaskModal } from "./components/task-modal.js";
+import { openProjectPropertiesModal, openOfferConversionModal } from "./components/project-properties-modal.js";
 import { renderFilterBar } from "./components/filter-bar.js";
 import { applyTaskFilters, buildFilterDefs, sortTasks } from "./task-filters.js";
 import { openSearchModal } from "./components/search-modal.js";
@@ -42,7 +44,7 @@ import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal
 import { openQuickCreateModal } from "./components/quick-create-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { removeBulkToolbar } from "./components/bulk-toolbar.js";
-import { showToast, getTaskSectionForProject, debounce } from "./utils.js";
+import { showToast, getTaskSectionForProject, debounce, toDateInputValue } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
 const authScreen = document.getElementById("auth-screen");
@@ -529,6 +531,7 @@ function renderShell() {
     onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive) }),
     onOpenAsanaImport: () => openAsanaImportModal({ teamMembers, currentUser }),
     onOpenQuickCreateAdmin: () => openQuickCreateAdminModal({ currentUser, quickCreateEnabled }),
+    onOpenProjectProperties: (project) => openProjectProperties(project),
     onCreateProject: () =>
       openProjectModal({
         onCreate: async (data) => {
@@ -756,6 +759,9 @@ function openNewProjectTask(sectionId, presetDueDate) {
     allProjects: projects,
     tagsRegistry,
     currentUserProfile: currentUser,
+    getCommercialOptions,
+    onConvertOffer: openOfferConversion,
+    onOpenProject: openConvertedProject,
     onSaved: () => showToast(isOffersProject(currentProject) ? "Oferta creada." : "Tarea creada."),
     onClosed: () => {},
   });
@@ -769,6 +775,9 @@ function openNewPersonalTask() {
     allProjects: projects,
     tagsRegistry,
     currentUserProfile: currentUser,
+    getCommercialOptions,
+    onConvertOffer: openOfferConversion,
+    onOpenProject: openConvertedProject,
     onSaved: () => showToast("Recordatorio creado."),
     onClosed: () => {},
   });
@@ -789,9 +798,78 @@ function openTask(taskId) {
     teamMembers,
     tagsRegistry,
     currentUserProfile: currentUser,
+    getCommercialOptions,
+    onConvertOffer: openOfferConversion,
+    onOpenProject: openConvertedProject,
     onSaved: () => {},
     onClosed: () => {},
   });
+}
+
+// ----------------------------------------------------------------------------
+// v57: Propiedades de un proyecto y oferta → proyecto
+// ----------------------------------------------------------------------------
+
+/**
+ * Los valores de "Comercial" que ya existen, para sugerirlos al escribir
+ * (campo Comercial de una oferta en task-modal.js y de las Propiedades de
+ * un proyecto): el de cada oferta (tareas de Ofertas, que ya están todas
+ * en globalTasksByProject — ver syncGlobalTimelineSubscriptions) más el de
+ * las propiedades de cada proyecto. Sin proyectos archivados: esos no se
+ * cargan fuera de la vista Archivo. Ofertas solo está en `projects` para
+ * quien puede verla (admin o el departamento con acceso), así que quien no
+ * la ve sugiere solo lo que hay en las propiedades de proyectos.
+ */
+function getCommercialOptions() {
+  const values = [];
+  const offers = projects.find((p) => isOffersProject(p));
+  const field = offers ? findOfferCommercialField(offers) : null;
+  if (offers && field) {
+    (globalTasksByProject[offers.id] || []).forEach((t) => values.push(t.customFields && t.customFields[field.id]));
+  }
+  projects.forEach((p) => values.push(p.properties && p.properties.comercial));
+  return collectSuggestions(values);
+}
+
+/** "Propiedades" del menú de clic derecho de un proyecto (sidebar.js). */
+function openProjectProperties(project) {
+  openProjectPropertiesModal({
+    project,
+    getCommercialOptions,
+    onSave: (properties) => updateProject(project.id, { properties }),
+  });
+}
+
+/**
+ * "Convertir en proyecto" del modal de una oferta (task-modal.js): carga la
+ * oferta tal como está guardada y abre la ventana de conversión ya
+ * rellena; al confirmar se crea el proyecto, la oferta queda enlazada y
+ * completada (data/offer-conversion.js) y se abre el proyecto nuevo.
+ */
+async function openOfferConversion(taskId) {
+  const offersProject = projects.find((p) => isOffersProject(p));
+  let offer = null;
+  try { offer = await getTask(taskId); } catch (e) { console.error(e); }
+  if (!offer || !offersProject) { showToast("No se pudo cargar la oferta.", "error"); return; }
+  openOfferConversionModal({
+    offer,
+    offersProject,
+    today: toDateInputValue(new Date()),
+    getCommercialOptions,
+    onConfirm: async ({ name, properties }) => {
+      const { projectId, linked } = await convertOfferToProject({ offer, name, properties, creatorUid: currentUser.uid });
+      showToast(
+        linked ? "Proyecto creado a partir de la oferta." : "Proyecto creado, pero no se pudo marcar la oferta como convertida.",
+        linked ? "info" : "error"
+      );
+      selectProject(projectId);
+    },
+  });
+}
+
+/** "Abrir proyecto" en una oferta ya convertida. */
+function openConvertedProject(projectId) {
+  selectProject(projectId);
 }
 
 /**

@@ -27,6 +27,12 @@
 // (antes un botón fijo aparte en esta misma barra), que desde la v54
 // también ve el rol Revisor — mismo permiso que Miembro más esta entrada,
 // ver el apartado 3 del README.
+//
+// Propiedades (v57): el menú de clic derecho de un proyecto normal (no de
+// las secciones exclusivas) incluye «Propiedades», que abre la ventana con
+// sus metadatos (project-properties-modal.js). El menú solo avisa con
+// `onOpenProjectProperties(project)`: la ventana y el guardado los monta
+// app.js, igual que el resto de acciones que necesitan datos de fuera.
 // ============================================================================
 import { initials, colorFromString, escapeHtml, projectBadgeHtml, projectIcon } from "../utils.js";
 import { DEPARTMENTS } from "../departments.js";
@@ -35,7 +41,7 @@ import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/p
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 import { openEditProjectModal } from "./edit-project-modal.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenAsanaImport, onOpenQuickCreateAdmin, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const regularProjects = projects.filter((p) => !p.exclusive);
@@ -131,6 +137,10 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
           { label: "Editar proyecto", icon: "✎", onClick: () => {
             openEditProjectModal({ project, onSave: (data) => updateProject(project.id, data) });
           } },
+          // v57: metadatos del proyecto (Comercial, Ubicación, versión aprobada,
+          // fechas e histórico). Solo para proyectos normales: una sección
+          // exclusiva como Ofertas no es un proyecto real y no tiene de esto.
+          ...(project.exclusive ? [] : [{ label: "Propiedades", icon: "ⓘ", onClick: () => onOpenProjectProperties(project) }]),
           {
             label: "Campos personalizados",
             icon: "☰",

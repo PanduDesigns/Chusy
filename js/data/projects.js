@@ -40,8 +40,14 @@ const DEFAULT_SECTIONS = [
  * por defecto` como el resto de campos) a propósito: Firestore rechaza
  * escribir una clave con valor `undefined`, así que un proyecto normal no
  * debe ni mencionar estas claves, no vale con dejarlas "vacías".
+ *
+ * `properties` (v57) — las propiedades del proyecto (Comercial, Ubicación,
+ * versión aprobada, fechas, histórico; ver project-properties.js) — solo
+ * las manda la conversión de una oferta en proyecto (offer-conversion.js);
+ * "+ Nuevo proyecto" no las pregunta, y se rellenan después desde
+ * "Propiedades" en el menú de clic derecho del proyecto.
  */
-export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments, seedVersion }) {
+export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments, seedVersion, properties }) {
   const ref = await addDoc(collection(db, "projects"), {
     name,
     description: description || "",
@@ -61,6 +67,7 @@ export async function createProject({ name, description, color, icon, creatorUid
     ...(customFieldDefs ? { customFieldDefs } : {}),
     ...(exclusive ? { exclusive: true, exclusiveKey, allowedDepartments: allowedDepartments || [] } : {}),
     ...(seedVersion ? { seedVersion } : {}),
+    ...(properties ? { properties } : {}),
   });
   return ref.id;
 }

@@ -28,6 +28,13 @@
 // se guarda nada hasta "Aceptar". Una oferta nueva nace en "Nuevas" con
 // versión A1, salvo que se haya abierto desde el "+ Añadir oferta" de otra
 // sección.
+//
+// v57: el histórico de una oferta arranca de serie con una fila A1
+// «Versión original» (ver ensureOriginalRevision); el campo Comercial
+// sugiere lo ya escrito (text-suggest.js); y en una oferta ya guardada el
+// botón «Convertir en proyecto» cierra este modal —guardando antes si hay
+// cambios— y abre la ventana de conversión a través de `onConvertOffer`
+// (project-properties-modal.js): la conversión en sí no vive aquí.
 // ============================================================================
 import { createTask, updateTask, getTask, nextPersonalOwnerId } from "../data/tasks.js";
 import { notifyNewAssignees } from "../data/notifications.js";
@@ -40,6 +47,7 @@ import {
   colorFromString,
   textColorFor,
   formatDateLong,
+  toDate,
   toDateInputValue,
   projectBadgeHtml,
   renderTitleHtml,
@@ -47,12 +55,28 @@ import {
   showToast,
   PRIORITY_LABELS,
 } from "../utils.js";
-import { isOffersProject, findOffersSection, findOfferVersionField, nextOfferVersion, OFFER_FIRST_VERSION } from "../offers.js";
+import {
+  isOffersProject,
+  findOffersSection,
+  findOfferVersionField,
+  findOfferCommercialField,
+  nextOfferVersion,
+  makeOriginalRevision,
+  lacksOriginalRevision,
+  OFFER_FIRST_VERSION,
+} from "../offers.js";
+import { attachTextSuggest } from "./text-suggest.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
 
 const PRIORITIES = ["urgente", "alta", "media", "baja"];
 let lastPickedTagColor = TAG_COLOR_PALETTE[0];
+
+/** ISO de un Timestamp/Date/string de Firestore, o null si no hay una fecha válida (v57). */
+function toIso(value) {
+  const d = toDate(value);
+  return d && !isNaN(d.getTime()) ? d.toISOString() : null;
+}
 
 /** Fecha corta (dd/mm/aa) de una fila del histórico de revisiones; "" si no hay fecha. */
 function formatRevisionDate(iso) {
@@ -92,6 +116,14 @@ export function openTaskModal({
   allProjects,
   tagsRegistry,
   currentUserProfile,
+  // v57 (todos opcionales): `getCommercialOptions()` da los valores de
+  // Comercial ya usados para sugerirlos; `onConvertOffer(taskId)` abre la
+  // conversión de oferta en proyecto; `onOpenProject(projectId)` va al
+  // proyecto en el que ya se convirtió. Sin ellos, el modal se comporta
+  // como antes (sin sugerencias ni botón de convertir).
+  getCommercialOptions,
+  onConvertOffer,
+  onOpenProject,
   onSaved,
   onClosed,
 }) {
@@ -120,6 +152,18 @@ export function openTaskModal({
   // por esas se avisa al guardar si siguen sin explicar qué cambió, no por
   // una fila antigua que alguien dejó en blanco hace semanas.
   const newRevisionIds = new Set();
+  // v57. A qué proyecto se convirtió ya esta oferta (y cuándo, en ISO), si
+  // se convirtió; y cuándo se creó la tarea, para fechar la fila A1 de
+  // partida de una oferta que llega sin histórico.
+  let convertedProjectId = null;
+  let convertedAtIso = null;
+  let taskCreatedIso = null;
+  // Solo se comprueba UNA vez por apertura si falta la fila A1 de partida
+  // (ver ensureOriginalRevision): sin esto, quitar esa fila la volvería a
+  // crear al instante.
+  let originalRevisionChecked = false;
+  // Desplegables de sugerencias enganchados a campos de este formulario.
+  let suggestHandles = [];
 
   const overlay = el(`<div class="modal-overlay"><div class="modal"><div style="padding:40px;text-align:center;color:var(--color-text-lo);">Cargando…</div></div></div>`);
   root.appendChild(overlay);
@@ -138,6 +182,9 @@ export function openTaskModal({
       Object.entries(t.extraSections || {}).forEach(([pid, sid]) => { sectionByProject[pid] = sid || null; });
       loadedOwnerId = t.ownerId || null;
       loadedAssigneeIds = t.assigneeIds || [];
+      convertedProjectId = t.convertedProjectId || null;
+      convertedAtIso = toIso(t.convertedAt);
+      taskCreatedIso = toIso(t.createdAt);
       revisions = (t.revisions || []).map((r) => ({
         id: r.id || uid(),
         version: String(r.version ?? ""),
@@ -168,6 +215,8 @@ export function openTaskModal({
   function close(skipCallback) {
     if (unsubComments) unsubComments();
     if (descriptionEditor) descriptionEditor.destroy();
+    suggestHandles.forEach((h) => h.destroy());
+    suggestHandles = [];
     document.querySelectorAll(".project-add-popover").forEach((p) => p.remove());
     document.removeEventListener("keydown", onKeydown);
     overlay.remove();
@@ -505,7 +554,20 @@ export function openTaskModal({
       )
       .join("");
 
+    // v57: el campo Comercial de Ofertas sugiere lo ya escrito. Se guarda
+    // cada desplegable para poder soltarlo al volver a pintar los campos.
+    suggestHandles.forEach((h) => h.destroy());
+    suggestHandles = [];
+    const offersForFields = offersProject();
+    const commercialDef = getCommercialOptions && offersForFields ? findOfferCommercialField(offersForFields) : null;
+
     mount.querySelectorAll("[data-custom-field]").forEach((elm) => {
+      // Enganchado ANTES del listener de `change` de aquí abajo a propósito
+      // (ver la cabecera de text-suggest.js): así ese listener ya lee el
+      // valor ajustado a la forma existente ("juan perez" → "Juan Pérez").
+      if (commercialDef && elm.tagName === "INPUT" && elm.type === "text" && elm.dataset.customField === commercialDef.id) {
+        suggestHandles.push(attachTextSuggest(elm, { getOptions: getCommercialOptions }));
+      }
       elm.addEventListener("change", (e) => {
         draft.customFields = { ...draft.customFields, [elm.dataset.customField]: e.target.value || null };
         markDirty();
@@ -556,12 +618,16 @@ export function openTaskModal({
     const mount = overlay.querySelector("#t-revisions");
     if (!mount) return;
     if (!offersProject()) { mount.innerHTML = ""; return; }
+    ensureOriginalRevision();
 
     mount.innerHTML = `
       <div class="field">
         <span class="field__label-row">
           <span class="field__label">Histórico de revisiones</span>
-          ${isNew ? "" : `<button type="button" class="btn btn--ghost btn--sm" id="t-new-version" style="margin-left:auto;">+ Nueva versión</button>`}
+          ${isNew ? "" : `<span style="margin-left:auto;display:flex;gap:6px;">
+            <button type="button" class="btn btn--ghost btn--sm" id="t-new-version">+ Nueva versión</button>
+            ${convertButtonHtml()}
+          </span>`}
         </span>
         ${revisions.length
           ? `<div class="revision-table">
@@ -581,10 +647,16 @@ export function openTaskModal({
                 .join("")}
             </div>`
           : `<p class="field__hint" style="margin:0;">${isNew ? "Podrás crear nuevas versiones después de guardar la oferta." : "Sin revisiones todavía. Cuando el comercial pida un cambio, pulsa «Nueva versión»."}</p>`}
+        ${isNew ? `<p class="field__hint" style="margin:6px 0 0;">Podrás crear nuevas versiones y convertir la oferta en proyecto después de guardarla.</p>` : ""}
+        ${convertedNoteHtml()}
       </div>`;
 
     const newVersionBtn = mount.querySelector("#t-new-version");
     if (newVersionBtn) newVersionBtn.addEventListener("click", startNewVersion);
+    const convertBtn = mount.querySelector("#t-convert");
+    if (convertBtn) convertBtn.addEventListener("click", startConversion);
+    const openProjectBtn = mount.querySelector("#t-open-project");
+    if (openProjectBtn) openProjectBtn.addEventListener("click", openConvertedProject);
     mount.querySelectorAll("[data-rev-version]").forEach((input) => {
       input.addEventListener("input", (e) => {
         const row = revisions.find((r) => r.id === input.dataset.revVersion);
@@ -605,6 +677,74 @@ export function openTaskModal({
         renderRevisions();
       });
     });
+  }
+
+  /**
+   * v57: toda oferta arranca su histórico con la fila A1 «Versión original»
+   * (makeOriginalRevision, offers.js). Se pone delante cuando falta
+   * (lacksOriginalRevision): en una oferta nueva, en una ya guardada sin
+   * ninguna fila (anterior a la v57) y en una con el histórico ya empezado
+   * en la v56 (A2, A3… — la A1 no se apuntaba). Solo se comprueba la primera
+   * vez en esta apertura del modal (ver `originalRevisionChecked`): quien
+   * quite esa fila a propósito no la ve reaparecer al instante. NO marca el
+   * formulario como modificado — abrir una oferta y cerrarla sin tocar
+   * nada no pregunta por cambios ni escribe nada; la fila se guarda con la
+   * siguiente vez que se pulse "Aceptar".
+   */
+  function ensureOriginalRevision() {
+    if (originalRevisionChecked) return;
+    originalRevisionChecked = true;
+    if (!lacksOriginalRevision(revisions)) return;
+    revisions = [makeOriginalRevision({ id: uid(), createdAt: taskCreatedIso || new Date().toISOString() }), ...revisions];
+  }
+
+  /** El proyecto al que ya se convirtió esta oferta, si sigue entre los proyectos activos. */
+  function convertedProject() {
+    return convertedProjectId ? projects.find((p) => p.id === convertedProjectId) || null : null;
+  }
+
+  /** El botón de convertir (o de ir al proyecto ya creado) de la cabecera del histórico; "" si el modal no recibió `onConvertOffer`. */
+  function convertButtonHtml() {
+    if (!onConvertOffer) return "";
+    if (convertedProject()) {
+      return onOpenProject ? `<button type="button" class="btn btn--ghost btn--sm" id="t-open-project">📁 Abrir proyecto</button>` : "";
+    }
+    return `<button type="button" class="btn btn--primary btn--sm" id="t-convert" title="Crear un proyecto con los datos de esta oferta">${convertedProjectId ? "Convertir de nuevo" : "✅ Convertir en proyecto"}</button>`;
+  }
+
+  /** La línea de debajo del histórico que dice a qué proyecto se convirtió, y cuándo. */
+  function convertedNoteHtml() {
+    if (!convertedProjectId) return "";
+    const project = convertedProject();
+    const when = formatRevisionDate(convertedAtIso);
+    const what = project
+      ? `Convertida en el proyecto «${escapeHtml(project.name)}»`
+      : "Se convirtió en un proyecto que ahora no está activo (archivado o eliminado)";
+    return `<p class="field__hint" style="margin:8px 0 0;">${what}${when ? ` el ${when}` : ""}.</p>`;
+  }
+
+  /**
+   * «Convertir en proyecto»: cierra este modal y abre la ventana de
+   * conversión (la abre `onConvertOffer`, que la carga de Firestore ya
+   * guardada — por eso, si hay cambios sin guardar, se guardan ANTES: la
+   * conversión leería una oferta desactualizada, y al volver aquí el modal
+   * antiguo pisaría con su copia lo que la conversión cambia en la oferta).
+   */
+  async function startConversion() {
+    if (dirty) {
+      if (!confirm("Se guardarán los cambios de la oferta antes de convertirla en proyecto. ¿Continuar?")) return;
+      await handleAccept(() => onConvertOffer(taskId));
+      return;
+    }
+    close();
+    onConvertOffer(taskId);
+  }
+
+  function openConvertedProject() {
+    if (dirty && !confirm("Tienes cambios sin guardar. ¿Descartarlos?")) return;
+    const id = convertedProjectId;
+    close();
+    onOpenProject(id);
   }
 
   /**
@@ -737,7 +877,7 @@ export function openTaskModal({
       if (e.key === "Enter") { e.preventDefault(); handleAddLink(); }
     });
 
-    overlay.querySelector("#t-accept").addEventListener("click", handleAccept);
+    overlay.querySelector("#t-accept").addEventListener("click", () => handleAccept());
 
     overlay.querySelector(".modal__body").addEventListener("click", (e) => {
       if (!e.target.closest(".tag-picker")) {
@@ -961,7 +1101,13 @@ export function openTaskModal({
     return nextPersonalOwnerId(loadedOwnerId || currentUserProfile.uid, draft.assigneeIds);
   }
 
-  async function handleAccept() {
+  /** Las filas del histórico tal como se guardan en Firestore (v56; desde la v57 también al CREAR una oferta). */
+  function revisionsForSave() {
+    return revisions.map((r) => ({ id: r.id, version: r.version.trim(), changes: r.changes.trim(), createdAt: r.createdAt }));
+  }
+
+  /** `afterSave` (v57, opcional): se ejecuta cuando ya se guardó y el modal se cerró — lo usa «Convertir en proyecto». */
+  async function handleAccept(afterSave) {
     const titleInputEl = overlay.querySelector("#t-title");
     // Con el texto plano (marcas de negrita fuera), no con draft.title tal
     // cual: un título que solo tuviera "****" sin nada escrito dentro
@@ -1000,6 +1146,9 @@ export function openTaskModal({
           extraProjectIds: extraIds,
           extraSections,
           ownerId,
+          // v57: una oferta nueva nace con su fila A1 «Versión original»
+          // (antes el histórico solo se guardaba al EDITAR una oferta).
+          ...(offers ? { revisions: revisionsForSave() } : {}),
           createdBy: currentUserProfile.uid,
           order: Date.now(),
         });
@@ -1027,9 +1176,7 @@ export function openTaskModal({
           // un `revisions: []` vacío cada vez que se guarda. Quitar una
           // tarea de Ofertas en este modal tampoco borra su histórico (no
           // se manda, así que Firestore lo deja como estaba).
-          ...(offers
-            ? { revisions: revisions.map((r) => ({ id: r.id, version: r.version.trim(), changes: r.changes.trim(), createdAt: r.createdAt })) }
-            : {}),
+          ...(offers ? { revisions: revisionsForSave() } : {}),
         });
         onSaved(taskId);
         // Tarea existente: solo avisa a quien esté en la lista nueva pero
@@ -1049,6 +1196,7 @@ export function openTaskModal({
       }
       dirty = false;
       close();
+      if (typeof afterSave === "function") afterSave();
     } catch (e) {
       console.error(e);
       acceptBtn.disabled = false;

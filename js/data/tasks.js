@@ -68,6 +68,9 @@ export async function createTask(projectId, data) {
     subtasks: data.subtasks || [],
     attachments: data.attachments || [],
     customFields: data.customFields || {},
+    // v57: solo una oferta lo manda (nace con su fila A1 «Versión original»,
+    // ver task-modal.js); una tarea normal no gana un `revisions` vacío.
+    ...(Array.isArray(data.revisions) ? { revisions: data.revisions } : {}),
     isComplete: data.isComplete || false,
     isMilestone: data.isMilestone || false,
     completedAt: null,

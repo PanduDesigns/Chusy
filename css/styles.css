@@ -1021,6 +1021,25 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .revision-row__changes { min-height: 52px; padding: 7px 9px; font-size: 13px; }
 .revision-row .attachment-row__remove { padding-top: 6px; }
 
+/* Propiedades de un proyecto / convertir una oferta en proyecto (v57) —
+   components/project-properties-modal.js. Filas de dos campos a la par; en
+   pantallas estrechas se apilan. El histórico de dentro reutiliza
+   .revision-table/.revision-row de arriba tal cual. */
+.props-row { display: flex; gap: 14px; }
+.props-row .field { flex: 1; min-width: 0; }
+
+/* Desplegable de sugerencias al escribir (v57) — components/text-suggest.js.
+   Vive en <body> con posición fija (lo coloca el JS bajo el campo), por
+   encima de las ventanas modales (z-index 100) y del menú contextual. */
+.text-suggest {
+  position: fixed; z-index: 400; max-height: 220px; overflow-y: auto;
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-raised); padding: 4px;
+}
+.text-suggest__item { padding: 7px 10px; border-radius: var(--radius-sm); font-size: 13px; color: var(--color-text-hi); cursor: pointer; }
+.text-suggest__item:hover, .text-suggest__item.is-active { background: var(--color-panel); }
+@media (max-width: 720px) { .props-row { flex-direction: column; gap: 18px; } }
+
 .section-divider { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .section-divider__label { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; color: var(--color-text-faint); text-transform: uppercase; white-space: nowrap; }
 .section-divider::after { content: ''; flex: 1; height: 1px; background: var(--color-line); }
