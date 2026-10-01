@@ -1027,6 +1027,8 @@ body.is-col-resizing * { cursor: col-resize !important; }
    .revision-table/.revision-row de arriba tal cual. */
 .props-row { display: flex; gap: 14px; }
 .props-row .field { flex: 1; min-width: 0; }
+/* v58: un desplegable (Sector) mide 2 px más que un campo de texto con el mismo padding: se igualan todos a 40 px, la altura de los de fecha. */
+.props-row .field__input, .props-row .field__select { height: 40px; }
 
 /* Desplegable de sugerencias al escribir (v57) — components/text-suggest.js.
    Vive en <body> con posición fija (lo coloca el JS bajo el campo), por
@@ -1244,6 +1246,32 @@ body.tl-dragging-bar { user-select: none; }
   pointer-events: none; z-index: 0;
 }
 .btn.is-toggled { background: var(--color-danger-soft); border-color: var(--color-danger); color: var(--color-danger); }
+
+/* Fechas clave del proyecto en su línea de tiempo (v58) — entrega, envío y
+   aprobación (ver la cabecera de timeline-view.js). Un color por fecha, igual
+   en los tres temas y lejos de los de prioridad (rojo/dorado/grises) y del
+   dorado de los hitos, para que no se confundan con una tarea ni con un
+   hito: cada una es una fila propia con un blanco de círculos concéntricos
+   en su fecha, más una línea discontinua que cruza toda la tabla (la línea
+   continua dorada sigue siendo la de "hoy"). */
+:root {
+  --kd-delivery: #8B5CF6;
+  --kd-sent: #3B82F6;
+  --kd-approval: #10B981;
+}
+.tl-keydate-label { font-weight: 600; box-shadow: inset 4px 0 0 var(--kd), 4px 0 6px -4px rgba(0, 0, 0, 0.4); }
+.tl-keydate-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--kd); flex-shrink: 0; }
+.tl-keydate-band { background: color-mix(in srgb, var(--kd) 9%, transparent); }
+.tl-keydate-band:hover { background: color-mix(in srgb, var(--kd) 15%, transparent); }
+.tl-keydate-marker { display: flex; align-items: center; justify-content: center; z-index: 2; }
+.tl-keydate-marker__dot {
+  width: 12px; height: 12px; border-radius: 50%; background: var(--kd);
+  box-shadow: 0 0 0 3px var(--color-void), 0 0 0 5px var(--kd);
+}
+.tl-keydate-line {
+  width: 2px; justify-self: center; pointer-events: none; z-index: 0; opacity: 0.8;
+  background: repeating-linear-gradient(to bottom, var(--kd) 0 6px, transparent 6px 10px);
+}
 
 /* ==========================================================================
    Search modal

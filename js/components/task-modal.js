@@ -35,6 +35,13 @@
 // botón «Convertir en proyecto» cierra este modal —guardando antes si hay
 // cambios— y abre la ventana de conversión a través de `onConvertOffer`
 // (project-properties-modal.js): la conversión en sí no vive aquí.
+//
+// v58: completar una oferta con el círculo de la cabecera la lleva a la
+// sección «Entregadas» del propio formulario (y reabrirla desde ahí la
+// devuelve a «Nuevas» o «Revisiones») — ver syncOfferSectionWithCompletion.
+// Igual que todo lo demás, solo se guarda al pulsar «Aceptar». El campo
+// «Sector» de las ofertas no necesita código aquí: es un campo
+// personalizado de tipo lista y renderCustomFields ya lo pinta.
 // ============================================================================
 import { createTask, updateTask, getTask, nextPersonalOwnerId } from "../data/tasks.js";
 import { notifyNewAssignees } from "../data/notifications.js";
@@ -63,6 +70,8 @@ import {
   nextOfferVersion,
   makeOriginalRevision,
   lacksOriginalRevision,
+  isOfferRevised,
+  offerSectionOnCompletionChange,
   OFFER_FIRST_VERSION,
 } from "../offers.js";
 import { attachTextSuggest } from "./text-suggest.js";
@@ -748,6 +757,31 @@ export function openTaskModal({
   }
 
   /**
+   * v58: al completar una oferta con el círculo de la cabecera, su sección
+   * pasa a «Entregadas»; al reabrirla estando en «Entregadas», vuelve a
+   * «Nuevas» —o a «Revisiones» si ya tuvo alguna revisión—. La regla
+   * (también para una oferta ya convertida en proyecto, que se queda en
+   * «Cerradas») es offerSectionOnCompletionChange, offers.js; aquí solo se
+   * aplica al formulario y se repinta el desplegable de sección, para que
+   * se vea el cambio antes de guardar. Si el usuario cambia después la
+   * sección a mano, manda lo que elija.
+   */
+  function syncOfferSectionWithCompletion() {
+    const offers = offersProject();
+    if (!offers) return;
+    const current = draft.sectionByProject[offers.id] || null;
+    const target = offerSectionOnCompletionChange(offers, {
+      isComplete: draft.isComplete,
+      isConverted: !!convertedProjectId,
+      currentSectionId: current,
+      revised: isOfferRevised(revisions),
+    });
+    if (!target || target === current) return;
+    draft.sectionByProject = { ...draft.sectionByProject, [offers.id]: target };
+    renderProjectRows();
+  }
+
+  /**
    * "Nueva versión": la oferta vuelve a quedar sin completar, pasa a la
    * sección Revisiones, sube de versión (A1 → A2) y se apunta una fila
    * nueva en el histórico para escribir qué cambia y por qué. Todo sobre el
@@ -799,6 +833,7 @@ export function openTaskModal({
       draft.isComplete = !draft.isComplete;
       completeBtn.classList.toggle("is-checked", draft.isComplete);
       completeBtn.textContent = draft.isComplete ? "✓" : "";
+      syncOfferSectionWithCompletion();
       markDirty();
     });
 

@@ -6,9 +6,11 @@
 //
 // Los campos son los metadatos de `projects/{id}.properties` (ver
 // project-properties.js): Comercial (con sugerencias de lo ya escrito),
-// Ubicación, Versión aprobada, Fecha de entrega, Fecha de envío, Fecha de
-// aprobación y un histórico del proyecto con el mismo aspecto y el mismo
-// formato de filas que el de una oferta.
+// Ubicación, Sector (desplegable Automoción / Industria, v58), Versión
+// aprobada, Fecha de entrega, Fecha de envío, Fecha de aprobación (las tres
+// fechas también se marcan en la línea de tiempo del proyecto, v58) y un
+// histórico del proyecto con el mismo aspecto y el mismo formato de filas
+// que el de una oferta.
 //
 // Como el modal de tarea: nada se guarda hasta pulsar el botón principal,
 // y si se cierra con cambios sin guardar se pregunta antes de descartarlos.
@@ -17,6 +19,7 @@
 // ============================================================================
 import { el, escapeHtml, uid, showToast, toDateInputValue } from "../utils.js";
 import { attachTextSuggest } from "./text-suggest.js";
+import { SECTOR_OPTIONS } from "../offers.js";
 import {
   PROPERTY_DATE_FIELDS,
   normalizeProperties,
@@ -81,12 +84,19 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
           </div>
           <div class="props-row">
             <label class="field">
+              <span class="field__label">Sector</span>
+              <select class="field__select" id="pp-sector">
+                <option value="">— Sin definir —</option>
+                ${SECTOR_OPTIONS.map((o) => `<option value="${escapeHtml(o)}" ${state.sector === o ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="field">
               <span class="field__label">Versión aprobada</span>
               <input class="field__input" id="pp-approvedVersion" type="text" value="${escapeHtml(state.approvedVersion)}" placeholder="A1">
             </label>
-            ${dateFieldHtml("deliveryDate", state.deliveryDate)}
           </div>
           <div class="props-row">
+            ${dateFieldHtml("deliveryDate", state.deliveryDate)}
             ${dateFieldHtml("sentDate", state.sentDate)}
             ${dateFieldHtml("approvalDate", state.approvalDate)}
           </div>
@@ -130,6 +140,7 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
   comercialInput.addEventListener("change", syncComercial);
 
   overlay.querySelector("#pp-ubicacion").addEventListener("input", (e) => { state.ubicacion = e.target.value; markDirty(); });
+  overlay.querySelector("#pp-sector").addEventListener("change", (e) => { state.sector = e.target.value; markDirty(); });
   overlay.querySelector("#pp-approvedVersion").addEventListener("input", (e) => { state.approvedVersion = e.target.value; markDirty(); });
   PROPERTY_DATE_FIELDS.forEach(({ key }) => {
     overlay.querySelector(`#pp-${key}`).addEventListener("change", (e) => { state[key] = e.target.value || null; markDirty(); });

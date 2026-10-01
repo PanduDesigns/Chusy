@@ -6,6 +6,8 @@
 // README) y son, a propósito, un dato APARTE de las tareas del proyecto:
 //
 //   comercial, ubicacion        texto libre (Comercial con sugerencias)
+//   sector                      "Automoción" o "Industria" ("" si no se ha
+//                               elegido; v58, ver SECTOR_OPTIONS en offers.js)
 //   approvedVersion             la versión de la oferta que se aprobó ("A3")
 //   deliveryDate / sentDate /   fechas "YYYY-MM-DD" (o null)
 //   approvalDate                entrega, envío y aprobación
@@ -14,6 +16,9 @@
 //                               createdAt}
 //   sourceOfferId /             solo si el proyecto nació de "Convertir en
 //   sourceOfferTitle            proyecto": qué oferta fue (para mostrarlo)
+//
+// v58: las tres fechas también se dibujan en la línea de tiempo del proyecto
+// (projectKeyDates, más abajo, decide cuáles hay y en qué orden).
 //
 // Aquí se decide cómo se NORMALIZA lo leído de Firestore para el formulario,
 // cómo se LIMPIA lo escrito antes de guardarlo, y qué valores de una oferta
@@ -29,15 +34,20 @@ import {
   findOfferCommercialField,
   findOfferLocationField,
   findOfferVersionField,
+  findOfferSectorField,
+  matchSector,
   cleanSuggestionText,
 } from "./offers.js";
 import { uid, toDate, toDateInputValue, plainTitleText } from "./utils.js";
 
-/** Las tres fechas de las propiedades, en el orden en el que se enseñan. */
+/**
+ * Las tres fechas de las propiedades, en el orden en el que se enseñan.
+ * `short` es el nombre corto que usa la línea de tiempo (v58).
+ */
 export const PROPERTY_DATE_FIELDS = [
-  { key: "deliveryDate", label: "Fecha de entrega" },
-  { key: "sentDate", label: "Fecha de envío" },
-  { key: "approvalDate", label: "Fecha de aprobación" },
+  { key: "deliveryDate", label: "Fecha de entrega", short: "Entrega" },
+  { key: "sentDate", label: "Fecha de envío", short: "Envío" },
+  { key: "approvalDate", label: "Fecha de aprobación", short: "Aprobación" },
 ];
 
 function text(value) {
@@ -74,6 +84,7 @@ export function normalizeProperties(raw) {
   return {
     comercial: text(p.comercial),
     ubicacion: text(p.ubicacion),
+    sector: matchSector(p.sector),
     approvedVersion: text(p.approvedVersion),
     deliveryDate: dateOrNull(p.deliveryDate),
     sentDate: dateOrNull(p.sentDate),
@@ -96,6 +107,7 @@ export function propertiesForSave(state) {
   const out = {
     comercial: cleanSuggestionText(state.comercial),
     ubicacion: cleanSuggestionText(state.ubicacion),
+    sector: matchSector(state.sector),
     approvedVersion: text(state.approvedVersion),
     deliveryDate: state.deliveryDate || null,
     sentDate: state.sentDate || null,
@@ -132,6 +144,9 @@ export function nextHistoryVersion(state) {
  * crear nada (ver openOfferConversionModal).
  *
  *   Comercial / Ubicación → los campos personalizados de la oferta
+ *   Sector (v58)          → el campo Sector de la oferta (vacío si no lo
+ *                           tenía, o si su valor ya no es Automoción ni
+ *                           Industria — ver matchSector)
  *   Versión aprobada      → la versión que tenga la oferta ahora (su campo
  *                           Versión; si está vacío, la de la última fila del
  *                           histórico; y si tampoco hay, A1)
@@ -150,6 +165,7 @@ export function propertiesFromOffer({ offer, offersProject, today }) {
   const commercialDef = findOfferCommercialField(offersProject);
   const locationDef = findOfferLocationField(offersProject);
   const versionDef = findOfferVersionField(offersProject);
+  const sectorDef = findOfferSectorField(offersProject);
 
   // Igual que al abrir la oferta (task-modal.js, ensureOriginalRevision): si
   // al histórico le falta la fila A1 «Versión original» —vacío, o ya
@@ -167,6 +183,7 @@ export function propertiesFromOffer({ offer, offersProject, today }) {
     properties: {
       comercial: commercialDef ? text(values[commercialDef.id]) : "",
       ubicacion: locationDef ? text(values[locationDef.id]) : "",
+      sector: sectorDef ? matchSector(values[sectorDef.id]) : "",
       approvedVersion,
       deliveryDate: dateOrNull(offer.dueDate),
       sentDate: null,
@@ -176,4 +193,17 @@ export function propertiesFromOffer({ offer, offersProject, today }) {
       sourceOfferTitle: plainTitleText(offer.title).trim(),
     },
   };
+}
+
+/**
+ * Las fechas clave del proyecto que hay que marcar en su línea de tiempo
+ * (v58): entrega, envío y aprobación — solo las que están rellenas, en ese
+ * mismo orden fijo (el de PROPERTY_DATE_FIELDS), no por fecha, para que
+ * cada una esté siempre en la misma fila. Cada elemento es
+ * `{ key, label, short, date }`, con `date` como Date (local, sin hora).
+ * Un proyecto sin propiedades, o sin ninguna fecha, devuelve `[]`.
+ */
+export function projectKeyDates(project) {
+  const props = (project && project.properties) || {};
+  return PROPERTY_DATE_FIELDS.map((f) => ({ key: f.key, label: f.label, short: f.short, date: toDate(dateOrNull(props[f.key])) })).filter((k) => k.date);
 }

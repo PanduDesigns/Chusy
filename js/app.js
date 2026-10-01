@@ -857,7 +857,7 @@ async function openOfferConversion(taskId) {
     today: toDateInputValue(new Date()),
     getCommercialOptions,
     onConfirm: async ({ name, properties }) => {
-      const { projectId, linked } = await convertOfferToProject({ offer, name, properties, creatorUid: currentUser.uid });
+      const { projectId, linked } = await convertOfferToProject({ offer, name, properties, creatorUid: currentUser.uid, offersProject });
       showToast(
         linked ? "Proyecto creado a partir de la oferta." : "Proyecto creado, pero no se pudo marcar la oferta como convertida.",
         linked ? "info" : "error"

@@ -10,8 +10,10 @@
 //      vuelta a ella).
 //   2. La oferta queda enlazada al proyecto y marcada como completada:
 //      `convertedProjectId` + `convertedAt`, más `isComplete`/`completedAt`
-//      (una oferta aprobada ya está terminada). No se mueve ni se borra —
-//      sigue en Ofertas como registro de qué se aprobó y cuándo.
+//      (una oferta aprobada ya está terminada). No se borra — sigue en
+//      Ofertas como registro de qué se aprobó y cuándo; desde la v58 pasa
+//      además a la sección «Cerradas» (la de las ofertas ya convertidas),
+//      en esa misma escritura.
 //
 // No son una única operación atómica (son dos documentos y el proyecto tiene
 // que existir antes de poder enlazarlo). Si la segunda falla —sin conexión
@@ -23,21 +25,26 @@
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import { createProject } from "./projects.js";
 import { updateTask } from "./tasks.js";
+import { findOffersSection, offerSectionFields, OFFER_SECTION_CLOSED } from "../offers.js";
 
 /**
- * @param {{ offer: object, name: string, properties: object, creatorUid: string }} args
+ * @param {{ offer: object, name: string, properties: object, creatorUid: string, offersProject?: object }} args
  *   `offer` es la tarea de Ofertas tal como está en Firestore (con su `id`);
- *   `properties` ya viene limpio (propertiesForSave).
+ *   `properties` ya viene limpio (propertiesForSave); `offersProject` (v58,
+ *   el proyecto Ofertas) sirve para llevar la oferta a «Cerradas» — sin él,
+ *   o si Ofertas ya no tiene esa sección, la oferta se queda donde estaba.
  * @returns {Promise<{ projectId: string, linked: boolean }>}
  */
-export async function convertOfferToProject({ offer, name, properties, creatorUid }) {
+export async function convertOfferToProject({ offer, name, properties, creatorUid, offersProject }) {
   const projectId = await createProject({ name, creatorUid, properties });
+  const closed = offersProject ? findOffersSection(offersProject, OFFER_SECTION_CLOSED) : null;
   try {
     await updateTask(offer.id, {
       convertedProjectId: projectId,
       convertedAt: serverTimestamp(),
       isComplete: true,
       ...(offer.isComplete ? {} : { completedAt: serverTimestamp() }),
+      ...(closed ? offerSectionFields(offersProject, offer, closed.id) : {}),
     });
     return { projectId, linked: true };
   } catch (e) {

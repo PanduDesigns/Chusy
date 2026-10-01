@@ -97,12 +97,26 @@
 // arriba), y gantt-export.js no necesita saber nada de cómo se agregó
 // (solo recibe `viewMode` para ajustar textos como "tareas" -> "secciones"
 // en cabeceras y avisos).
+//
+// Fechas clave del proyecto (v58): en la línea de tiempo de UN proyecto
+// (`project` informado) se marcan las fechas de entrega, envío y aprobación
+// de sus Propiedades (project-properties.js, projectKeyDates) — las que
+// estén rellenas. Cada una es una fila propia arriba del todo (etiqueta con
+// su fecha, un blanco de círculos concéntricos en su columna) más una línea
+// vertical discontinua que cruza toda la tabla, cada fecha con su color
+// (variables --kd-* en css/styles.css). Se ven distintas de un vistazo de un
+// hito (rombo dorado) y de una tarea (barra por prioridad), y la escala
+// siempre las incluye aunque ninguna tarea llegue tan lejos. No son tareas:
+// no se abren, no se arrastran y no entran en la exportación (que sigue
+// recibiendo solo las tareas). Se editan desde «Propiedades» del proyecto.
+// La línea de tiempo global no las dibuja.
 // ============================================================================
 import { escapeHtml, toDate, toDateInputValue, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast, renderTitleHtml, plainTitleText, getTaskSectionForProject } from "../utils.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { exportTimelineToExcel, exportTimelineToPdf } from "../components/gantt-export.js";
 import { updateTask } from "../data/tasks.js";
 import { saveProjectSections } from "../data/projects.js";
+import { projectKeyDates } from "../project-properties.js";
 import { openSectionsModal } from "../components/sections-modal.js";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -125,6 +139,20 @@ const PRIORITY_RANK = { urgente: 0, alta: 1, media: 2, baja: 3 };
 // confundan con "urgente". Con más secciones que colores, se repiten en
 // ciclo (mismo criterio que el de 10 colores de la plantilla Martech).
 const SECTION_ACCENT_COLORS = ["#76CE64", "#64CE9D", "#64B5CE", "#646BCE", "#A764CE", "#CE64AB"];
+
+// Color de cada fecha clave del proyecto (v58) — variables definidas en
+// css/styles.css (violeta, azul y verde: ninguno se parece a los colores de
+// prioridad ni al dorado de los hitos).
+const KEY_DATE_COLORS = {
+  deliveryDate: "var(--kd-delivery)",
+  sentDate: "var(--kd-sent)",
+  approvalDate: "var(--kd-approval)",
+};
+
+/** "15 oct 2026" */
+function fmtKeyDate(d) {
+  return `${d.getDate()} ${MESES[d.getMonth()]} ${d.getFullYear()}`;
+}
 
 const ZOOM_CONFIG = {
   day: { width: 32, label: "Días" },
@@ -297,7 +325,13 @@ export function renderTimelineView(container, {
   const withDates = allTasks.filter((t) => t.startDate || t.dueDate);
   const withoutDates = allTasks.length - withDates.length;
 
-  const dateList = withDates.flatMap((t) => [t.startDate && toDate(t.startDate), t.dueDate && toDate(t.dueDate)].filter(Boolean));
+  // v58: las fechas clave del proyecto (si hay) cuentan para el rango de la
+  // escala, aunque ninguna tarea llegue tan lejos.
+  const keyDates = projectKeyDates(project);
+  const dateList = [
+    ...withDates.flatMap((t) => [t.startDate && toDate(t.startDate), t.dueDate && toDate(t.dueDate)].filter(Boolean)),
+    ...keyDates.map((k) => k.date),
+  ];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   let rawMin = dateList.length ? new Date(Math.min(...dateList)) : addDays(today, -3);
@@ -317,6 +351,8 @@ export function renderTimelineView(container, {
   const displayGroups = vm === "sections" ? buildSectionModeGroups(groups, project && project.id) : groups;
 
   const rows = [];
+  // v58: una fila por cada fecha clave rellena, arriba del todo.
+  keyDates.forEach((k) => rows.push({ type: "keydate", keyDate: k }));
   displayGroups.forEach((g) => {
     if (!g.tasks.length) return;
     if (!(vm === "sections" && g.flat)) {
@@ -387,8 +423,24 @@ export function renderTimelineView(container, {
     </div>`;
   });
 
+  // Líneas verticales de las fechas clave (v58): se añaden al final (ver más
+  // abajo) para que crucen todas las filas.
+  let keyDateLines = "";
+
   rows.forEach((row, ri) => {
     const gridRow = ri + 2;
+    if (row.type === "keydate") {
+      const k = row.keyDate;
+      const color = KEY_DATE_COLORS[k.key];
+      const when = fmtKeyDate(k.date);
+      const title = escapeHtml(`${k.label}: ${when}`);
+      const col = taskSpan({ dueDate: k.date }, columns).e + 2;
+      cells += `<div class="tl-group-label tl-keydate-label" title="${title}" style="grid-column:1;grid-row:${gridRow};--kd:${color};"><span class="tl-keydate-dot"></span>${escapeHtml(k.short)} · ${escapeHtml(when)}</div>`;
+      cells += `<div class="tl-row-band tl-keydate-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};--kd:${color};"></div>`;
+      cells += `<div class="tl-keydate-marker" title="${title}" style="grid-column:${col};grid-row:${gridRow};--kd:${color};"><span class="tl-keydate-marker__dot"></span></div>`;
+      keyDateLines += `<div class="tl-keydate-line" style="grid-column:${col};grid-row:1 / ${totalRows + 1};--kd:${color};"></div>`;
+      return;
+    }
     if (row.type === "group") {
       const marker = row.icon ? badgeHtml(row.icon, row.color, "project-badge--sm") : `<span class="tl-group-dot" style="background:${row.color}"></span>`;
       cells += `<div class="tl-group-label" style="grid-column:1;grid-row:${gridRow};">${marker}${escapeHtml(row.label)}</div>`;
@@ -454,6 +506,8 @@ export function renderTimelineView(container, {
       }
     });
   }
+
+  cells += keyDateLines;
 
   if (todayIdx >= 0) {
     cells += `<div class="tl-today-line" style="grid-column:${todayIdx + 2};grid-row:1 / ${totalRows + 1};"></div>`;

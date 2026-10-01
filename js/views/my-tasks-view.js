@@ -233,7 +233,7 @@ export function renderMyTasksView(container, opts) {
       const task = tasks.find((t) => t.id === btn.dataset.check);
       if (!task) return;
       const willComplete = !task.isComplete;
-      toggleTaskComplete(task.id, willComplete);
+      toggleTaskComplete(task, willComplete);
       if (willComplete) celebrateTask(btn); // pequeña recompensa — solo al completar, no al desmarcar
     });
   });

@@ -16,6 +16,15 @@
 // (ver collectSuggestions) y una oferta aprobada se puede convertir en
 // proyecto (ver project-properties.js y data/offer-conversion.js).
 //
+// v58: Ofertas gana dos secciones más —«Entregadas» (las ofertas con su tarea
+// completada) y «Cerradas» (las ya convertidas en proyecto)— y un campo
+// «Sector» (Automoción / Industria). Aquí viven las reglas PURAS de a qué
+// sección le toca ir a una oferta al completarla o reabrirla
+// (offerSectionOnCompletionChange, offerCompletionFields) y de dónde se
+// recoloca lo que ya existía al pasar a la v58 (planOfferRepositioning);
+// quien escribe en Firestore (data/tasks.js, data/offer-conversion.js,
+// data/projects.js) o en el formulario (task-modal.js) solo las aplica.
+//
 // Nada de esto es un dato nuevo del proyecto: la versión sigue siendo el
 // campo personalizado "Versión" de siempre (texto libre, editable a mano
 // para cualquier ajuste), y las secciones siguen siendo las del proyecto —
@@ -23,6 +32,8 @@
 // si alguien las recreó, por su nombre. Quien llama (task-modal.js,
 // topbar.js y las vistas) decide qué hacer con lo que devuelven.
 // ============================================================================
+
+import { getTaskSectionForProject } from "./utils.js";
 
 /** `exclusiveKey` del proyecto Ofertas (ver EXCLUSIVE_PROJECT_SEEDS en data/projects.js). */
 export const OFFERS_KEY = "ofertas";
@@ -180,4 +191,141 @@ export function collectSuggestions(values) {
     result.push(best);
   }
   return result.sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+}
+
+// ----------------------------------------------------------------------------
+// v58
+// ----------------------------------------------------------------------------
+
+/**
+ * Los dos valores del desplegable «Sector» — el campo personalizado de
+ * Ofertas y la propiedad del proyecto. En este orden se ofrecen.
+ */
+export const SECTOR_OPTIONS = ["Automoción", "Industria"];
+
+/** Ids de fábrica de las dos secciones nuevas de Ofertas (ver EXCLUSIVE_PROJECT_SEEDS en data/projects.js). */
+export const OFFER_SECTION_DELIVERED = "entregadas";
+export const OFFER_SECTION_CLOSED = "cerradas";
+
+/** El campo "Sector" de Ofertas (id de fábrica "sector"); `null` si el proyecto ya no lo tiene. */
+export function findOfferSectorField(project) {
+  return findOfferField(project, "sector");
+}
+
+/**
+ * Un texto → la opción de SECTOR_OPTIONS que le corresponde (sin mirar
+ * mayúsculas, tildes ni espacios: "automocion" → "Automoción"), o "" si no
+ * es ninguna de las dos. Se usa al pasar el Sector de una oferta a las
+ * propiedades del proyecto y al leer lo guardado: alguien pudo cambiar a
+ * mano las opciones del campo de Ofertas desde «Campos personalizados», y
+ * las propiedades solo admiten los dos valores de siempre.
+ */
+export function matchSector(value) {
+  const key = suggestionKey(value);
+  return SECTOR_OPTIONS.find((o) => suggestionKey(o) === key) || "";
+}
+
+/** ¿Es esta fila del histórico la de partida (A1 o «Versión original»)? Mismo criterio que lacksOriginalRevision. */
+function isOriginalRevisionRow(row) {
+  return normalizeName(row.version) === normalizeName(OFFER_FIRST_VERSION) || normalizeName(row.changes) === normalizeName(ORIGINAL_REVISION_TEXT);
+}
+
+/**
+ * ¿Ha tenido esta oferta alguna revisión de verdad? Sí si su histórico tiene
+ * alguna fila que no sea la de partida (A1 «Versión original»): una oferta
+ * sin histórico, o solo con esa fila, nunca se ha revisado. Decide a qué
+ * sección vuelve una oferta que se reabre desde «Entregadas» (Nuevas si
+ * nunca se revisó, Revisiones si ya lo había sido).
+ */
+export function isOfferRevised(revisions) {
+  return (revisions || []).some((r) => !isOriginalRevisionRow(r));
+}
+
+/**
+ * A qué sección de Ofertas le toca ir a una oferta cuando cambia su estado
+ * de completada — `null` si no hay que moverla:
+ *
+ *  - Ya convertida en proyecto (`isConverted`): se queda donde esté —
+ *    «Cerradas» manda—, complétese o se reabra.
+ *  - Se completa: a «Entregadas».
+ *  - Se reabre estando en «Entregadas»: a «Nuevas», o a «Revisiones» si ya
+ *    había tenido alguna (`revised`, ver isOfferRevised). Reabierta desde
+ *    cualquier otra sección (una movida a mano, o «Nueva versión», que ya
+ *    la lleva a Revisiones por su cuenta) no se toca.
+ *
+ * Si el proyecto ya no tiene la sección de destino (alguien la borró),
+ * tampoco hay movimiento: la oferta se queda donde estaba.
+ */
+export function offerSectionOnCompletionChange(offersProject, { isComplete, isConverted, currentSectionId, revised }) {
+  if (isConverted) return null;
+  const delivered = findOffersSection(offersProject, OFFER_SECTION_DELIVERED);
+  if (isComplete) return delivered && delivered.id !== currentSectionId ? delivered.id : null;
+  if (!delivered || currentSectionId !== delivered.id) return null;
+  const back = findOffersSection(offersProject, revised ? "revisiones" : "nuevas");
+  return back ? back.id : null;
+}
+
+/** ¿Pertenece esta tarea a Ofertas, como proyecto principal o como adicional? */
+function isTaskInOffers(offersProject, task) {
+  return !!offersProject && !!task && (task.projectId === offersProject.id || (task.extraProjectIds || []).includes(offersProject.id));
+}
+
+/**
+ * Los campos de Firestore que ponen a `task` en la sección `sectionId` de
+ * Ofertas: `sectionId` si Ofertas es su proyecto principal, o su entrada
+ * dentro de `extraSections` si es uno adicional (ver el modelo de datos) —
+ * nunca toca la sección que tenga en otro proyecto.
+ */
+export function offerSectionFields(offersProject, task, sectionId) {
+  return task.projectId === offersProject.id ? { sectionId } : { [`extraSections.${offersProject.id}`]: sectionId };
+}
+
+/**
+ * Lo que hay que escribir ADEMÁS de `isComplete`/`completedAt` cuando se
+ * marca o desmarca una tarea como completada fuera del formulario (el
+ * círculo de Lista y Mis tareas, el menú de clic derecho, «Marcar como
+ * completadas» de la selección múltiple): `{}` si la tarea no es una oferta
+ * o no hay que moverla, o el cambio de sección que toque (ver
+ * offerSectionOnCompletionChange). `offersProject` puede ser `null` (aún no
+ * cargado, o sin proyecto Ofertas) — entonces nunca hay nada que añadir.
+ */
+export function offerCompletionFields(offersProject, task, isComplete) {
+  if (!isTaskInOffers(offersProject, task)) return {};
+  const current = getTaskSectionForProject(task, offersProject.id);
+  const target = offerSectionOnCompletionChange(offersProject, {
+    isComplete,
+    isConverted: !!task.convertedProjectId,
+    currentSectionId: current,
+    revised: isOfferRevised(task.revisions),
+  });
+  return target && target !== current ? offerSectionFields(offersProject, task, target) : {};
+}
+
+/**
+ * Al pasar a la v58: qué ofertas ya existentes hay que recolocar en las
+ * dos secciones nuevas, para que «Entregadas» y «Cerradas» reflejen la
+ * realidad desde el primer día — una oferta convertida en proyecto va a
+ * «Cerradas», y una completada (y sin convertir) a «Entregadas». Solo se
+ * tocan las que hoy están en «Nuevas», en «Revisiones» o sin sección: una
+ * oferta que alguien colocó a mano en una sección propia se respeta.
+ * `project` es el proyecto Ofertas YA con las dos secciones nuevas.
+ * Devuelve `[{ taskId, fields }]` — solo las que de verdad cambian.
+ */
+export function planOfferRepositioning(project, tasks) {
+  const delivered = findOffersSection(project, OFFER_SECTION_DELIVERED);
+  const closed = findOffersSection(project, OFFER_SECTION_CLOSED);
+  const nuevas = findOffersSection(project, "nuevas");
+  const revisiones = findOffersSection(project, "revisiones");
+  const known = new Set((project.sections || []).map((s) => s.id));
+  const movable = (sectionId) => !sectionId || !known.has(sectionId) || (nuevas && sectionId === nuevas.id) || (revisiones && sectionId === revisiones.id);
+
+  const plan = [];
+  for (const task of tasks || []) {
+    if (!isTaskInOffers(project, task)) continue;
+    const current = getTaskSectionForProject(task, project.id);
+    if (!movable(current)) continue;
+    const target = task.convertedProjectId ? closed : task.isComplete ? delivered : null;
+    if (target && target.id !== current) plan.push({ taskId: task.id, fields: offerSectionFields(project, task, target.id) });
+  }
+  return plan;
 }

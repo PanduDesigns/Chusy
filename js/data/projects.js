@@ -2,7 +2,15 @@
 // Acceso a datos: proyectos.
 // ============================================================================
 import { db } from "../firebase-init.js";
-import { OFFERS_KEY, normalizeName } from "../offers.js";
+import {
+  OFFERS_KEY,
+  SECTOR_OPTIONS,
+  OFFER_SECTION_DELIVERED,
+  OFFER_SECTION_CLOSED,
+  normalizeName,
+  isOffersProject,
+  planOfferRepositioning,
+} from "../offers.js";
 import {
   collection,
   doc,
@@ -239,6 +247,14 @@ export function isProjectVisibleToUser(project, user) {
  * sitios: a `customFieldDefs` (para los proyectos que se creen de cero) y
  * a `fieldsAddedIn` de la versión que lo trae (para los ya creados).
  *
+ * `sectionsAddedIn` (v58): lo mismo que `fieldsAddedIn`, pero para
+ * SECCIONES (por id): la v58 trae «Entregadas» y «Cerradas» — se añaden al
+ * FINAL de las que ya tuviera el proyecto (sin tocar el orden ni el nombre
+ * de ninguna), una sola vez, y sin duplicar si alguien ya había creado a
+ * mano una sección con ese mismo nombre. Además, y solo esta vez, la
+ * migración recoloca las ofertas que ya existían (ver
+ * repositionExistingOffers más abajo).
+ *
  * Importante: la comprobación de "ya existe" solo mira proyectos NO
  * archivados (subscribeToAllProjects no trae los archivados) — si alguna
  * vez se archiva o se borra una de estas secciones, la próxima vez que un
@@ -248,19 +264,23 @@ export function isProjectVisibleToUser(project, user) {
 const EXCLUSIVE_PROJECT_SEEDS = [
   {
     exclusiveKey: OFFERS_KEY,
-    seedVersion: 2,
-    fieldsAddedIn: { 2: ["ubicacion"] }, // v56: Ubicación
+    seedVersion: 3,
+    fieldsAddedIn: { 2: ["ubicacion"], 3: ["sector"] }, // v56: Ubicación · v58: Sector
+    sectionsAddedIn: { 3: [OFFER_SECTION_DELIVERED, OFFER_SECTION_CLOSED] }, // v58: Entregadas, Cerradas
     name: "Ofertas",
     icon: "💼",
     color: "#8B85C4",
     sections: [
       { id: "nuevas", name: "Nuevas", order: 0, color: null },
       { id: "revisiones", name: "Revisiones", order: 1, color: null },
+      { id: OFFER_SECTION_DELIVERED, name: "Entregadas", order: 2, color: null },
+      { id: OFFER_SECTION_CLOSED, name: "Cerradas", order: 3, color: null },
     ],
     customFieldDefs: [
       { id: "comercial", name: "Comercial", type: "texto", options: [] },
       { id: "version", name: "Versión", type: "texto", options: [] },
       { id: "ubicacion", name: "Ubicación", type: "texto", options: [] },
+      { id: "sector", name: "Sector", type: "lista", options: [...SECTOR_OPTIONS] },
     ],
     allowedDepartments: ["diseno"],
   },
@@ -270,23 +290,73 @@ const EXCLUSIVE_PROJECT_SEEDS = [
  * Pone al día un proyecto exclusivo YA creado con lo que trajeron las
  * versiones de su seed posteriores a la suya (ver `seedVersion` arriba).
  * No toca nada más de lo que el equipo haya cambiado a mano (nombre,
- * color, secciones, otros campos...): solo AÑADE los campos que falten, y
- * si ya hay uno con ese mismo nombre (alguien lo creó a mano antes, con
- * otro id) no lo duplica — solo da la migración por hecha.
+ * color, secciones, otros campos...): solo AÑADE los campos y secciones
+ * que falten, y si ya hay uno con ese mismo nombre (alguien lo creó a
+ * mano antes, con otro id) no lo duplica — solo da la migración por hecha.
+ *
+ * Orden de las escrituras (v58): primero el proyecto con lo nuevo (campos y
+ * secciones, SIN la `seedVersion`), después —solo en Ofertas al pasar a la
+ * v58— se recolocan sus ofertas ya existentes, y solo al final se guarda
+ * la `seedVersion`. Así, si algo falla a medias, la próxima vez que un
+ * admin entre se repite entero (todos los pasos son idempotentes) en vez
+ * de darse por hecho con las ofertas sin recolocar.
  */
 async function migrateSeededProject(project, seed) {
   const have = project.seedVersion || 1;
   if (have >= seed.seedVersion) return;
   const defs = [...(project.customFieldDefs || [])];
+  const sections = [...(project.sections || [])];
+  let nextOrder = sections.reduce((max, s) => Math.max(max, Number.isFinite(s.order) ? s.order : -1), -1) + 1;
   for (let v = have + 1; v <= seed.seedVersion; v++) {
     for (const fieldId of (seed.fieldsAddedIn && seed.fieldsAddedIn[v]) || []) {
       const def = seed.customFieldDefs.find((f) => f.id === fieldId);
       if (!def) continue;
       const alreadyThere = defs.some((d) => d.id === def.id || normalizeName(d.name) === normalizeName(def.name));
-      if (!alreadyThere) defs.push({ ...def });
+      if (!alreadyThere) defs.push({ ...def, options: [...(def.options || [])] });
+    }
+    for (const sectionId of (seed.sectionsAddedIn && seed.sectionsAddedIn[v]) || []) {
+      const def = seed.sections.find((sec) => sec.id === sectionId);
+      if (!def) continue;
+      const alreadyThere = sections.some((sec) => sec.id === def.id || normalizeName(sec.name) === normalizeName(def.name));
+      if (!alreadyThere) sections.push({ ...def, order: nextOrder++ });
     }
   }
-  await updateProject(project.id, { customFieldDefs: defs, seedVersion: seed.seedVersion });
+  const updated = { ...project, customFieldDefs: defs, sections };
+  await updateProject(project.id, { customFieldDefs: defs, sections });
+  if (isOffersProject(project) && have < 3) await repositionExistingOffers(updated);
+  await updateProject(project.id, { seedVersion: seed.seedVersion });
+}
+
+/**
+ * Todas las tareas de un proyecto, las que lo tienen como principal y las
+ * que lo tienen como adicional, sin duplicados — lectura única (no en
+ * tiempo real). Las mismas dos consultas que ya usan saveProjectSections y
+ * subscribeToProjectTasks, así que no hace falta ningún índice nuevo.
+ */
+async function fetchProjectTasksOnce(projectId) {
+  const [primarySnap, extraSnap] = await Promise.all([
+    getDocs(query(collection(db, "tasks"), where("projectId", "==", projectId))),
+    getDocs(query(collection(db, "tasks"), where("extraProjectIds", "array-contains", projectId), where("projectId", "!=", null))),
+  ]);
+  const byId = new Map();
+  [...primarySnap.docs, ...extraSnap.docs].forEach((d) => byId.set(d.id, { id: d.id, ...d.data() }));
+  return [...byId.values()];
+}
+
+/**
+ * v58, una sola vez: coloca las ofertas que ya existían donde ahora les
+ * toca — las convertidas en proyecto en «Cerradas», las completadas en
+ * «Entregadas» (qué se mueve exactamente lo decide planOfferRepositioning,
+ * offers.js). Es la misma regla que se aplica de ahí en adelante al
+ * completar o convertir una oferta; esto solo la aplica a lo anterior.
+ */
+async function repositionExistingOffers(project) {
+  const plan = planOfferRepositioning(project, await fetchProjectTasksOnce(project.id));
+  for (let i = 0; i < plan.length; i += 450) {
+    const batch = writeBatch(db);
+    plan.slice(i, i + 450).forEach(({ taskId, fields }) => batch.update(doc(db, "tasks", taskId), { ...fields, updatedAt: serverTimestamp() }));
+    await batch.commit();
+  }
 }
 
 export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid) {
@@ -322,12 +392,32 @@ export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid)
  */
 export function subscribeToAllProjects(callback) {
   const q = query(collection(db, "projects"), where("archived", "==", false));
-  return onSnapshot(q, (snap) => {
+  const unsubscribe = onSnapshot(q, (snap) => {
     const projects = [];
     snap.forEach((d) => projects.push({ id: d.id, ...d.data() }));
     projects.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    // v58: se guarda SIN filtrar por departamento (ver getOffersProject).
+    offersProjectCache = projects.find((p) => isOffersProject(p)) || null;
     callback(projects);
   }, (err) => console.error("subscribeToAllProjects:", err));
+  return () => { unsubscribe(); offersProjectCache = null; };
+}
+
+/**
+ * El proyecto Ofertas tal como llegó de la última suscripción de
+ * subscribeToAllProjects (v58), o `null` si aún no ha llegado o no existe.
+ * Lo usan data/tasks.js (completar una oferta la lleva a «Entregadas»)
+ * para saber qué secciones tiene Ofertas sin que cada vista tenga que
+ * pasarle los proyectos. Se guarda SIN filtrar por departamento a
+ * propósito: quien no puede VER Ofertas en la interfaz sí puede tener una
+ * oferta asignada en «Mis tareas» y completarla desde ahí — y esa oferta
+ * tiene que moverse igual (el acceso por departamento es solo de
+ * interfaz, ver isProjectVisibleToUser). Se vacía al cancelar la
+ * suscripción (cerrar sesión).
+ */
+let offersProjectCache = null;
+export function getOffersProject() {
+  return offersProjectCache;
 }
 
 /** Proyectos archivados (el "Archivo") — se guardan, no se ven en la lista principal. */

@@ -49,6 +49,8 @@ import {
   arrayRemove,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import { toEditableHtml, escapeHtml, renderTitleHtml } from "../utils.js";
+import { offerCompletionFields } from "../offers.js";
+import { getOffersProject } from "./projects.js";
 
 export async function createTask(projectId, data) {
   const ref = await addDoc(collection(db, "tasks"), {
@@ -113,10 +115,19 @@ export function deleteTask(taskId) {
   return deleteDoc(doc(db, "tasks", taskId));
 }
 
-export function toggleTaskComplete(taskId, isComplete) {
-  return updateDoc(doc(db, "tasks", taskId), {
+/**
+ * Marca/desmarca UNA tarea como completada. Recibe la tarea entera (no solo
+ * su id) desde la v58: si es una oferta, completarla la lleva a la sección
+ * «Entregadas» de Ofertas (y reabrirla desde ahí la devuelve a «Nuevas» o
+ * «Revisiones») en la MISMA escritura que el `isComplete` — ver
+ * offerCompletionFields en offers.js para la regla exacta. Una tarea que
+ * no es una oferta se escribe igual que siempre.
+ */
+export function toggleTaskComplete(task, isComplete) {
+  return updateDoc(doc(db, "tasks", task.id), {
     isComplete,
     completedAt: isComplete ? serverTimestamp() : null,
+    ...offerCompletionFields(getOffersProject(), task, isComplete),
     updatedAt: serverTimestamp(),
   });
 }
@@ -348,11 +359,20 @@ export function bulkMoveToSectionInProject(tasks, projectId, sectionId) {
   });
 }
 
-/** Marca/desmarca como completadas todas las tareas indicadas de una vez. */
-export function bulkSetComplete(taskIds, isComplete) {
-  return runBatchedUpdate(taskIds, () => ({
+/**
+ * Marca/desmarca como completadas todas las tareas indicadas de una vez.
+ * Recibe las tareas enteras (no solo sus ids) desde la v58, por lo mismo
+ * que toggleTaskComplete: una oferta completada pasa a «Entregadas» — cada
+ * una según su propio estado (una ya convertida en proyecto se queda en
+ * «Cerradas»), por eso el campo de sección se calcula tarea a tarea.
+ */
+export function bulkSetComplete(tasks, isComplete) {
+  const offersProject = getOffersProject();
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  return runBatchedUpdate(tasks.map((t) => t.id), (id) => ({
     isComplete,
     completedAt: isComplete ? serverTimestamp() : null,
+    ...offerCompletionFields(offersProject, byId.get(id), isComplete),
   }));
 }
 

@@ -185,7 +185,7 @@ export function renderListView(container, opts) {
       e.stopPropagation();
       const task = tasks.find((t) => t.id === btn.dataset.check);
       const willComplete = !task.isComplete;
-      toggleTaskComplete(task.id, willComplete);
+      toggleTaskComplete(task, willComplete);
       if (willComplete) celebrateTask(btn); // pequeña recompensa — solo al completar, no al desmarcar
     });
   });
@@ -246,7 +246,7 @@ export function openTaskContextMenu(x, y, task, onOpenTask) {
   openContextMenu({
     x, y,
     items: [
-      { label: task.isComplete ? "Marcar como pendiente" : "Marcar como completada", icon: "✓", onClick: () => toggleTaskComplete(task.id, !task.isComplete) },
+      { label: task.isComplete ? "Marcar como pendiente" : "Marcar como completada", icon: "✓", onClick: () => toggleTaskComplete(task, !task.isComplete) },
       { label: "Duplicar tarea", icon: "⧉", onClick: async () => { await duplicateTask(task); showToast("Tarea duplicada."); } },
       { label: task.isMilestone ? "Quitar de hitos" : "Convertir en hito", icon: "🚩", onClick: () => updateTask(task.id, { isMilestone: !task.isMilestone }) },
       { label: "Abrir detalles", icon: "↗", onClick: () => onOpenTask(task.id) },
