@@ -1264,6 +1264,10 @@ body.tl-dragging-bar { user-select: none; }
 .tl-keydate-band { background: color-mix(in srgb, var(--kd) 9%, transparent); }
 .tl-keydate-band:hover { background: color-mix(in srgb, var(--kd) 15%, transparent); }
 .tl-keydate-marker { display: flex; align-items: center; justify-content: center; z-index: 2; }
+/* v59: el círculo se puede arrastrar para mover la fecha (zoom de día o de semana) */
+.tl-keydate-marker--draggable { cursor: grab; }
+.tl-keydate-marker--dragging { cursor: grabbing; z-index: 6; }
+.tl-keydate-marker--dragging .tl-keydate-marker__dot { box-shadow: 0 0 0 3px var(--color-void), 0 0 0 5px var(--kd), 0 4px 10px rgba(0, 0, 0, 0.35); }
 .tl-keydate-marker__dot {
   width: 12px; height: 12px; border-radius: 50%; background: var(--kd);
   box-shadow: 0 0 0 3px var(--color-void), 0 0 0 5px var(--kd);

@@ -96,9 +96,7 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
             </label>
           </div>
           <div class="props-row">
-            ${dateFieldHtml("deliveryDate", state.deliveryDate)}
-            ${dateFieldHtml("sentDate", state.sentDate)}
-            ${dateFieldHtml("approvalDate", state.approvalDate)}
+            ${PROPERTY_DATE_FIELDS.map(({ key }) => dateFieldHtml(key, state[key])).join("")}
           </div>
           <div id="pp-history"></div>
         </div>

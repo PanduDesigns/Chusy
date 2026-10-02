@@ -31,6 +31,7 @@
 // los avisos digan "sección(es)" en vez de "tarea(s)" cuando corresponda.
 // ============================================================================
 import { toDate, addDays, daysBetween, isoWeekNumber, initials, showToast, plainTitleText } from "../utils.js";
+import { projectKeyDates } from "../project-properties.js";
 
 const XLSX_CDN = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
 const JSPDF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
@@ -116,9 +117,14 @@ function assigneeNames(t, teamMembers) {
   return (t.assigneeIds || []).map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean).map((m) => m.name);
 }
 
-/** Rango de fechas de TODAS las tareas exportadas — para el eje del gráfico y el título. */
-function computeRange(allTasks) {
-  const dates = allTasks.flatMap((t) => [t.startDate, t.dueDate].filter(Boolean).map(toDate)).filter(Boolean);
+/**
+ * Rango de fechas de TODAS las tareas exportadas — para el eje del gráfico y
+ * el título. `extraDates` (v59, opcional): fechas que también tienen que
+ * caber aunque ninguna tarea llegue tan lejos (las fechas clave del
+ * proyecto en el PDF); sin ellas el resultado es el de siempre.
+ */
+function computeRange(allTasks, extraDates = []) {
+  const dates = [...allTasks.flatMap((t) => [t.startDate, t.dueDate].filter(Boolean).map(toDate)).filter(Boolean), ...extraDates];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   if (!dates.length) return { min: addDays(today, -3), max: addDays(today, 25) };
@@ -566,12 +572,31 @@ export async function exportTimelineToExcel({ groups, title, groupLabel, teamMem
 // interactivo, algo que no tiene sentido replicar en una página fija).
 // Se pagina verticalmente si hay más tareas de las que caben en una
 // página, repitiendo el eje de fechas arriba de cada una nueva.
+//
+// Fechas clave del proyecto (v59): si se exporta la línea de tiempo de UN
+// proyecto (`project`) con fechas de aprobación, envío o entrega en sus
+// Propiedades, el PDF las refleja igual que la pantalla (v58): una fila por
+// fecha arriba del todo —con su círculo de círculos concéntricos en la fecha
+// y su nombre y fecha escritos a la izquierda— y una línea vertical
+// discontinua del mismo color que cruza cada página, para ver qué tareas
+// caen antes o después. Mismos colores que la pantalla (--kd-* en
+// css/styles.css). En las páginas siguientes, donde ya no están las filas,
+// una leyenda arriba dice qué es cada línea. El eje se amplía para que
+// quepan todas. Sin `project` (la línea de tiempo global) o sin fechas, el
+// PDF sale exactamente igual que antes.
 // ============================================================================
-export async function exportTimelineToPdf({ groups, title, teamMembers, viewMode = "tasks" }) {
+const KEY_DATE_RGB = {
+  approvalDate: [16, 185, 129],
+  sentDate: [59, 130, 246],
+  deliveryDate: [139, 92, 246],
+};
+
+export async function exportTimelineToPdf({ groups, title, teamMembers, viewMode = "tasks", project }) {
   await ensureJsPdf();
   const { jsPDF } = window.jspdf;
   const allTasks = groups.flatMap((g) => g.tasks);
-  const { min, max } = computeRange(allTasks);
+  const keyDates = projectKeyDates(project);
+  const { min, max } = computeRange(allTasks, keyDates.map((k) => k.date));
   const totalDays = Math.max(1, daysBetween(min, max) + 1);
   const rowNoun = (n) => (viewMode === "sections" ? (n === 1 ? "sección" : "secciones") : n === 1 ? "tarea" : "tareas");
 
@@ -621,6 +646,17 @@ export async function exportTimelineToPdf({ groups, title, teamMembers, viewMode
       doc.line(x, AXIS_Y, x, PAGE_H - MARGIN);
       doc.text(tk.label, x, AXIS_Y - 2);
     });
+    // Fechas clave (v59): línea discontinua de su color, detrás de las barras
+    // (el eje se dibuja antes que las filas) y debajo de la línea de hoy.
+    keyDates.forEach((k) => {
+      const x = xForDate(k.date);
+      doc.setDrawColor(...KEY_DATE_RGB[k.key]);
+      doc.setLineWidth(0.4);
+      doc.setLineDashPattern([1.2, 1.2], 0);
+      doc.line(x, AXIS_Y, x, PAGE_H - MARGIN);
+      doc.setLineDashPattern([], 0);
+      doc.setLineWidth(0.2);
+    });
     const todayX = xForDate(new Date());
     if (todayX >= CHART_X && todayX <= PAGE_W - MARGIN) {
       doc.setDrawColor(255, 88, 74);
@@ -630,7 +666,35 @@ export async function exportTimelineToPdf({ groups, title, teamMembers, viewMode
     }
   }
 
+  // El círculo de una fecha clave: un anillo de su color con el centro
+  // blanco y un punto, como el de la pantalla.
+  function drawKeyDateMarker(rgb, cx, cy) {
+    doc.setFillColor(...rgb);
+    doc.circle(cx, cy, 2.1, "F");
+    doc.setFillColor(255, 255, 255);
+    doc.circle(cx, cy, 1.4, "F");
+    doc.setFillColor(...rgb);
+    doc.circle(cx, cy, 0.9, "F");
+  }
+
+  // Leyenda de las líneas discontinuas en las páginas que no son la primera
+  // (en la primera ya están las filas de las fechas clave).
+  function drawKeyDateLegend() {
+    let x = MARGIN;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    keyDates.forEach((k) => {
+      doc.setFillColor(...KEY_DATE_RGB[k.key]);
+      doc.circle(x + 1, 21.2, 1, "F");
+      doc.setTextColor(60, 64, 68);
+      const text = `${k.short} ${fmtDate(k.date)}`;
+      doc.text(text, x + 3.2, 22);
+      x += 3.2 + doc.getTextWidth(text) + 6;
+    });
+  }
+
   function drawPageHeader(isFirstPage) {
+    if (!isFirstPage && keyDates.length) drawKeyDateLegend();
     if (isFirstPage) {
       doc.setFontSize(15);
       doc.setTextColor(20, 22, 26);
@@ -653,6 +717,26 @@ export async function exportTimelineToPdf({ groups, title, teamMembers, viewMode
   }
 
   drawPageHeader(true);
+
+  // Una fila por fecha clave, antes de las secciones (v59). El centro de la
+  // fila (y + 2.3) es el mismo que el de las barras de las tareas, para que
+  // el punto y el círculo queden a la altura del texto. Un pequeño hueco
+  // después, para que el rótulo de la primera sección no se pegue al de la
+  // última fecha.
+  keyDates.forEach((k) => {
+    ensureSpace();
+    const rgb = KEY_DATE_RGB[k.key];
+    doc.setFillColor(...rgb);
+    doc.circle(MARGIN + 1, y + 2.3, 1, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 32, 36);
+    doc.text(`${k.short} · ${fmtDate(k.date)}`, MARGIN + 4, y + 3.2);
+    doc.setFont("helvetica", "normal");
+    drawKeyDateMarker(rgb, xForDate(k.date), y + 2.3);
+    y += ROW_H;
+  });
+  if (keyDates.length) y += 2.5;
 
   groups.forEach((g) => {
     if (!g.tasks.length) return;

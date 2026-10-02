@@ -329,3 +329,25 @@ export function planOfferRepositioning(project, tasks) {
   }
   return plan;
 }
+
+// ----------------------------------------------------------------------------
+// v59
+// ----------------------------------------------------------------------------
+
+/**
+ * Los campos personalizados de un proyecto que se ofrecen como filtro en su
+ * barra de filtros (v59): todos, salvo «Ubicación» de Ofertas. Ese campo
+ * guarda la carpeta donde está el proyecto, para tenerla a mano — una ruta
+ * escrita a mano, distinta en cada oferta, así que filtrar por ella no sirve
+ * de nada y solo llenaba la barra de opciones. Sigue siendo un campo normal
+ * en todo lo demás (modal, columna de la Lista, Propiedades…): solo se
+ * quita de los filtros. Se identifica como el resto de campos de Ofertas
+ * (findOfferLocationField: por su id de fábrica o, si se recreó a mano, por
+ * su nombre), y solo en el proyecto Ofertas: un campo llamado igual en otro
+ * proyecto no se toca.
+ */
+export function filterableCustomFields(project) {
+  const defs = (project && project.customFieldDefs) || [];
+  const location = isOffersProject(project) ? findOfferLocationField(project) : null;
+  return location ? defs.filter((f) => f.id !== location.id) : defs;
+}

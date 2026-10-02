@@ -60,6 +60,41 @@ export function applyTaskFilters(tasks, activeFilters, searchText) {
   return result;
 }
 
+/**
+ * Guardar y recuperar los filtros activos (v59: los de Ofertas se recuerdan
+ * entre sesiones — el almacenamiento en sí vive en app.js, junto a los de
+ * «Mis tareas»). `activeFilters` es `{ clave: Set(valores) }`; guardado es
+ * un objeto plano `{ clave: [valores] }`, sin las claves vacías.
+ */
+export function filtersToPlain(activeFilters) {
+  const plain = {};
+  Object.entries(activeFilters || {}).forEach(([key, set]) => { if (set && set.size) plain[key] = [...set]; });
+  return plain;
+}
+
+/** Lo contrario de filtersToPlain; ignora lo que no tenga forma de lista (un guardado dañado no rompe nada). */
+export function filtersFromPlain(plain) {
+  const filters = {};
+  if (!plain || typeof plain !== "object" || Array.isArray(plain)) return filters;
+  Object.entries(plain).forEach(([key, values]) => { if (Array.isArray(values) && values.length) filters[key] = new Set(values); });
+  return filters;
+}
+
+/**
+ * Quita los filtros cuya clave ya no está en la barra (`filterDefs`, la
+ * salida de buildFilterDefs): un filtro que la barra no pinta no se puede
+ * ver ni quitar, y seguiría ocultando tareas sin explicación. Pasa con los
+ * filtros recordados de una sesión anterior si entre tanto se borró el
+ * campo personalizado al que apuntaban. Devuelve el MISMO objeto si no hay
+ * nada que quitar.
+ */
+export function pruneFilters(activeFilters, filterDefs) {
+  const keys = new Set((filterDefs || []).map((d) => d.key));
+  const entries = Object.entries(activeFilters || {});
+  if (entries.every(([key]) => keys.has(key))) return activeFilters;
+  return Object.fromEntries(entries.filter(([key]) => keys.has(key)));
+}
+
 /** Construye las columnas de filtro disponibles para el contexto actual. */
 export function buildFilterDefs({ teamMembers, tagsRegistry, projects, project, customFieldDefs, tasks = [], includeStatus = true, includeProject = false }) {
   const defs = [

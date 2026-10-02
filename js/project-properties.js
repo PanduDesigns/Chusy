@@ -9,8 +9,9 @@
 //   sector                      "Automoción" o "Industria" ("" si no se ha
 //                               elegido; v58, ver SECTOR_OPTIONS en offers.js)
 //   approvedVersion             la versión de la oferta que se aprobó ("A3")
-//   deliveryDate / sentDate /   fechas "YYYY-MM-DD" (o null)
-//   approvalDate                entrega, envío y aprobación
+//   approvalDate / sentDate /   fechas "YYYY-MM-DD" (o null): aprobación, envío
+//   deliveryDate                y entrega, en este orden — el de la vida real
+//                               (v59, ver PROPERTY_DATE_FIELDS)
 //   history[]                   histórico del proyecto, con el mismo formato
 //                               que el de una oferta: {id, version, changes,
 //                               createdAt}
@@ -41,13 +42,17 @@ import {
 import { uid, toDate, toDateInputValue, plainTitleText } from "./utils.js";
 
 /**
- * Las tres fechas de las propiedades, en el orden en el que se enseñan.
- * `short` es el nombre corto que usa la línea de tiempo (v58).
+ * Las tres fechas de las propiedades, en el orden en el que se enseñan —
+ * el de la vida real (v59): primero se aprueba, luego se envía y por último
+ * se entrega. Este es el ÚNICO sitio que decide ese orden: el formulario de
+ * Propiedades (y el de convertir una oferta), las filas de la línea de
+ * tiempo del proyecto y el PDF lo recorren tal cual. `short` es el nombre
+ * corto que usan la línea de tiempo y el PDF (v58).
  */
 export const PROPERTY_DATE_FIELDS = [
-  { key: "deliveryDate", label: "Fecha de entrega", short: "Entrega" },
-  { key: "sentDate", label: "Fecha de envío", short: "Envío" },
   { key: "approvalDate", label: "Fecha de aprobación", short: "Aprobación" },
+  { key: "sentDate", label: "Fecha de envío", short: "Envío" },
+  { key: "deliveryDate", label: "Fecha de entrega", short: "Entrega" },
 ];
 
 function text(value) {
@@ -197,9 +202,10 @@ export function propertiesFromOffer({ offer, offersProject, today }) {
 
 /**
  * Las fechas clave del proyecto que hay que marcar en su línea de tiempo
- * (v58): entrega, envío y aprobación — solo las que están rellenas, en ese
- * mismo orden fijo (el de PROPERTY_DATE_FIELDS), no por fecha, para que
- * cada una esté siempre en la misma fila. Cada elemento es
+ * (v58): aprobación, envío y entrega — solo las que están rellenas, en ese
+ * mismo orden fijo (el de PROPERTY_DATE_FIELDS, que desde la v59 es el de
+ * la vida real), no por fecha, para que cada una esté siempre en la misma
+ * fila. Cada elemento es
  * `{ key, label, short, date }`, con `date` como Date (local, sin hora).
  * Un proyecto sin propiedades, o sin ninguna fecha, devuelve `[]`.
  */

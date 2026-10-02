@@ -5,7 +5,7 @@
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
 import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
-import { isOffersProject, findOfferCommercialField, collectSuggestions } from "./offers.js";
+import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
 import { convertOfferToProject } from "./data/offer-conversion.js";
 import { getTask, subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { subscribeToAllTags } from "./data/tags.js";
@@ -34,7 +34,7 @@ import { openProjectModal } from "./components/project-modal.js";
 import { openTaskModal } from "./components/task-modal.js";
 import { openProjectPropertiesModal, openOfferConversionModal } from "./components/project-properties-modal.js";
 import { renderFilterBar } from "./components/filter-bar.js";
-import { applyTaskFilters, buildFilterDefs, sortTasks } from "./task-filters.js";
+import { applyTaskFilters, buildFilterDefs, sortTasks, filtersToPlain, filtersFromPlain, pruneFilters } from "./task-filters.js";
 import { openSearchModal } from "./components/search-modal.js";
 import { openAccountModal } from "./components/account-modal.js";
 import { openTeamAdminModal } from "./components/team-admin-modal.js";
@@ -125,6 +125,34 @@ function saveMyTasksFilters(filters) {
     Object.entries(filters).forEach(([key, set]) => { if (set && set.size) plain[key] = [...set]; });
     localStorage.setItem(`chusy:myTasksFilters:${currentUser.uid}`, JSON.stringify(plain));
   } catch (e) { /* localStorage no disponible */ }
+}
+
+// Los filtros de Ofertas (v59) se recuerdan igual que los de «Mis tareas»:
+// por persona y en este navegador, no en la cuenta. Quien solo trabaja con
+// un sector (por ejemplo Industria, porque no toca Automoción) lo deja
+// marcado una vez y lo encuentra así cada vez que vuelve a entrar. Sin nada
+// guardado, sin filtros (a diferencia de «Mis tareas», que arranca en
+// «Pendiente»): una oferta completada sigue siendo parte del trabajo. El
+// cuadro de búsqueda por texto NO se guarda — como en el resto de la app,
+// empieza vacío —, porque un texto olvidado en la caja dejaría la lista
+// «vacía» sin que se vea por qué.
+function offersFiltersKey() { return `chusy:offersFilters:${currentUser.uid}`; }
+function isOffersProjectId(projectId) {
+  const p = projects.find((x) => x.id === projectId);
+  return !!p && isOffersProject(p);
+}
+function loadOffersFilters() {
+  if (!currentUser) return {};
+  try {
+    const raw = localStorage.getItem(offersFiltersKey());
+    return raw === null ? {} : filtersFromPlain(JSON.parse(raw));
+  } catch {
+    return {}; // guardado ilegible o localStorage no disponible: sin filtros
+  }
+}
+function saveOffersFilters(filters) {
+  if (!currentUser) return;
+  try { localStorage.setItem(offersFiltersKey(), JSON.stringify(filtersToPlain(filters))); } catch { /* localStorage no disponible */ }
 }
 
 // El orden de columna de una tabla (Lista de un proyecto, o Mis tareas) se
@@ -384,11 +412,20 @@ function syncGlobalTimelineSubscriptions() {
 }
 
 function selectProject(projectId) {
+  const fromAnotherMode = mode !== "project";
   mode = "project";
   saveLastLocation({ mode: "project", projectId, view: currentView });
-  if (projectId === currentProjectId) { renderShell(); return; }
+  if (projectId === currentProjectId) {
+    // v59: volver a Ofertas desde otra sección (Mis tareas, por ejemplo) sin
+    // haber abierto otro proyecto entre medias: `activeFilters` es ahora el
+    // de esa otra sección, y hay que recuperar los filtros recordados de
+    // Ofertas. En los demás proyectos esto sigue como antes.
+    if (fromAnotherMode && isOffersProjectId(projectId)) { activeFilters = loadOffersFilters(); searchText = ""; }
+    renderShell();
+    return;
+  }
   currentProjectId = projectId;
-  activeFilters = {};
+  activeFilters = isOffersProjectId(projectId) ? loadOffersFilters() : {};
   searchText = "";
   sortState = loadSortState(`project:${projectId}`);
   if (unsubCurrentProject) unsubCurrentProject();
@@ -463,6 +500,7 @@ function toggleTimelineSectionExpanded(sectionKey) {
 function handleFilterChange(key, newSet) {
   activeFilters = { ...activeFilters, [key]: newSet };
   if (mode === "mytasks") saveMyTasksFilters(activeFilters);
+  if (mode === "project" && isOffersProjectId(currentProjectId)) saveOffersFilters(activeFilters);
   if (mode === "project") renderMain();
   else renderShell();
 }
@@ -677,7 +715,13 @@ function renderProjectTopbar() {
 
 function renderMain() {
   if (mode !== "project" || !currentProject) return;
-  const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, customFieldDefs: currentProject.customFieldDefs, tasks: currentTasks });
+  const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, customFieldDefs: filterableCustomFields(currentProject), tasks: currentTasks });
+  // v59: un filtro recordado de Ofertas que la barra ya no pinta (se borró el
+  // campo personalizado al que apuntaba) se descarta: no se vería ni se
+  // podría quitar. Solo cuando `currentProject` es el proyecto elegido: justo
+  // al cambiar de proyecto sigue siendo el anterior hasta que llega el nuevo,
+  // y sus campos no valen para podar los filtros de este.
+  if (currentProject.id === currentProjectId && isOffersProject(currentProject)) activeFilters = pruneFilters(activeFilters, filterDefs);
   renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange, searchText, onSearchChange: handleSearchTextChange });
   renderProjectContent();
 }

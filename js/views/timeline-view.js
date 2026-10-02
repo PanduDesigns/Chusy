@@ -99,7 +99,7 @@
 // en cabeceras y avisos).
 //
 // Fechas clave del proyecto (v58): en la línea de tiempo de UN proyecto
-// (`project` informado) se marcan las fechas de entrega, envío y aprobación
+// (`project` informado) se marcan las fechas de aprobación, envío y entrega
 // de sus Propiedades (project-properties.js, projectKeyDates) — las que
 // estén rellenas. Cada una es una fila propia arriba del todo (etiqueta con
 // su fecha, un blanco de círculos concéntricos en su columna) más una línea
@@ -107,15 +107,19 @@
 // (variables --kd-* en css/styles.css). Se ven distintas de un vistazo de un
 // hito (rombo dorado) y de una tarea (barra por prioridad), y la escala
 // siempre las incluye aunque ninguna tarea llegue tan lejos. No son tareas:
-// no se abren, no se arrastran y no entran en la exportación (que sigue
-// recibiendo solo las tareas). Se editan desde «Propiedades» del proyecto.
+// no se abren y no entran en la lista de tareas que se exporta (el PDF las
+// dibuja aparte, ver gantt-export.js). Se editan desde «Propiedades» del
+// proyecto y, desde la v59, también arrastrando su círculo por la línea de
+// tiempo, igual que un hito (solo con zoom de día o de semana, como las
+// tareas — ver wireKeyDateDragging): al soltar se guarda la nueva fecha en
+// `properties.<fecha>` del proyecto, sin tocar el resto de sus Propiedades.
 // La línea de tiempo global no las dibuja.
 // ============================================================================
 import { escapeHtml, toDate, toDateInputValue, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast, renderTitleHtml, plainTitleText, getTaskSectionForProject } from "../utils.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { exportTimelineToExcel, exportTimelineToPdf } from "../components/gantt-export.js";
 import { updateTask } from "../data/tasks.js";
-import { saveProjectSections } from "../data/projects.js";
+import { saveProjectSections, updateProject } from "../data/projects.js";
 import { projectKeyDates } from "../project-properties.js";
 import { openSectionsModal } from "../components/sections-modal.js";
 
@@ -437,8 +441,11 @@ export function renderTimelineView(container, {
       const col = taskSpan({ dueDate: k.date }, columns).e + 2;
       cells += `<div class="tl-group-label tl-keydate-label" title="${title}" style="grid-column:1;grid-row:${gridRow};--kd:${color};"><span class="tl-keydate-dot"></span>${escapeHtml(k.short)} · ${escapeHtml(when)}</div>`;
       cells += `<div class="tl-row-band tl-keydate-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};--kd:${color};"></div>`;
-      cells += `<div class="tl-keydate-marker" title="${title}" style="grid-column:${col};grid-row:${gridRow};--kd:${color};"><span class="tl-keydate-marker__dot"></span></div>`;
-      keyDateLines += `<div class="tl-keydate-line" style="grid-column:${col};grid-row:1 / ${totalRows + 1};--kd:${color};"></div>`;
+      // v59: el círculo se puede arrastrar (zoom de día/semana, ver wireKeyDateDragging)
+      const dragMarker = canDrag ? ` data-drag-keydate="${k.key}"` : "";
+      const markerHint = canDrag ? escapeHtml(" — arrástrala para cambiar la fecha") : "";
+      cells += `<div class="tl-keydate-marker${canDrag ? " tl-keydate-marker--draggable" : ""}" title="${title}${markerHint}"${dragMarker} style="grid-column:${col};grid-row:${gridRow};--kd:${color};"><span class="tl-keydate-marker__dot"></span></div>`;
+      keyDateLines += `<div class="tl-keydate-line" data-keydate-line="${k.key}" style="grid-column:${col};grid-row:1 / ${totalRows + 1};--kd:${color};"></div>`;
       return;
     }
     if (row.type === "group") {
@@ -569,6 +576,7 @@ export function renderTimelineView(container, {
   // que siempre.
   const dragState = { suppressClickFor: null };
   if (canDrag) wireBarDragging(container, { unit, colWidth, allTasksById, dragState });
+  if (canDrag && project && keyDates.length) wireKeyDateDragging(container, { unit, colWidth, keyDates, project });
 
   container.querySelectorAll("[data-open]").forEach((elx) => {
     elx.addEventListener("click", () => {
@@ -868,6 +876,79 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
           : "Fecha actualizada.";
         updateTask(taskId, patch)
           .then(() => showToast(toastMsg))
+          .catch((err) => {
+            console.error(err);
+            showToast("No se pudo actualizar la fecha. Comprueba tu conexión e inténtalo de nuevo.");
+          });
+      }
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  });
+}
+
+// --------------------------------------------------------------------
+// Arrastrar el círculo de una fecha clave del proyecto (v59). Mismo gesto
+// que mover un hito: se agarra el círculo, se arrastra en horizontal (el
+// círculo y su línea vertical se desplazan en vivo, con un aviso con la
+// fecha nueva) y al soltar se guarda. Mismos umbrales y mismo «un día por
+// paso» que las barras (en semana, 1/7 del ancho de la columna). Solo se
+// escribe esa fecha — `properties.<fecha>`, ruta de campo — para no pisar
+// el resto de las Propiedades del proyecto (histórico, comercial…) si
+// alguien más las está editando a la vez. No hay topes: las fechas clave
+// son independientes entre sí (se puede aprobar después de enviar, aunque
+// no sea lo habitual), y si la nueva cae fuera de la escala, la escala se
+// amplía sola al repintar.
+// --------------------------------------------------------------------
+function wireKeyDateDragging(container, { unit, colWidth, keyDates, project }) {
+  const pxPerDay = unit === "week" ? colWidth / 7 : colWidth;
+
+  container.querySelectorAll("[data-drag-keydate]").forEach((el) => {
+    const keyDate = keyDates.find((k) => k.key === el.dataset.dragKeydate);
+    if (!keyDate) return;
+    const line = container.querySelector(`[data-keydate-line="${keyDate.key}"]`);
+
+    el.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return; // solo botón izquierdo del ratón
+      e.preventDefault(); // sin selección de texto mientras se arrastra, como en las barras
+      e.stopPropagation();
+      const startX = e.clientX;
+      let dayDelta = 0;
+      let dragging = false;
+
+      function shiftTo(px) {
+        const t = px ? `translateX(${px}px)` : "";
+        el.style.transform = t;
+        if (line) line.style.transform = t;
+      }
+
+      function onMove(ev) {
+        const deltaPx = ev.clientX - startX;
+        if (!dragging && Math.abs(deltaPx) < DRAG_MOVE_THRESHOLD_PX) return;
+        if (!dragging) {
+          dragging = true;
+          document.body.classList.add("tl-dragging-bar");
+          document.body.style.cursor = "grabbing";
+          el.classList.add("tl-keydate-marker--dragging");
+        }
+        dayDelta = Math.round(deltaPx / pxPerDay);
+        shiftTo(dayDelta * pxPerDay);
+        showDragTooltip(el, `${keyDate.short} ${fmtEsShort(toDateInputValue(addDays(keyDate.date, dayDelta)))}`);
+      }
+
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        removeDragTooltip();
+        el.classList.remove("tl-keydate-marker--dragging");
+        shiftTo(0);
+        document.body.style.cursor = "";
+        document.body.classList.remove("tl-dragging-bar");
+        if (!dayDelta) return; // clic sin arrastre, o de vuelta al mismo día: nada que guardar (dayDelta solo se mueve de 0 con el arrastre ya empezado)
+        const next = toDateInputValue(addDays(keyDate.date, dayDelta));
+        updateProject(project.id, { [`properties.${keyDate.key}`]: next })
+          .then(() => showToast(`${keyDate.label} actualizada.`))
           .catch((err) => {
             console.error(err);
             showToast("No se pudo actualizar la fecha. Comprueba tu conexión e inténtalo de nuevo.");
