@@ -16,9 +16,13 @@
 // y si se cierra con cambios sin guardar se pregunta antes de descartarlos.
 // Este archivo no habla con Firestore — quien lo abre le pasa qué hacer al
 // confirmar (`onSave` / `onConfirm`).
+//
+// v60: junto a la etiqueta de «Ubicación» hay un botón «Abrir Ubicación»
+// (ver components/open-location.js).
 // ============================================================================
 import { el, escapeHtml, uid, showToast, toDateInputValue } from "../utils.js";
 import { attachTextSuggest } from "./text-suggest.js";
+import { createOpenLocationButton } from "./open-location.js";
 import { SECTOR_OPTIONS } from "../offers.js";
 import {
   PROPERTY_DATE_FIELDS,
@@ -72,15 +76,18 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
             <span class="field__label">Nombre del proyecto</span>
             <input class="field__input" id="pp-name" type="text" value="${escapeHtml(nameField.value)}" placeholder="Nombre del proyecto">
           </label>` : ""}
-          <div class="props-row">
+          <div class="props-row props-row--with-action">
             <label class="field">
               <span class="field__label">Comercial</span>
               <input class="field__input" id="pp-comercial" type="text" value="${escapeHtml(state.comercial)}" placeholder="Escribe…">
             </label>
-            <label class="field">
-              <span class="field__label">Ubicación</span>
+            <div class="field">
+              <span class="field__label-row">
+                <label class="field__label" for="pp-ubicacion">Ubicación</label>
+                <span class="field__label-action" id="pp-open-location-slot"></span>
+              </span>
               <input class="field__input" id="pp-ubicacion" type="text" value="${escapeHtml(state.ubicacion)}" placeholder="Escribe…">
-            </label>
+            </div>
           </div>
           <div class="props-row">
             <label class="field">
@@ -137,7 +144,14 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
   comercialInput.addEventListener("input", syncComercial);
   comercialInput.addEventListener("change", syncComercial);
 
-  overlay.querySelector("#pp-ubicacion").addEventListener("input", (e) => { state.ubicacion = e.target.value; markDirty(); });
+  // v60: «Abrir Ubicación» junto a la etiqueta — abre lo que haya escrito en
+  // la casilla en este momento (aunque no se haya guardado) y se deshabilita
+  // mientras esté vacía. Aquí la etiqueta SÍ es un <label for>: el botón va
+  // fuera de ella, en su fila, así que clicar el texto sigue enfocando la casilla.
+  const ubicacionInput = overlay.querySelector("#pp-ubicacion");
+  const openLocationButton = createOpenLocationButton({ getValue: () => ubicacionInput.value, compact: true });
+  overlay.querySelector("#pp-open-location-slot").appendChild(openLocationButton.el);
+  ubicacionInput.addEventListener("input", (e) => { state.ubicacion = e.target.value; markDirty(); openLocationButton.refresh(); });
   overlay.querySelector("#pp-sector").addEventListener("change", (e) => { state.sector = e.target.value; markDirty(); });
   overlay.querySelector("#pp-approvedVersion").addEventListener("input", (e) => { state.approvedVersion = e.target.value; markDirty(); });
   PROPERTY_DATE_FIELDS.forEach(({ key }) => {

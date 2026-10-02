@@ -1042,6 +1042,27 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .text-suggest__item:hover, .text-suggest__item.is-active { background: var(--color-panel); }
 @media (max-width: 720px) { .props-row { flex-direction: column; gap: 18px; } }
 
+/* «Abrir Ubicación» (v60) — components/open-location.js. Botón junto a la
+   etiqueta de un campo Ubicación (ficha de una oferta, Propiedades de un
+   proyecto) y en la barra superior de un proyecto con Ubicación rellena. */
+.field__label-action { margin-left: auto; display: inline-flex; }
+.open-location-btn { flex-shrink: 0; }
+.open-location-btn--compact { padding: 2px 9px; font-size: 12px; line-height: 1.35; }
+.open-location-btn.is-busy { cursor: progress; opacity: 0.7; }
+/* En la barra superior (muy justa de ancho — la campana de notificaciones le
+   reserva el hueco de la derecha): el botón se encoge con la pantalla. Los
+   cortes son de ventana, contando la barra lateral abierta (260 px): con
+   texto desde 1500 px; solo el icono hasta 1160 px; por debajo, oculto (queda
+   el botón de la ficha de la oferta y el de Propiedades). */
+.open-location-btn--topbar .open-location-btn__label { white-space: nowrap; }
+@media (max-width: 1499px) { .open-location-btn--topbar .open-location-btn__label { display: none; } }
+@media (max-width: 1159px) { .open-location-btn--topbar { display: none; } }
+/* En la fila Comercial + Ubicación de Propiedades, la etiqueta de Ubicación
+   (con su botón) mide un poco más que la de Comercial: se igualan las dos
+   para que sus casillas queden a la misma altura. */
+.props-row--with-action > .field > .field__label,
+.props-row--with-action > .field > .field__label-row { min-height: 24px; display: flex; align-items: center; }
+
 .section-divider { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .section-divider__label { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; color: var(--color-text-faint); text-transform: uppercase; white-space: nowrap; }
 .section-divider::after { content: ''; flex: 1; height: 1px; background: var(--color-line); }

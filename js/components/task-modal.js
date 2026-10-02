@@ -67,6 +67,7 @@ import {
   findOffersSection,
   findOfferVersionField,
   findOfferCommercialField,
+  findOfferLocationField,
   nextOfferVersion,
   makeOriginalRevision,
   lacksOriginalRevision,
@@ -75,6 +76,7 @@ import {
   OFFER_FIRST_VERSION,
 } from "../offers.js";
 import { attachTextSuggest } from "./text-suggest.js";
+import { createOpenLocationButton } from "./open-location.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
 
@@ -546,9 +548,25 @@ export function openTaskModal({
     const personalFieldDefs = (currentUserProfile?.personalCustomFieldDefs || []).map((f) => ({ ...f, isPersonalField: true }));
     const allFieldDefs = [...projectFieldDefs, ...personalFieldDefs];
 
+    // v60: el campo Ubicación de una oferta lleva el botón «Abrir
+    // Ubicación» junto a su etiqueta (ver components/open-location.js). Se
+    // pinta como un `<div class="field">` y no como el `<label>` de los
+    // demás: un botón dentro de un `<label>` pasaría a ser SU control
+    // (clic en el texto = pulsar el botón) y no la casilla.
+    const offersForFields = offersProject();
+    const locationDef = offersForFields ? findOfferLocationField(offersForFields) : null;
+    const isLocationField = (f) => !!locationDef && !f.isPersonalField && f.id === locationDef.id && f.type === "texto";
+
     mount.innerHTML = allFieldDefs
       .map(
-        (f) => `
+        (f) => isLocationField(f) ? `
+      <div class="field">
+        <span class="field__label-row">
+          <span class="field__label">${escapeHtml(f.name)}</span>
+          <span class="field__label-action" data-open-location-slot></span>
+        </span>
+        <input class="field__input" type="text" data-custom-field="${f.id}" value="${escapeHtml(draft.customFields[f.id] ?? "")}" placeholder="Escribe…">
+      </div>` : `
       <label class="field">
         <span class="field__label">${escapeHtml(f.name)}${f.isPersonalField ? ` <span style="color:var(--color-text-faint);font-weight:400;">· personal</span>` : ""}</span>
         ${f.type === "numero"
@@ -567,7 +585,6 @@ export function openTaskModal({
     // cada desplegable para poder soltarlo al volver a pintar los campos.
     suggestHandles.forEach((h) => h.destroy());
     suggestHandles = [];
-    const offersForFields = offersProject();
     const commercialDef = getCommercialOptions && offersForFields ? findOfferCommercialField(offersForFields) : null;
 
     mount.querySelectorAll("[data-custom-field]").forEach((elm) => {
@@ -582,6 +599,18 @@ export function openTaskModal({
         markDirty();
       });
     });
+
+    // v60: el botón actúa sobre lo que haya escrito en la casilla EN ESE
+    // MOMENTO (aunque la oferta no se haya guardado todavía) y se deshabilita
+    // mientras esté vacía.
+    const locationSlot = mount.querySelector("[data-open-location-slot]");
+    if (locationSlot) {
+      const locationInput = locationSlot.closest(".field").querySelector("input");
+      const openButton = createOpenLocationButton({ getValue: () => locationInput.value, compact: true });
+      locationSlot.appendChild(openButton.el);
+      locationInput.addEventListener("input", openButton.refresh);
+      locationInput.addEventListener("change", openButton.refresh);
+    }
   }
 
   // --------------------------------------------------------------------

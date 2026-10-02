@@ -1,0 +1,40 @@
+CHUSY - AYUDANTE DE "ABRIR UBICACION" (solo Windows)
+====================================================
+
+Para que sirve
+--------------
+El boton "Abrir Ubicacion" de Chusy copia SIEMPRE la ruta al portapapeles
+(para pegarla en el Explorador de archivos). Pero un navegador no puede abrir
+carpetas de tu ordenador por si solo. Este ayudante lo permite: una vez
+instalado, el boton abre la carpeta directamente en el Explorador.
+
+Instalar (una vez por ordenador y usuario de Windows)
+-----------------------------------------------------
+1. Descomprime esta carpeta entera (no ejecutes nada desde dentro del zip).
+2. Doble clic en  Instalar-AbrirUbicacion.bat
+3. En Chusy, pulsa "Abrir Ubicacion". La primera vez el navegador pregunta si
+   permite abrir "Chusy - Abrir ubicacion": marca la casilla de recordar y acepta.
+
+No hace falta ser administrador: solo escribe en
+%LOCALAPPDATA%\Chusy y en el registro del propio usuario (HKCU).
+
+Quitar
+------
+Doble clic en  Desinstalar-AbrirUbicacion.bat
+
+Que hace exactamente
+--------------------
+Registra un enlace especial, "chusy-open:", que Windows entrega a
+abrir-ubicacion.ps1 (cuyo texto puedes leer). El script solo abre la ruta si
+es una CARPETA que existe: si es un archivo, un programa o no existe, no
+ejecuta nada y lo avisa.
+
+Si algo falla
+-------------
+- "No se encuentra la carpeta": comprueba que tienes acceso (unidad de red,
+  VPN...). El ayudante abre la ruta tal y como esta escrita en Chusy.
+- No pasa nada al pulsar el boton: la ruta ya esta copiada en el portapapeles;
+  pegala en la barra del Explorador (Ctrl+L). Si el ordenador esta gestionado
+  por la empresa, una directiva puede impedir ejecutar el script (o escribir
+  en el registro): avisa a Informatica.
+- Brevemente puede verse parpadear una ventana azul de PowerShell al abrir.
