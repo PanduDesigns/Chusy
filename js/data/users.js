@@ -27,8 +27,10 @@ export function updateUserRole(uid, role) {
 /**
  * Solo administradores (lo exigen las reglas de Firestore, igual que el
  * rol): asigna el departamento de alguien (v55, ver ../departments.js).
- * `department` es uno de los `value` de DEPARTMENTS, o null para dejarla
- * sin departamento.
+ * `department` es uno de los `value` de DEPARTMENTS (v63: «diseno-industria»,
+ * «diseno-automocion», «tecnicos», «produccion»), o null para dejarla sin
+ * departamento. (El «diseno» de antes de la v63 se sigue aceptando donde ya
+ * esté guardado, pero ya no se ofrece para asignarlo.)
  */
 export function updateUserDepartment(uid, department) {
   return updateDoc(doc(db, "users", uid), { department: department || null });

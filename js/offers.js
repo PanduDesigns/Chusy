@@ -228,6 +228,23 @@ export function findOfferSectorField(project) {
 }
 
 /**
+ * El Sector con el que nace una oferta nueva (v63): el campo «Sector» del
+ * proyecto Ofertas y la opción que corresponde a `wanted` («Industria»,
+ * «Automoción»…) tal como esté escrita en ESE campo — sin mirar mayúsculas,
+ * tildes ni espacios, porque alguien pudo cambiar a mano sus opciones desde
+ * «Campos personalizados». `{ fieldId, value }`, o `null` si no hay nada que
+ * poner (no se pide ninguno, el proyecto ya no tiene el campo o el campo ya
+ * no tiene esa opción: entonces la oferta nace sin Sector, como antes).
+ */
+export function defaultSectorValue(project, wanted) {
+  const field = findOfferSectorField(project);
+  if (!field || !wanted) return null;
+  const key = suggestionKey(wanted);
+  const option = (field.options || []).find((o) => suggestionKey(o) === key);
+  return option ? { fieldId: field.id, value: option } : null;
+}
+
+/**
  * Un texto → la opción de SECTOR_OPTIONS que le corresponde (sin mirar
  * mayúsculas, tildes ni espacios: "automocion" → "Automoción"), o "" si no
  * es ninguna de las dos. Se usa al pasar el Sector de una oferta a las

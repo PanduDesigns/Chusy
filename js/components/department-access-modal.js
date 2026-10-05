@@ -8,10 +8,14 @@
 // "Administrar equipo"), no hay un botón "Guardar" aparte — con solo un par
 // de secciones exclusivas de partida no merece la pena acumular cambios sin
 // guardar.
+//
+// v63: las casillas son GRUPOS de acceso (Diseño, Técnicos, Producción — ver
+// DEPARTMENT_GROUPS en departments.js), no departamentos sueltos: «Diseño»
+// abre la sección a Diseño - Industria y a Diseño - Automoción a la vez.
 // ============================================================================
 import { el, escapeHtml, showToast, projectBadgeHtml } from "../utils.js";
 import { updateProject } from "../data/projects.js";
-import { DEPARTMENTS } from "../departments.js";
+import { DEPARTMENT_GROUPS } from "../departments.js";
 
 export function openDepartmentAccessModal({ exclusiveProjects }) {
   const root = document.getElementById("modal-root");
@@ -28,7 +32,7 @@ export function openDepartmentAccessModal({ exclusiveProjects }) {
           <button class="modal__close" id="close">✕</button>
         </div>
         <div class="modal__body">
-          <p class="field__hint">Qué departamentos pueden ver y usar cada sección exclusiva. Quien sea admin accede siempre a todas, estén marcadas aquí o no.</p>
+          <p class="field__hint">Qué departamentos pueden ver y usar cada sección exclusiva. «Diseño» incluye a Diseño - Industria y a Diseño - Automoción. Quien sea admin accede siempre a todas, estén marcadas aquí o no.</p>
           <div id="da-list" style="display:flex;flex-direction:column;gap:14px;"></div>
         </div>
         <div class="modal__footer">
@@ -54,7 +58,7 @@ export function openDepartmentAccessModal({ exclusiveProjects }) {
           <span style="font-size:13.5px;font-weight:600;color:var(--color-text-hi);">${escapeHtml(p.name)}</span>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px 18px;">
-          ${DEPARTMENTS.map(
+          ${DEPARTMENT_GROUPS.map(
             (d) => `
             <label class="acc-switch-row" style="display:inline-flex;">
               <input type="checkbox" data-project="${p.id}" data-dept="${d.value}" ${p.allowedDepartments.includes(d.value) ? "checked" : ""}>

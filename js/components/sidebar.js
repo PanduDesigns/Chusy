@@ -35,7 +35,7 @@
 // app.js, igual que el resto de acciones que necesitan datos de fuera.
 // ============================================================================
 import { initials, colorFromString, escapeHtml, projectBadgeHtml, projectIcon } from "../utils.js";
-import { DEPARTMENTS } from "../departments.js";
+import { findDepartment } from "../departments.js";
 import { openContextMenu } from "./context-menu.js";
 import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/projects.js";
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
@@ -69,10 +69,11 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   const exclusiveItems = exclusiveProjects.map((p) => projectItemHtml(p, " sidebar__item--pinned", true)).join("");
 
   // Pie de la barra (v56): rol y, si tiene uno asignado, su departamento —
-  // "Admin · Diseño". Un valor que ya no esté en DEPARTMENTS (departamento
-  // quitado del registro) se ignora en vez de pintar algo raro.
+  // "Admin · Diseño - Industria". Un valor que ya no esté en el registro de
+  // departamentos (uno quitado) se ignora en vez de pintar algo raro; el
+  // «Diseño» antiguo (v63) sí se reconoce.
   const roleLabel = userProfile.role === "admin" ? "Admin" : userProfile.role === "revisor" ? "Revisor" : "Miembro";
-  const department = DEPARTMENTS.find((d) => d.value === userProfile.department);
+  const department = findDepartment(userProfile.department);
   const roleLine = department ? `${roleLabel} · ${department.label}` : roleLabel;
 
   container.innerHTML = `

@@ -26,6 +26,7 @@ import {
 import { getOffersProject, isProjectVisibleToUser } from "./data/projects.js";
 import { createTask } from "./data/tasks.js";
 import { planOfferFromRequest } from "./outlook-offer.js";
+import { defaultSectorOf } from "./departments.js";
 import { showToast, uid } from "./utils.js";
 
 /** Identifica esta pestaña (para saber quién se quedó cada petición). */
@@ -40,19 +41,32 @@ const CLEANUP_DELAY_MS = 60000;
 
 let stopListening = null;
 let listeningFor = "";
+/**
+ * La última cuenta y opciones con las que se llamó a startOutlookListener.
+ * Se lee al ATENDER cada petición, no al empezar a escuchar: el perfil
+ * cambia con la sesión abierta (un admin le da otro departamento, o acceso a
+ * Ofertas) y la escucha no se reinicia — con lo capturado al principio se
+ * atendería con el departamento de antes (v63: de él depende el Sector).
+ */
+let context = null;
 
 /**
  * Empieza a escuchar para esta cuenta. Se puede llamar en cada `bootstrap()`
  * (que se repite cada vez que cambia el perfil): si ya se está escuchando para
- * la misma cuenta no hace nada — reiniciar la escucha trataría como «restos»
- * una petición que acabara de llegar.
+ * la misma cuenta no se reinicia la escucha — hacerlo trataría como «restos»
+ * una petición que acabara de llegar — pero sí se guarda el perfil más
+ * reciente para las siguientes (ver `context`).
  */
 export function startOutlookListener({ user, getCommercialOptions }) {
   const email = String((user && user.email) || "").trim().toLowerCase();
   if (!email) return;
   const identity = `${user.uid}|${email}`;
-  if (stopListening && listeningFor === identity) return;
-  stopOutlookListener();
+  if (stopListening && listeningFor === identity) {
+    context = { user, getCommercialOptions }; // misma cuenta: solo se actualiza el perfil
+    return;
+  }
+  stopOutlookListener(); // (deja `context` a null: se rellena justo después)
+  context = { user, getCommercialOptions };
   listeningFor = identity;
   stopListening = subscribeToOutlookRequests(email, ({ isFirst, all, added }) => {
     if (isFirst) {
@@ -63,7 +77,7 @@ export function startOutlookListener({ user, getCommercialOptions }) {
     }
     added
       .filter((request) => request.status === "pending")
-      .forEach((request) => handleOutlookRequest(request, { user, getCommercialOptions }));
+      .forEach((request) => handleOutlookRequest(request, context));
   });
 }
 
@@ -71,6 +85,7 @@ export function stopOutlookListener() {
   if (stopListening) stopListening();
   stopListening = null;
   listeningFor = "";
+  context = null;
 }
 
 /** Atiende una petición. No lanza nunca: cualquier fallo se apunta en la petición y sale en un toast. */
@@ -95,6 +110,7 @@ export async function handleOutlookRequest(request, { user, getCommercialOptions
       now: new Date(),
       userId: user.uid,
       makeId: uid,
+      defaultSector: defaultSectorOf(user.department),
     });
     if (!plan.ok) return await fail(plan.message);
 

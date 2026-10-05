@@ -13,8 +13,9 @@
 //   · ajustar el Comercial a como ya lo escribe el equipo (mayúsculas,
 //     tildes… — la misma regla de sugerencias de la v57);
 //   · montar los datos de la tarea tal como los guardaría el formulario de
-//     «+ Nueva oferta»: sección «Nuevas», versión A1 y su fila «Versión
-//     original» del histórico.
+//     «+ Nueva oferta»: sección «Nuevas», versión A1, su fila «Versión
+//     original» del histórico y, desde la v63, el Sector que le toca al
+//     departamento de quien recibe la petición.
 //
 // Quien lee y escribe en Firestore es outlook-listener.js (con
 // data/outlook-inbox.js); este archivo no genera ids ni lee el reloj: se los
@@ -29,6 +30,7 @@ import {
   findOfferVersionField,
   findOfferCommercialField,
   findOfferLocationField,
+  defaultSectorValue,
   makeOriginalRevision,
   OFFER_FIRST_VERSION,
 } from "./offers.js";
@@ -118,9 +120,11 @@ export function snapToOption(value, options) {
  *   { ok: true, data, finalName, renamed }   o   { ok: false, message }.
  *
  * Sale igual que una oferta creada a mano con «+ Nueva oferta»: sección
- * «Nuevas», versión A1 y el histórico con su primera fila «Versión
- * original». Un campo que alguien haya borrado del proyecto Ofertas
- * (Versión, Comercial, Ubicación) simplemente no se rellena.
+ * «Nuevas», versión A1, el histórico con su primera fila «Versión
+ * original» y el Sector por defecto del departamento de quien la recibe
+ * (`defaultSector`: «Industria», «Automoción» o vacío — v63; ver
+ * departments.js). Un campo que alguien haya borrado del proyecto Ofertas
+ * (Versión, Comercial, Ubicación, Sector) simplemente no se rellena.
  *
  * @param {object} p
  * @param {object} p.request          la petición tal como llegó
@@ -129,9 +133,10 @@ export function snapToOption(value, options) {
  * @param {string[]} p.commercialOptions valores de Comercial que ya usa el equipo
  * @param {Date} p.now
  * @param {string} p.userId           quien recibe la petición (será `createdBy`)
+ * @param {string} [p.defaultSector]  el Sector por defecto de su departamento ("" si no tiene)
  * @param {() => string} p.makeId     genera el id de la fila del histórico
  */
-export function planOfferFromRequest({ request, offersProject, existingTitles, commercialOptions, now, userId, makeId }) {
+export function planOfferFromRequest({ request, offersProject, existingTitles, commercialOptions, now, userId, makeId, defaultSector }) {
   if (!isOffersProject(offersProject)) {
     return { ok: false, message: "La sección Ofertas todavía no existe en Chusy (entra una vez como administrador)." };
   }
@@ -151,6 +156,9 @@ export function planOfferFromRequest({ request, offersProject, existingTitles, c
   const locationField = findOfferLocationField(offersProject);
   const location = String(request.location ?? "").trim();
   if (locationField && location) customFields[locationField.id] = location;
+
+  const sector = defaultSectorValue(offersProject, defaultSector);
+  if (sector) customFields[sector.fieldId] = sector.value;
 
   const nuevas = findOffersSection(offersProject, "nuevas");
 

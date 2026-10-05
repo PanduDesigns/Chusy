@@ -5,7 +5,7 @@
 // ============================================================================
 import { el, escapeHtml, initials, colorFromString, showToast } from "../utils.js";
 import { updateUserRole, updateUserDepartment, setUserDeleted, getTeamConfig, updateTeamConfig } from "../data/users.js";
-import { DEPARTMENTS } from "../departments.js";
+import { departmentOptionsFor } from "../departments.js";
 
 /**
  * Cuentas ficticias (isImported, del importador de Asana — nunca un UID de
@@ -101,7 +101,7 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
         </select>
         <select class="field__select acc-dept-select" data-uid="${m.uid}">
           <option value="" ${!m.department ? "selected" : ""}>Sin departamento</option>
-          ${DEPARTMENTS.map((d) => `<option value="${d.value}" ${m.department === d.value ? "selected" : ""}>${d.label}</option>`).join("")}
+          ${departmentOptionsFor(m.department).map((d) => `<option value="${d.value}" ${m.department === d.value ? "selected" : ""}>${d.label}</option>`).join("")}
         </select>
         ${m.uid === currentUser.uid
           ? `<span></span>`

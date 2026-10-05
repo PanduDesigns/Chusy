@@ -68,6 +68,7 @@ import {
   findOfferVersionField,
   findOfferCommercialField,
   findOfferLocationField,
+  defaultSectorValue,
   nextOfferVersion,
   makeOriginalRevision,
   lacksOriginalRevision,
@@ -76,6 +77,7 @@ import {
   OFFER_FIRST_VERSION,
 } from "../offers.js";
 import { attachTextSuggest } from "./text-suggest.js";
+import { defaultSectorOf } from "../departments.js";
 import { createOpenLocationButton } from "./open-location.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
@@ -629,8 +631,10 @@ export function openTaskModal({
   /**
    * Valores de partida de una oferta NUEVA: sección "Nuevas" (salvo que se
    * haya abierto desde el "+ Añadir oferta" de una sección concreta, que
-   * manda) y versión A1. Solo si el proyecto sigue teniendo esa sección o
-   * ese campo — si alguien los borró, se deja el formulario como estaba.
+   * manda), versión A1 y, desde la v63, el Sector que le toca al
+   * departamento de quien la crea. Solo si el proyecto sigue teniendo esa
+   * sección o ese campo — si alguien los borró, se deja el formulario como
+   * estaba.
    */
   function applyOfferDefaults() {
     const offers = offersProject();
@@ -642,6 +646,15 @@ export function openTaskModal({
     const versionField = findOfferVersionField(offers);
     if (versionField && !draft.customFields[versionField.id]) {
       draft.customFields = { ...draft.customFields, [versionField.id]: OFFER_FIRST_VERSION };
+    }
+    // v63: el Sector de una oferta nueva sale ya puesto según el departamento
+    // de quien la crea (Diseño - Industria → Industria; Diseño - Automoción →
+    // Automoción; el resto de departamentos, ninguno). Es solo el valor de
+    // partida del desplegable: se puede cambiar antes de pulsar Aceptar y
+    // después, como cualquier otro campo.
+    const sector = defaultSectorValue(offers, defaultSectorOf(currentUserProfile?.department));
+    if (sector && !draft.customFields[sector.fieldId]) {
+      draft.customFields = { ...draft.customFields, [sector.fieldId]: sector.value };
     }
   }
 

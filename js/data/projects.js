@@ -2,6 +2,7 @@
 // Acceso a datos: proyectos.
 // ============================================================================
 import { db } from "../firebase-init.js";
+import { departmentHasAccess } from "../departments.js";
 import {
   OFFERS_KEY,
   SECTOR_OPTIONS,
@@ -216,7 +217,7 @@ export function isProjectVisibleToUser(project, user) {
   if (!project.exclusive) return true;
   if (!user) return false;
   if (user.role === "admin") return true;
-  return !!user.department && (project.allowedDepartments || []).includes(user.department);
+  return departmentHasAccess(user.department, project.allowedDepartments);
 }
 
 /**
@@ -282,6 +283,8 @@ const EXCLUSIVE_PROJECT_SEEDS = [
       { id: "ubicacion", name: "Ubicación", type: "texto", options: [] },
       { id: "sector", name: "Sector", type: "lista", options: [...SECTOR_OPTIONS] },
     ],
+    // Grupos de acceso (v63, ver departments.js): «diseno» abre Ofertas a
+    // Diseño - Industria, Diseño - Automoción y al «Diseño» antiguo.
     allowedDepartments: ["diseno"],
   },
 ];
