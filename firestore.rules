@@ -127,7 +127,21 @@ service cloud.firestore {
 
     // ---- Usuarios ----
     match /users/{userId} {
-      allow read: if isActiveUser();
+      // Leer UN perfil (get): cualquier cuenta activa. Y, desde la v62, cada
+      // persona con sesión puede pedir el SUYO aunque todavía NO exista.
+      // Antes (allow read: if isActiveUser()) esa lectura se denegaba — la
+      // propia isActiveUser() exige que el perfil exista —, así que quien
+      // tenía cuenta de Auth pero no perfil (un registro cortado a medias)
+      // recibía «permiso denegado» en vez de «no existe», y la app no podía
+      // ni darse cuenta de qué faltaba ni crearlo (ver js/auth.js,
+      // `onAuthChange`). Esta excepción solo cubre el documento propio y
+      // solo mientras NO existe: no deja leer nada ajeno ni nada guardado
+      // (una cuenta eliminada, cuyo documento sí existe, sigue sin poder
+      // leerlo). Leer la LISTA de perfiles (list) sigue exigiendo cuenta activa.
+      allow get: if isActiveUser() ||
+        (isSignedIn() && request.auth.uid == userId &&
+         !exists(/databases/$(database)/documents/users/$(userId)));
+      allow list: if isActiveUser();
       // Alta normal: cada quien crea SU PROPIO documento al registrarse
       // (isSignedIn() a secas a propósito: en este mismo paso su perfil
       // todavía no existe, así que isActiveUser() sería siempre falso). La
