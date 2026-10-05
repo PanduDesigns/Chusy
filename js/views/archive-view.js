@@ -7,6 +7,8 @@
 // ============================================================================
 import { escapeHtml, projectBadgeHtml } from "../utils.js";
 import { openContextMenu } from "../components/context-menu.js";
+import { openLocation } from "../components/open-location.js";
+import { hasLocation, projectLocation, OPEN_LOCATION_TEXT, OPEN_LOCATION_ICON } from "../location.js";
 
 export function renderArchiveView(container, { archivedProjects, onOpenProject, onUnarchive, onDelete }) {
   if (!archivedProjects.length) {
@@ -46,6 +48,8 @@ export function renderArchiveView(container, { archivedProjects, onOpenProject, 
         x: e.clientX, y: e.clientY,
         items: [
           { label: "Desarchivar proyecto", icon: "🗄️", onClick: () => onUnarchive(project.id) },
+          // v61: igual que en la barra lateral — solo si tiene Ubicación.
+          ...(hasLocation(projectLocation(project)) ? [{ label: OPEN_LOCATION_TEXT, icon: OPEN_LOCATION_ICON, onClick: () => openLocation(projectLocation(project)) }] : []),
           { divider: true },
           { label: "Eliminar proyecto", icon: "🗑", danger: true, onClick: () => {
             if (confirm(`¿Eliminar "${project.name}" y TODAS sus tareas? No se puede deshacer.`)) {

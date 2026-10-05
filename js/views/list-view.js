@@ -12,9 +12,11 @@
 import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml, getTaskSectionForProject, renderTitleHtml, plainTitleText } from "../utils.js";
 import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
 import { celebrateTask } from "../components/celebration.js";
-import { updateProject, saveProjectSections } from "../data/projects.js";
+import { updateProject, saveProjectSections, getOffersProject } from "../data/projects.js";
 import { openContextMenu } from "../components/context-menu.js";
-import { isOffersProject } from "../offers.js";
+import { isOffersProject, offerLocationOfTask } from "../offers.js";
+import { hasLocation, OPEN_LOCATION_TEXT, OPEN_LOCATION_ICON } from "../location.js";
+import { openLocation } from "../components/open-location.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
 import { openSectionsModal } from "../components/sections-modal.js";
 import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, wireColumnReorder, openColumnsMenu } from "../components/table-columns.js";
@@ -243,6 +245,10 @@ function priorityColor(p) { return PRIORITY_COLORS[p] || "var(--color-line-brigh
 function priorityLabel(p) { return PRIORITY_LABELS[p] || p; }
 
 export function openTaskContextMenu(x, y, task, onOpenTask) {
+  // v61: una oferta con la Ubicación rellena ofrece «Abrir Ubicación» (el
+  // mismo botón que la ficha de la oferta). Este menú lo comparten Lista,
+  // Tablero, Mis tareas y la línea de tiempo, así que sale en todas.
+  const offerLocation = offerLocationOfTask(task, getOffersProject());
   openContextMenu({
     x, y,
     items: [
@@ -250,6 +256,7 @@ export function openTaskContextMenu(x, y, task, onOpenTask) {
       { label: "Duplicar tarea", icon: "⧉", onClick: async () => { await duplicateTask(task); showToast("Tarea duplicada."); } },
       { label: task.isMilestone ? "Quitar de hitos" : "Convertir en hito", icon: "🚩", onClick: () => updateTask(task.id, { isMilestone: !task.isMilestone }) },
       { label: "Abrir detalles", icon: "↗", onClick: () => onOpenTask(task.id) },
+      ...(hasLocation(offerLocation) ? [{ label: OPEN_LOCATION_TEXT, icon: OPEN_LOCATION_ICON, onClick: () => openLocation(offerLocation) }] : []),
       { divider: true },
       { label: "Eliminar tarea", icon: "🗑", danger: true, onClick: async () => {
         if (!confirm(`¿Eliminar "${plainTitleText(task.title)}"? No se puede deshacer.`)) return;

@@ -40,8 +40,10 @@ import { openContextMenu } from "./context-menu.js";
 import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/projects.js";
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 import { openEditProjectModal } from "./edit-project-modal.js";
+import { openLocation } from "./open-location.js";
+import { hasLocation, projectLocation, OPEN_LOCATION_TEXT, OPEN_LOCATION_ICON } from "../location.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenOutlookBridge, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const regularProjects = projects.filter((p) => !p.exclusive);
@@ -141,6 +143,10 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
           // fechas e histórico). Solo para proyectos normales: una sección
           // exclusiva como Ofertas no es un proyecto real y no tiene de esto.
           ...(project.exclusive ? [] : [{ label: "Propiedades", icon: "ⓘ", onClick: () => onOpenProjectProperties(project) }]),
+          // v61: «Abrir Ubicación» también desde el clic derecho, solo si el
+          // proyecto tiene la Ubicación rellena en sus Propiedades (igual
+          // que el botón de la barra superior, que no se pinta sin ella).
+          ...(hasLocation(projectLocation(project)) ? [{ label: OPEN_LOCATION_TEXT, icon: OPEN_LOCATION_ICON, onClick: () => openLocation(projectLocation(project)) }] : []),
           {
             label: "Campos personalizados",
             icon: "☰",
@@ -178,6 +184,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       items.push({ label: "Administrar equipo", icon: "🛠️", onClick: onOpenTeamAdmin });
       items.push({ label: "Accesos por departamento", icon: "🔐", onClick: onOpenDepartmentAccess });
       items.push({ label: "Importar desde Asana", icon: "📥", onClick: onOpenAsanaImport });
+      items.push({ label: "Conexión con Outlook", icon: "📧", onClick: onOpenOutlookBridge });
     }
     // Métricas (v54): admin Y Revisor — el único permiso que distingue a
     // Revisor de Miembro, así que va en su propia comprobación en vez de

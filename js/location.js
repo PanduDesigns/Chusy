@@ -81,6 +81,17 @@ export function hasLocation(raw) {
 }
 
 /**
+ * La Ubicación de un proyecto (la de sus Propiedades, v57) tal como se
+ * escribió, o "" si no tiene (proyecto sin Propiedades, o con ese campo
+ * vacío). Lo usan los menús de clic derecho (v61) para decidir si ofrecen
+ * «Abrir Ubicación».
+ */
+export function projectLocation(project) {
+  const value = project && project.properties ? project.properties.ubicacion : "";
+  return typeof value === "string" ? value : "";
+}
+
+/**
  * El enlace que entiende el ayudante de Windows: `chusy-open:` + la ruta
  * codificada (sin `//`, para que ningún navegador le añada barras). El
  * ayudante lo decodifica y solo abre la ruta si es una CARPETA que existe.

@@ -1,0 +1,59 @@
+CHUSY - MACRO DE OUTLOOK "CREAR CARPETA DE PROYECTO" (v61)
+==========================================================
+
+Para que sirve
+--------------
+Es la macro de siempre (crea la carpeta del proyecto, extrae las plantillas y
+archiva el correo), con una novedad: al terminar, si Chusy esta abierto con tu
+sesion iniciada, crea tambien la oferta en Chusy:
+
+  - Nombre ........ el nombre del proyecto que escribes en la macro
+  - Ubicacion ..... la carpeta que ha creado la macro
+  - Comercial ..... la carpeta del comercial elegido (si es de INTERNACIONAL,
+                    la subcarpeta: ACO, MEXICO, LUIS MENACA)
+  - Descripcion ... el texto del correo desde el que lanzaste la macro
+  - Si ya hay una oferta con ese nombre, se le anade la fecha: NOMBRE (02/10/2026)
+
+Si Chusy no esta abierto con tu sesion, la macro hace todo lo de siempre y te
+avisa en el mensaje final de que la oferta no se ha creado en Chusy.
+
+Preparar (una vez, lo hace un administrador de Chusy)
+-----------------------------------------------------
+1. En Chusy (como administrador): menu del usuario (abajo a la izquierda) >
+   "Conexion con Outlook" > "Generar clave y activar" > "Copiar las tres lineas".
+   (Antes hay que haber publicado las reglas nuevas de Firestore: ver README.)
+2. En Outlook: Alt+F11 abre el editor de VBA.
+3. Si ya tienes la macro antigua: clic derecho sobre el modulo
+   "CrearCarpetaProyecto" > Quitar (sin exportar). Despues: Archivo >
+   Importar archivo... > elige este CrearCarpetaProyecto.bas.
+4. Al principio del modulo hay tres lineas "Private Const CHUSY_PROJECT_ID",
+   "CHUSY_API_KEY" y "CHUSY_CLAVE": sustituyelas por las tres que copiaste de
+   Chusy. Guarda (Ctrl+S) y cierra el editor.
+5. Para repartirla al equipo: el .bas ya con las tres lineas pegadas. Cada
+   persona la importa igual (paso 3). No hay que configurar nada mas: la macro
+   busca la sesion de Chusy con el correo de tu cuenta de Outlook.
+
+Probar
+------
+Con Chusy abierto y la sesion iniciada: en Outlook, Alt+F8 > ProbarConexionConChusy.
+Debe decir que ha creado la oferta "PRUEBA OUTLOOK hh:mm:ss" (aparece tambien en
+Chusy, en Ofertas > Nuevas). Borrala despues a mano. La prueba no toca ningun
+proyecto ni carpeta reales.
+
+Mensajes del final de la macro
+------------------------------
+- "oferta creada en Chusy: ..."  Todo bien.
+- "... Chusy no esta abierto con la sesion iniciada de <correo>"  Abre Chusy,
+  inicia sesion y crea la oferta a mano. Si el correo que sale no es el que
+  usas en Chusy, escribelo en la constante CHUSY_CORREO (al principio de la macro).
+- "Chusy rechazo la peticion (permisos)"  Faltan por publicar las reglas de
+  Firestore, o la clave de la macro no es la que muestra Chusy.
+- "no se pudo conectar"  Outlook no llega a firestore.googleapis.com (red, proxy
+  o cortafuegos): pidele a Informatica que lo permita.
+- Sin ningun mensaje de Chusy: CHUSY_CLAVE esta vacia y la macro funciona como antes.
+
+Cambiar la clave
+----------------
+Si se pierde o se filtra: en Chusy, "Conexion con Outlook" > "Cambiar la clave", y
+repartir la macro con las tres lineas nuevas. Las macros con la clave vieja siguen
+creando sus carpetas, pero ya no crean la oferta en Chusy.

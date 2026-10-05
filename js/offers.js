@@ -33,7 +33,7 @@
 // topbar.js y las vistas) decide qué hacer con lo que devuelven.
 // ============================================================================
 
-import { getTaskSectionForProject } from "./utils.js";
+import { getTaskSectionForProject, getTaskProjectIds } from "./utils.js";
 
 /** `exclusiveKey` del proyecto Ofertas (ver EXCLUSIVE_PROJECT_SEEDS en data/projects.js). */
 export const OFFERS_KEY = "ofertas";
@@ -141,6 +141,21 @@ export function findOfferCommercialField(project) {
 /** El campo "Ubicación" de Ofertas (id de fábrica "ubicacion"); `null` si el proyecto ya no lo tiene. */
 export function findOfferLocationField(project) {
   return findOfferField(project, "ubicacion");
+}
+
+/**
+ * La Ubicación escrita en una OFERTA (su campo personalizado «Ubicación»),
+ * tal cual; "" si la tarea no es una oferta (no pertenece a Ofertas) o no
+ * la tiene rellena (v61: el clic derecho de una oferta ofrece «Abrir
+ * Ubicación» solo si hay algo que abrir). `offersProject` es el proyecto
+ * Ofertas con sus definiciones de campo (puede ser null).
+ */
+export function offerLocationOfTask(task, offersProject) {
+  if (!task || !isOffersProject(offersProject)) return "";
+  if (!getTaskProjectIds(task).includes(offersProject.id)) return "";
+  const field = findOfferLocationField(offersProject);
+  const value = field && task.customFields ? task.customFields[field.id] : "";
+  return typeof value === "string" ? value : "";
 }
 
 /**

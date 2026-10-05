@@ -39,6 +39,8 @@ import { openSearchModal } from "./components/search-modal.js";
 import { openAccountModal } from "./components/account-modal.js";
 import { openTeamAdminModal } from "./components/team-admin-modal.js";
 import { openDepartmentAccessModal } from "./components/department-access-modal.js";
+import { openOutlookBridgeModal } from "./components/outlook-bridge-modal.js";
+import { startOutlookListener, stopOutlookListener } from "./outlook-listener.js";
 import { openAsanaImportModal } from "./components/asana-import-modal.js";
 import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal.js";
 import { openQuickCreateModal } from "./components/quick-create-modal.js";
@@ -295,11 +297,17 @@ function cleanup() {
   removeBulkToolbar();
   resetNotificationUi();
   notifBellEl.hidden = true;
+  stopOutlookListener(); // v61: ya no hay sesión que atienda las ofertas de Outlook
 }
 
 function bootstrap() {
   if (unsubUsers) unsubUsers();
   unsubUsers = subscribeToAllUsers((users) => { teamMembers = users; renderShell(); });
+
+  // v61: mientras Chusy esté abierto con la sesión iniciada, atiende las
+  // ofertas que deje la macro de Outlook (idempotente: bootstrap() se repite
+  // con cada cambio del perfil y la escucha no se reinicia — ver outlook-listener.js).
+  startOutlookListener({ user: currentUser, getCommercialOptions });
 
   if (unsubNotifications) unsubNotifications();
   notifBellEl.hidden = false;
@@ -567,6 +575,7 @@ function renderShell() {
     onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
     onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive) }),
+    onOpenOutlookBridge: () => openOutlookBridgeModal({ currentUser }),
     onOpenAsanaImport: () => openAsanaImportModal({ teamMembers, currentUser }),
     onOpenQuickCreateAdmin: () => openQuickCreateAdminModal({ currentUser, quickCreateEnabled }),
     onOpenProjectProperties: (project) => openProjectProperties(project),

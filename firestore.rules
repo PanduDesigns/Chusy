@@ -57,6 +57,21 @@ rules_version = '2';
 //    esté deshabilitado para todo el mundo salvo admins); solo un admin
 //    puede crear, editar o borrar un producto — es contenido de
 //    configuración del equipo, no de un proyecto concreto.
+//  - meta/outlookBridge: `{key}` — la clave compartida con la macro de
+//    Outlook (v61, «Conexión con Outlook»). Solo un admin la lee o la
+//    cambia; borrarla apaga la conexión.
+//  - offerInbox/{id}: peticiones de oferta que deja la macro «Crear
+//    carpeta de proyecto» de Outlook para que la pestaña de Chusy abierta
+//    de su destinatario (`targetEmail`) cree la oferta (v61). Es la ÚNICA
+//    colección donde se puede escribir SIN sesión iniciada — la macro la
+//    usa por REST —, y por eso: (1) crear exige la clave de
+//    meta/outlookBridge, con los campos y tamaños exactos; (2) solo
+//    el destinatario (con sesión) puede listarlas y anotar el resultado
+//    (status, claimedBy, taskId, finalName, message); (3) leer UNA por su
+//    id y borrarla lo puede hacer quien la conozca — el id lo reparte
+//    Firestore al crearla (20 caracteres al azar: no se adivina) y es lo que
+//    usa la macro para saber si Chusy la atendió y para recogerla después;
+//    listar o enumerar, no.
 //
 // Cuentas eliminadas: "Eliminar usuario" (panel de administración) NO
 // borra el documento de Firestore ni la cuenta de Firebase Auth (borrar la
@@ -167,6 +182,50 @@ service cloud.firestore {
     match /meta/quickCreate {
       allow read: if isActiveUser();
       allow write: if isAdmin();
+    }
+
+    // ---- Oferta desde Outlook (v61, apartado «Oferta desde Outlook» del
+    // README): la clave compartida con la macro y el buzón de peticiones ----
+    match /meta/outlookBridge {
+      allow read, write: if isAdmin();
+    }
+
+    match /offerInbox/{requestId} {
+      // Sin sesión a propósito (la macro de Outlook no inicia sesión): la
+      // clave es lo que impide que cualquiera que conozca el proyecto de
+      // Firebase deje peticiones. `get()` sobre un documento que no existe
+      // (puente apagado) o sin `key` hace fallar la regla = denegado.
+      allow create: if
+        request.resource.data.keys().hasOnly(['key', 'targetEmail', 'name', 'location', 'commercial', 'description', 'status']) &&
+        request.resource.data.keys().hasAll(['key', 'targetEmail', 'name', 'location', 'commercial', 'description', 'status']) &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.targetEmail is string &&
+        request.resource.data.targetEmail.size() > 2 && request.resource.data.targetEmail.size() <= 200 &&
+        request.resource.data.targetEmail == request.resource.data.targetEmail.lower() &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 300 &&
+        request.resource.data.location is string && request.resource.data.location.size() <= 1000 &&
+        request.resource.data.commercial is string && request.resource.data.commercial.size() <= 200 &&
+        request.resource.data.description is string && request.resource.data.description.size() <= 100000 &&
+        request.resource.data.key is string &&
+        request.resource.data.key == get(/databases/$(database)/documents/meta/outlookBridge).data.key;
+
+      // Una por su id (la macro mira si Chusy ya la atendió) — sin listar.
+      allow get: if true;
+      allow list: if isActiveUser() &&
+        'email' in request.auth.token &&
+        resource.data.targetEmail == request.auth.token.email.lower();
+
+      // Solo la pestaña de su destinatario anota quién se la queda y cómo terminó.
+      allow update: if isActiveUser() &&
+        'email' in request.auth.token &&
+        resource.data.targetEmail == request.auth.token.email.lower() &&
+        request.resource.data.status in ['processing', 'created', 'error'] &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claimedBy', 'taskId', 'finalName', 'message']);
+
+      // La macro la recoge al terminar (o la cancela si nadie la atiende);
+      // el destinatario también la limpia. Lleva el texto de un correo.
+      allow delete: if true;
     }
 
     // ---- Proyectos (visibles para todo el equipo) ----
