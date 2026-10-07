@@ -62,6 +62,7 @@ Gestor de tareas multiusuario inspirado en Asana y hecho a medida para el equipo
 | Cambiar qué rutas se reconocen en una descripción | `findLocationInDescription()` en `js/location.js` |
 | Nuevo tipo de notificación | Campo `type` de `notifications/{id}` (`js/data/notifications.js`, `js/components/notification-bell.js`) |
 | Cambiar permisos de datos | `firestore.rules` y republicar. Roles, departamentos y Métricas son solo comprobaciones de interfaz |
+| Cambiar qué tareas se bajan al entrar, o qué vistas piden las de todos los proyectos | `js/task-loader.js` y las llamadas `taskLoader.ensureProject()` / `ensureAll()` de `app.js` (`selectProject`, `selectTimeline`, `selectMetrics`, `openSearch`). El porqué, en 3.11 y 7.6 |
 | Cambiar el nombre «Chusy» | `index.html` y `js/components/sidebar.js` |
 
 ---
@@ -166,6 +167,12 @@ Gestor de tareas multiusuario inspirado en Asana y hecho a medida para el equipo
 - **Personas:** cada persona de Asana se lista con un desplegable para equivaler a una cuenta real (solo cuentas ya registradas). Sin equivalencia queda como **usuario ficticio** (`asana:<gid>`): sus tareas y comentarios se ven, pero no puede entrar ni se ofrece al asignar. Al aplicar una equivalencia se reescriben sus tareas y comentarios importados; la tabla está siempre disponible en el panel.
 - Las **subtareas** de Asana entran como tareas normales (con una referencia a la tarea de origen en la descripción); los **adjuntos no se importan**. La «zona de riesgo» borra todo lo importado (también el archivo cargado y la tabla de equivalencias) sin tocar lo creado a mano.
 
+### 3.11 Carga de datos y lecturas de Firestore
+
+- **Qué se descarga y cuándo (v66).** Al iniciar sesión se abren, una sola vez por cuenta, las escuchas de proyectos, personas, etiquetas, avisos, Creación Rápida y «Mis tareas» (más las tareas de Ofertas, para quien la ve). Las **tareas de un proyecto** se escuchan al abrirlo y se quedan escuchadas hasta cerrar la sesión: volver a él no lo vuelve a bajar. Las de **todos** los proyectos solo se piden al entrar en la línea de tiempo global, en Métricas o al abrir el buscador (⌘/Ctrl+K), y también se quedan escuchadas. La lista de proyectos **archivados** solo se pide al entrar en Archivo.
+- **Lo que se nota.** La primera vez de cada sesión que se abre una de esas tres vistas sale «Cargando las tareas de todos los proyectos…» hasta que llegan (un par de segundos con muchas tareas). El buscador avisa con un mensaje, espera a que lleguen (hasta 8 s; si una consulta fallara, abre con lo que haya) y abre; las siguientes veces abre al instante. Archivo muestra «Cargando los proyectos archivados…» la primera vez.
+- **Por qué.** Cada documento que baja cuenta como una lectura, y cada cambio llega —y cuenta— a cada navegador que escucha ese proyecto. Las cifras y los límites del plan gratuito están en 7.6.
+
 ---
 ## 4. Estructura del proyecto
 
@@ -179,7 +186,8 @@ assets/
   abrir-ubicacion/                                      Ayudante de Windows de «Abrir Ubicación»
   outlook/                                              Macro CrearCarpetaProyecto.bas + LEEME.txt
 js/
-  app.js                  Orquestador: sesión, estado en memoria, enrutado simple, suscripciones, avisos,
+  app.js                  Orquestador: sesión, estado en memoria, enrutado simple, suscripciones (se abren una vez por cuenta;
+                          las de tareas, bajo demanda), avisos,
                           Propiedades/conversión de ofertas, filtros recordados (Mis tareas, Ofertas)
   firebase-config.js      Configuración de Firebase (NO sobrescribir) · firebase-init.js: inicializa auth y db
   auth.js                 Registro, login, roles y perfil (createMissingProfile, whileWritingOwnProfile)
@@ -198,6 +206,8 @@ js/
                           y findLocationInDescription (la ruta escrita en una descripción, para «Convertir en oferta»)
   outlook-offer.js        Helpers puros de «Oferta desde Outlook» (texto → HTML, nombre único, planOfferFromRequest…)
   outlook-listener.js     Atiende las peticiones de la macro de Outlook (offerInbox) mientras hay sesión
+  task-loader.js          Escuchas de tareas bajo demanda (v66): proyecto abierto, Ofertas, y todos solo para la línea global,
+                          Métricas y el buscador. Sin Firestore ni DOM: recibe la función que suscribe
   task-filters.js         Filtrado y ordenación compartidos por todas las vistas (+ filtros ↔ formato guardable)
   data/                   Acceso a Firestore
     projects.js           CRUD de proyectos (borrado en cascada, archivado, secciones), visibilidad por departamento
@@ -285,6 +295,18 @@ js/
 - Las fechas clave del proyecto no se marcan en el Excel, en el Calendario ni en la línea de tiempo global.
 - «Entregadas» y «Cerradas» se rellenan solas al completar, reabrir o convertir, pero no al revés (arrastrar una tarjeta a esas secciones no completa ni convierte).
 
+**Rendimiento y lecturas de Firestore**
+
+- Ofertas se sigue escuchando entera al iniciar sesión para quien la ve (las sugerencias de Comercial y la macro de Outlook la leen de forma síncrona); pesará más a medida que acumule ofertas «Entregadas» y «Cerradas». Idea: pedirla bajo demanda y darles una vía asíncrona.
+- Las tareas completadas se siguen bajando mientras su proyecto no se archive (la línea global solo pinta las abiertas, pero Métricas y el buscador usan todas). Idea: no escuchar las completadas hace más de N meses salvo que se pidan.
+- Caché persistente de Firestore: descartada en la v66 (motivos en 7.6); reconsiderar solo si la gráfica de «Uso» dice que merece la pena.
+
+**Infraestructura (decisión abierta)**
+
+- En octubre de 2026 se valoró mover la base de datos y la web al servidor/NAS de la empresa (más control, archivos adjuntos sin pasar por Firebase, login con cuentas de empresa, sin cuotas). Se decidió optimizar las lecturas primero y seguir en Firebase por ahora.
+- Si se retoma: lo primero es que Informática asuma el servidor (parches, copias fuera del NAS, acceso solo por red interna/VPN, HTTPS válido y la web servida desde el mismo servidor, que dejaría GitHub Pages). Por fases: aislar la capa de datos mientras se sigue en Firebase (`js/data/` ya es casi esa frontera), construir el backend (cuentas, permisos, tiempo real, archivos en el NAS) con piezas estándar —PostgreSQL y una API pequeña; PocketBase seguía por debajo de la 1.0 a mediados de 2026 y su web desaconseja usarlo todavía en aplicaciones críticas—, migrar con un script, piloto en paralelo y Firebase como respaldo de solo lectura. Las contraseñas no se copian bien: cada persona fijaría una nueva.
+- Los **archivos adjuntos** hoy son solo enlaces: Cloud Storage de Firebase exige el plan Blaze (tarjeta) desde el 3 de febrero de 2026. Opciones valoradas: Blaze; archivos en el NAS con un servicio de subida pequeño; o enlazar el archivo de la carpeta del proyecto en el NAS y abrirlo con el ayudante de «Abrir Ubicación» (hoy solo abre carpetas).
+
 **Abrir Ubicación y Outlook**
 
 - El ayudante de «Abrir Ubicación» es solo para Windows y se instala a mano, un PC cada vez; no hay versión Mac/Linux ni forma de bajarlo desde Chusy (por ejemplo desde «Mi cuenta»).
@@ -307,6 +329,9 @@ js/
 - **Plantilla Excel Martech:** se edita tocando el XML del `.xlsm` (nunca con SheetJS/openpyxl sin conservar el VBA, que pierde macros y botones). El código conserva el estilo de cada celda, vacía los huecos nativos (filas 13-23, 25 y 27-33; salta la fila 24 «OBSERVACIONES» y la 26, hueco fijo), clona la fila 27 más allá de esas 19, sincroniza `F10` («AÑO») con `D9` y calcula en JS los valores cacheados de la cabecera de fechas. Se descarga como `.xlsm`. Ampliar las 40 columnas de semana exigiría reescribir a mano la cadena de fórmulas de fecha. La fuente base de jsPDF no tiene el glifo ◆: en el PDF se usa •.
 - **`attachTextSuggest()`** debe llamarse **antes** de añadir el listener `change` propio del campo (el ajuste automático depende de ese orden).
 - **Seeds exclusivos:** la comprobación de «ya existe» solo mira proyectos **no archivados**: si se archiva o se borra Ofertas, la próxima vez que un admin entre se crea una copia nueva y vacía. Archivarla o borrarla, por tanto, solo a conciencia.
+- **Tareas bajo demanda (`task-loader.js`, v66):** `globalTasksByProject` ya NO tiene las tareas de todos los proyectos, solo las de los que se han pedido (el abierto, los visitados, Ofertas para quien la ve). Una vista nueva que necesite las de varios proyectos debe llamar a `taskLoader.ensureAll()` al entrar y comprobar `taskLoader.isAllLoaded()` antes de pintar (o esperar con `whenAllLoaded()`), o mostrará cifras a medias, como ya hacen la línea global, Métricas y el buscador. Un proyecto visitado se queda escuchado hasta cerrar la sesión; al desaparecer de la lista (archivado, borrado, sin acceso) se deja de escuchar.
+- **`bootstrap()` abre las escuchas una sola vez por cuenta (v66):** se llama con cada cambio del perfil (también al cambiar el ancho u orden de una columna, que se guarda en el perfil), y antes reabría siete escuchas cada vez. Ahora, si `sessionUid` ya es el de la cuenta, solo vuelve a filtrar `rawProjects` con el perfil nuevo (`handleProjectsList()`) y repinta. Una escucha nueva que dependa del perfil (departamento, rol…) no basta con abrirla en `bootstrap()`: hay que volver a aplicar ese perfil en esa rama.
+- **Archivados bajo demanda (v66):** `archivedProjects` solo se rellena al entrar en Archivo (`ensureArchivedProjects()`); quien quiera usar esa lista en otro sitio debe pedirla antes.
 
 ### 7.2 Datos y permisos
 
@@ -349,6 +374,15 @@ js/
 - El arreglo del registro tiene **dos mitades**: la de `js/auth.js` (no cortarse la sesión a sí mismo durante el alta) arregla los registros nuevos aunque `firestore.rules` no esté republicada; la que repara una cuenta que **ya** está sin perfil necesita la regla nueva (`get` del perfil propio mientras no existe). Sin ella, esa persona sigue viendo «No se pudo cargar tu perfil» y hay que crearle el documento a mano (apartado 3.5).
 - La reparación del perfil pone el nombre de la cuenta de Auth, no el que la persona tecleó si el registro se cortó antes de guardarlo: es lo anterior a la `@` (se cambia desde «Mi cuenta»). Se intenta **una vez por sesión** y **nunca con un «no existe» que venga de la caché**: sin red no se repara nada y la app espera al servidor (en un arranque sin conexión se queda en la pantalla de carga hasta que vuelva).
 - Una cuenta **eliminada** no ve el aviso «Esta cuenta ha sido desactivada…» (las reglas le deniegan leer su perfil, así que ve el mensaje genérico); se dejó así para no ampliar lo que puede leer.
+
+### 7.6 Consumo de Firestore (plan gratuito)
+
+- **Límites del plan gratuito (Spark):** 50.000 lecturas, 20.000 escrituras y 20.000 borrados al día, 1 GiB guardado y 10 GiB/mes de salida. El cupo diario se renueva hacia la medianoche de California (las 9:00 en España): si se agota, la app deja de responder hasta entonces, en plena jornada. Cloud Storage (archivos adjuntos) exige el plan Blaze desde el 3 de febrero de 2026.
+- **Qué gasta lecturas:** cada documento que entra o cambia en una consulta escuchada cuenta como una lectura, y cada navegador cuenta aparte. Una escucha que se cierra y se vuelve a abrir (sin caché persistente) cobra la consulta entera otra vez; recargar con Ctrl+F5 también. Las escrituras casi no pesan.
+- **Referencia (primera semana de octubre de 2026, unas 10 personas, v65):** entre semana 11.000-19.000 lecturas al día (pico de 28.000 en un día de pruebas con recargas Ctrl+F5) y menos de 50 escrituras (pico de 167). Se mira en la consola de Firebase → Firestore → pestaña «Uso». Hasta la v65, además de cada sesión (todas las tareas de todos los proyectos), cada cambio de perfil reabría siete escuchas.
+- **Proyección (estimación, no medida):** con los mismos hábitos por persona, 20 personas serían ≈ ×2 las lecturas y 30 ≈ ×3, y las tareas acumuladas encarecen cada sesión. En el plan Blaze costaría céntimos (desde 0,03 USD por 100.000 lecturas, según la ubicación de la base de datos), pero exige tarjeta y las alertas de presupuesto avisan sin cortar el gasto. Archivar los proyectos terminados sigue siendo la palanca sin código: sus tareas no se escuchan nunca.
+- **Caché persistente (`persistentLocalCache`) — descartada en la v66:** solo evita volver a cobrar la consulta si la desconexión dura menos de 30 minutos, deja datos de la empresa guardados en el navegador y se mezcla con la lógica de «primer snapshot» de las notificaciones (la primera tanda puede salir de la caché y la del servidor llegar como `added`, con avisos falsos). Si se retoma, habría que tratar `snapshot.metadata.fromCache`.
+- **Para comprobar el efecto de una optimización:** comparar la gráfica de «Uso» de una semana con la de otra con hábitos parecidos.
 
 ---
 ## 8. Historial de cambios
@@ -400,3 +434,4 @@ Cada número es un ZIP completo (`Chusy-N.zip`); el último es la fuente de la v
 - **README reorganizado (sin cambios de código, tras la v63)** — De 477 KB y 1 438 líneas a 69 KB y 391 líneas. Se quitaron las anotaciones de versión dentro de cada función, los avisos de «no probado» de cosas que luego se usaron sin problema, los recuentos de pruebas y la prosa de justificación; se añadió el apartado 2 (flujo de entrega y «Dónde tocar para…»); las trampas técnicas, que estaban repartidas por el historial, pasan al apartado 7.1; y este historial queda en una a cuatro líneas por versión. No cambia ningún archivo de código: la v64 será la siguiente entrega con cambios.
 - **v63 → v64** — **«Convertir en oferta»**: opción nueva en el clic derecho de una tarea (Lista, Tablero, Mis tareas y línea de tiempo) y en el «···» de la selección múltiple («Convertir en ofertas»), solo para quien tiene acceso a Ofertas. Traslada la tarea a Ofertas («Nuevas», o «Entregadas» si ya estaba completada) con versión A1, histórico «A1 · Versión original» y el Sector según el departamento de quien convierte (la misma regla que al crear una oferta a mano o desde Outlook). Archivo nuevo `js/components/convert-to-offers.js`; `canBecomeOffer()` y `planTaskToOffer()` en `offers.js`; `bulkConvertToOffers()` en `data/tasks.js`; `openTaskContextMenu()` recibe ahora `currentUser` (Tablero y línea de tiempo lo reciben desde `app.js`). Sin cambios en `firestore.rules`, CSS ni macro: al publicar, subir los archivos y Ctrl+F5.
 - **v64 → v65** — **«Convertir en oferta» toma la Ubicación de la descripción**: si la descripción de la tarea trae una ruta de carpeta (letra de unidad, ruta de red o `file:///`), la primera pasa a ser la Ubicación de la oferta (solo si el campo estaba vacío; la descripción no se modifica). La confirmación muestra la ruta y el aviso final lo dice. Nuevo `findLocationInDescription()` en `location.js` (puro, sin DOM: pasa el HTML del editor a texto con un salto por bloque y busca la ruta), `offerLocationFromDescription()` en `offers.js` y cambios en `convert-to-offers.js`. Sin cambios en reglas, CSS ni macro: al publicar, subir los archivos y Ctrl+F5.
+- **v65 → v66** — **Menos lecturas de Firestore** (tras ver la gráfica de «Uso»: unas 10 personas, 11.000-19.000 lecturas al día de un cupo de 50.000, y con 20-30 personas se superaría en los días fuertes): (1) las **tareas de cada proyecto se escuchan bajo demanda**, en vez de las de todos al iniciar sesión: el proyecto que se abre (y se queda escuchado hasta cerrar la sesión), Ofertas para quien la ve, y todos solo al entrar en la línea de tiempo global, en Métricas o al abrir el buscador, que muestran «Cargando…» o esperan a que lleguen; (2) **`bootstrap()` ya no reabre las escuchas con cada cambio de perfil**: antes, cada clic de ancho u orden de columna o cambio de tema volvía a bajar proyectos, personas, etiquetas, avisos, «Mis tareas» y archivados (siete escuchas por cambio); ahora se abren una vez por cuenta y, al cambiar el perfil, solo se vuelve a filtrar la lista de proyectos y se repinta; (3) la lista de **archivados** solo se pide al entrar en Archivo. Archivo nuevo `js/task-loader.js` (sin Firestore ni DOM); cambios en `app.js` (`taskLoader`, `handleProjectsList()`, `ensureArchivedProjects()`, `openSearch()` / `openSearchNow()` y los avisos de «Cargando…», con la clase `.empty-state` que ya existía). Sin cambios en reglas, CSS ni macro: al publicar, subir los archivos (incluido el nuevo `task-loader.js`) y Ctrl+F5. Para ver el efecto, comparar la gráfica «Uso» de Firestore de una semana con la de la v65.

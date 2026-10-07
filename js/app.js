@@ -8,6 +8,7 @@ import { createProject, updateProject, subscribeToAllProjects, subscribeToArchiv
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
 import { convertOfferToProject } from "./data/offer-conversion.js";
 import { getTask, subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
+import { createTaskLoader } from "./task-loader.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
 import { subscribeToNotifications } from "./data/notifications.js";
@@ -82,9 +83,27 @@ let timelineExpandedSections = new Set();
 let activeFilters = {}; // { [filterKey]: Set(valores) }
 let searchText = ""; // cuadro de búsqueda de la barra de filtros — transitorio, no se recuerda entre sesiones (se reinicia en cada selectProject/selectMyTasks/selectTimeline, igual que activeFilters salvo en Mis tareas)
 let sortState = { column: null, direction: "asc" };
-let globalTasksByProject = {}; // { [projectId]: tasks[] } — línea de tiempo global y buscador
 let notifications = [];
-let unsubGlobalTasks = {}; // { [projectId]: unsubscribeFn }
+// v66: las tareas de cada proyecto se escuchan SOLO cuando hacen falta (ver
+// task-loader.js): el proyecto que se abre, Ofertas para quien la ve, y todos
+// a la vez únicamente al entrar en la línea de tiempo global, en Métricas o al
+// abrir el buscador. Antes se escuchaban todos nada más iniciar sesión.
+const taskLoader = createTaskLoader({
+  subscribe: subscribeToProjectTasks,
+  // El panel de métricas usa esta misma bolsa de datos (ver
+  // getAllProjectTasksDeduped) — sin este aviso se quedaría desactualizado si
+  // alguien completa/crea una tarea mientras un admin lo tiene abierto.
+  onChange: () => { if (mode === "timeline" || mode === "metrics") renderShell(); },
+});
+// { [projectId]: tasks[] } — objeto VIVO del cargador (no se reasigna). Solo trae
+// los proyectos que se han pedido: fuera de la línea de tiempo global, Métricas
+// y el buscador (que antes piden todos con taskLoader.ensureAll()) pueden faltar.
+const globalTasksByProject = taskLoader.tasksByProject;
+let rawProjects = []; // v66: la última lista de proyectos SIN filtrar por departamento (ver handleProjectsList)
+let projectsLoaded = false; // ya llegó la primera lista de proyectos
+let archivedProjectsLoaded = false; // v66: la lista de archivados solo se pide al entrar en Archivo
+let searchLoadPending = false; // el buscador está esperando a que lleguen todas las tareas
+let sessionUid = null; // v66: cuenta para la que bootstrap() ya abrió las escuchas — ver bootstrap()
 // Si el botón "Nueva cabina" (topbar de un proyecto, ver Creación Rápida en
 // el menú de usuario) está abierto a todo el equipo o reservado a admins —
 // en tiempo real, para que se note al momento en cualquier proyecto abierto
@@ -285,10 +304,10 @@ onAuthChange((profile, message) => {
 
 function cleanup() {
   [unsubProjects, unsubArchivedProjects, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications, unsubQuickCreateConfig].forEach((fn) => fn && fn());
-  Object.values(unsubGlobalTasks).forEach((fn) => fn && fn());
+  taskLoader.stopAll();
   unsubProjects = unsubArchivedProjects = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = unsubQuickCreateConfig = null;
-  unsubGlobalTasks = {}; globalTasksByProject = {};
-  projects = []; archivedProjects = []; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
+  projects = []; rawProjects = []; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
+  sessionUid = null; searchLoadPending = false;
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
   activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
   quickCreateEnabled = false;
@@ -301,16 +320,31 @@ function cleanup() {
 }
 
 function bootstrap() {
-  if (unsubUsers) unsubUsers();
-  unsubUsers = subscribeToAllUsers((users) => { teamMembers = users; renderShell(); });
-
   // v61: mientras Chusy esté abierto con la sesión iniciada, atiende las
   // ofertas que deje la macro de Outlook (idempotente: bootstrap() se repite
   // con cada cambio del perfil y la escucha no se reinicia — ver outlook-listener.js).
   startOutlookListener({ user: currentUser, getCommercialOptions });
+  notifBellEl.hidden = false;
+
+  // v66: bootstrap() se repite con cada cambio del perfil (cambiar el ancho u
+  // orden de una columna, el tema, el departamento o el rol desde un admin…) y
+  // hasta ahora cada repetición CERRABA y volvía a ABRIR todas las escuchas de
+  // abajo — con lo que Firestore volvía a cobrar la lista de proyectos, de
+  // personas, las etiquetas, los avisos y todas las tareas de «Mis tareas» en
+  // cada clic de columna. Ahora las escuchas se abren una sola vez por cuenta; en
+  // las repeticiones solo se aplica el perfil nuevo: se vuelve a filtrar la
+  // lista de proyectos con el departamento/rol de ahora y se repinta.
+  if (sessionUid === currentUser.uid) {
+    if (projectsLoaded) handleProjectsList(rawProjects); // (ya repinta)
+    else renderShell();
+    return;
+  }
+  sessionUid = currentUser.uid;
+
+  if (unsubUsers) unsubUsers();
+  unsubUsers = subscribeToAllUsers((users) => { teamMembers = users; renderShell(); });
 
   if (unsubNotifications) unsubNotifications();
-  notifBellEl.hidden = false;
   unsubNotifications = subscribeToNotifications(
     currentUser.uid,
     (list) => {
@@ -340,42 +374,11 @@ function bootstrap() {
   if (unsubMyTasks) unsubMyTasks();
   unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; renderShell(); });
 
-  if (unsubArchivedProjects) unsubArchivedProjects();
-  unsubArchivedProjects = subscribeToArchivedProjects((list) => { archivedProjects = list; if (mode === "archive") renderShell(); });
-
   if (unsubProjects) unsubProjects();
   unsubProjects = subscribeToAllProjects((allProjects) => {
-    // v55: filtrado por departamento ANTES de guardarlo en `projects` — el
-    // único sitio donde se hace esta comprobación, así que todo lo que se
-    // alimenta de esta variable (barra lateral, buscador, línea de tiempo
-    // global, filtros por proyecto...) ya solo ve las secciones
-    // exclusivas a las que esta cuenta tiene acceso, sin repetir la
-    // comprobación en cada uno de esos sitios — ver isProjectVisibleToUser
-    // en data/projects.js.
-    projects = allProjects.filter((p) => isProjectVisibleToUser(p, currentUser));
-    syncGlobalTimelineSubscriptions();
-    if (mode === "project" && currentProjectId && !projects.find((p) => p.id === currentProjectId)) {
-      // La sección recordada (o la que se acaba de seleccionar) ya no
-      // existe, se archivó, o (v55) es una sección exclusiva a la que esta
-      // cuenta ya no tiene acceso — los tres casos caen en lo mismo:
-      // "projects" (ya filtrado arriba) no la tiene. Igual que si no
-      // hubiera nada guardado, el destino por defecto es "Mis tareas".
-      selectMyTasks();
-      return;
-    }
-    // Sembrado de secciones exclusivas (v55) — como mucho una vez por
-    // sesión, y solo si esta cuenta es admin (así dos admins con sesión
-    // abierta a la vez no intentan crear cada uno su propia copia de
-    // Ofertas con el mismo primer snapshot). Se comprueba contra
-    // allProjects SIN filtrar: cualquier cuenta activa ya puede LEER un
-    // proyecto exclusivo aunque su departamento no la deje VERLO en la
-    // interfaz (ver isProjectVisibleToUser), así que mirar la lista sin
-    // filtrar es lo correcto para decidir si ya existe.
-    if (!hasSeededExclusiveProjects && currentUser.role === "admin") {
-      hasSeededExclusiveProjects = true;
-      ensureExclusiveProjectsSeeded(allProjects, currentUser.uid).catch((e) => console.error("ensureExclusiveProjectsSeeded:", e));
-    }
-    renderShell();
+    rawProjects = allProjects;
+    projectsLoaded = true;
+    handleProjectsList(allProjects);
   });
 
   // Solo una vez por sesión: aterriza en la última sección que esta
@@ -388,35 +391,42 @@ function bootstrap() {
 }
 
 /**
- * La línea de tiempo global y el buscador necesitan las tareas de TODOS
- * los proyectos a la vez. En vez de una consulta sin filtro (que las
- * reglas de seguridad rechazarían, porque no pueden garantizar de
- * antemano que todo lo que devuelva sea legible), mantenemos un listener
- * por proyecto — a la escala de un departamento no supone ningún
- * problema, y así reutilizamos exactamente las mismas reglas que ya
- * funcionan para la vista de un solo proyecto.
+ * Lo que se hace cada vez que llega la lista de proyectos — y, desde la v66,
+ * también cuando solo cambia el perfil (ver bootstrap()): recibe la lista SIN
+ * filtrar y deja en `projects` la que esta cuenta puede ver.
  */
-function syncGlobalTimelineSubscriptions() {
-  const currentIds = new Set(projects.map((p) => p.id));
-  Object.keys(unsubGlobalTasks).forEach((id) => {
-    if (!currentIds.has(id)) {
-      unsubGlobalTasks[id]();
-      delete unsubGlobalTasks[id];
-      delete globalTasksByProject[id];
-    }
-  });
-  projects.forEach((p) => {
-    if (!unsubGlobalTasks[p.id]) {
-      unsubGlobalTasks[p.id] = subscribeToProjectTasks(p.id, (tasks) => {
-        globalTasksByProject[p.id] = tasks;
-        // El panel de métricas usa esta misma bolsa de datos (ver
-        // getAllProjectTasksDeduped) — sin este mode, se quedaría
-        // desactualizado si alguien completa/crea una tarea mientras un
-        // admin tiene el panel abierto, hasta cambiar de sección y volver.
-        if (mode === "timeline" || mode === "metrics") renderShell();
-      });
-    }
-  });
+function handleProjectsList(allProjects) {
+  // v55: filtrado por departamento ANTES de guardarlo en `projects` — el
+  // único sitio donde se hace esta comprobación, así que todo lo que se
+  // alimenta de esta variable (barra lateral, buscador, línea de tiempo
+  // global, filtros por proyecto...) ya solo ve las secciones
+  // exclusivas a las que esta cuenta tiene acceso, sin repetir la
+  // comprobación en cada uno de esos sitios — ver isProjectVisibleToUser
+  // en data/projects.js.
+  projects = allProjects.filter((p) => isProjectVisibleToUser(p, currentUser));
+  taskLoader.syncProjects(projects, isOffersProject); // v66: solo Ofertas (y lo que ya se pidió); ver task-loader.js
+  if (mode === "project" && currentProjectId && !projects.find((p) => p.id === currentProjectId)) {
+    // La sección recordada (o la que se acaba de seleccionar) ya no
+    // existe, se archivó, o (v55) es una sección exclusiva a la que esta
+    // cuenta ya no tiene acceso — los tres casos caen en lo mismo:
+    // "projects" (ya filtrado arriba) no la tiene. Igual que si no
+    // hubiera nada guardado, el destino por defecto es "Mis tareas".
+    selectMyTasks();
+    return;
+  }
+  // Sembrado de secciones exclusivas (v55) — como mucho una vez por
+  // sesión, y solo si esta cuenta es admin (así dos admins con sesión
+  // abierta a la vez no intentan crear cada uno su propia copia de
+  // Ofertas con el mismo primer snapshot). Se comprueba contra
+  // allProjects SIN filtrar: cualquier cuenta activa ya puede LEER un
+  // proyecto exclusivo aunque su departamento no la deje VERLO en la
+  // interfaz (ver isProjectVisibleToUser), así que mirar la lista sin
+  // filtrar es lo correcto para decidir si ya existe.
+  if (!hasSeededExclusiveProjects && currentUser.role === "admin") {
+    hasSeededExclusiveProjects = true;
+    ensureExclusiveProjectsSeeded(allProjects, currentUser.uid).catch((e) => console.error("ensureExclusiveProjectsSeeded:", e));
+  }
+  renderShell();
 }
 
 function selectProject(projectId) {
@@ -441,6 +451,10 @@ function selectProject(projectId) {
 
   unsubCurrentProject = subscribeToProject(projectId, (project) => { currentProject = project; renderShell(); });
   unsubCurrentTasks = subscribeToProjectTasks(projectId, (tasks) => { currentTasks = tasks; renderShell(); });
+  // v66: además se pide al cargador de tareas, que lo mantiene escuchado hasta
+  // cerrar la sesión: al volver a este proyecto no se vuelve a bajar entero. Es
+  // la MISMA consulta que la de arriba, así que Firestore no cobra dos veces.
+  taskLoader.ensureProject(projectId);
   renderShell();
 }
 
@@ -458,13 +472,41 @@ function selectTimeline() {
   saveLastLocation({ mode: "timeline" });
   activeFilters = {};
   searchText = "";
+  taskLoader.ensureAll(); // v66: la línea global es de las pocas vistas que necesitan las tareas de todos los proyectos
   renderShell();
 }
 
 function selectArchive() {
   mode = "archive";
   saveLastLocation({ mode: "archive" });
+  ensureArchivedProjects();
   renderShell();
+}
+
+/**
+ * v66: la lista de proyectos archivados solo se pide al entrar en Archivo (antes
+ * se bajaba entera en cada inicio de sesión aunque nadie la abriera). Se queda
+ * escuchada hasta cerrar la sesión.
+ */
+function ensureArchivedProjects() {
+  if (unsubArchivedProjects) return;
+  unsubArchivedProjects = subscribeToArchivedProjects((list) => {
+    archivedProjects = list;
+    archivedProjectsLoaded = true;
+    if (mode === "archive") renderShell();
+  });
+  // Si la consulta fallara (el callback de error solo escribe en la consola),
+  // no dejar la pantalla en «Cargando…» para siempre.
+  setTimeout(() => {
+    if (archivedProjectsLoaded || !unsubArchivedProjects) return;
+    archivedProjectsLoaded = true;
+    if (mode === "archive") renderShell();
+  }, 10000);
+}
+
+/** Aviso de «cargando» dentro del contenido principal, con los estilos de siempre (sin CSS nuevo). */
+function loadingStateHtml(text) {
+  return `<div class="empty-state"><p>${text}</p></div>`;
 }
 
 /**
@@ -477,6 +519,7 @@ function selectMetrics() {
   if (!currentUser || (currentUser.role !== "admin" && currentUser.role !== "revisor")) { selectMyTasks(); return; }
   mode = "metrics";
   saveLastLocation({ mode: "metrics" });
+  taskLoader.ensureAll(); // v66: Métricas cuenta las tareas de todos los proyectos
   renderShell();
 }
 
@@ -591,6 +634,12 @@ function renderShell() {
   });
 
   if (mode === "archive") {
+    if (!archivedProjectsLoaded) {
+      topbarEl.innerHTML = `<span class="topbar__title">Archivo</span>`;
+      filterbarEl.innerHTML = "";
+      mainContentEl.innerHTML = loadingStateHtml("Cargando los proyectos archivados…");
+      return;
+    }
     topbarEl.innerHTML = `<span class="topbar__title">Archivo</span><span class="topbar__count">${archivedProjects.length} ${archivedProjects.length === 1 ? "proyecto" : "proyectos"}</span>`;
     filterbarEl.innerHTML = "";
     renderArchiveView(mainContentEl, {
@@ -612,6 +661,8 @@ function renderShell() {
     if (currentUser.role !== "admin" && currentUser.role !== "revisor") { selectMyTasks(); return; }
     topbarEl.innerHTML = `<span class="topbar__title">Métricas</span><span class="topbar__count">todos los proyectos</span>`;
     filterbarEl.innerHTML = ""; // resumen global, no una lista que filtrar
+    // v66: hasta que llegan las tareas de TODOS los proyectos, las cifras saldrían a medias.
+    if (!taskLoader.isAllLoaded()) { mainContentEl.innerHTML = loadingStateHtml("Cargando las tareas de todos los proyectos…"); return; }
     renderMetricsView(mainContentEl, { tasks: getAllProjectTasksDeduped(), teamMembers, projects, onOpenTask: openTask });
     return;
   }
@@ -679,6 +730,8 @@ function renderMyTasksContent() {
 
 /** Igual que renderMyTasksContent() pero para la línea de tiempo global — el topbar de este modo es estático, así que aquí solo hace falta la vista. */
 function renderTimelineContent() {
+  // v66: hasta que llegan las tareas de TODOS los proyectos, los grupos saldrían vacíos o a medias.
+  if (!taskLoader.isAllLoaded()) { mainContentEl.innerHTML = loadingStateHtml("Cargando las tareas de todos los proyectos…"); return; }
   const groups = projects.map((p) => ({
     id: p.id,
     label: p.name,
@@ -866,8 +919,9 @@ function openTask(taskId) {
 /**
  * Los valores de "Comercial" que ya existen, para sugerirlos al escribir
  * (campo Comercial de una oferta en task-modal.js y de las Propiedades de
- * un proyecto): el de cada oferta (tareas de Ofertas, que ya están todas
- * en globalTasksByProject — ver syncGlobalTimelineSubscriptions) más el de
+ * un proyecto): el de cada oferta (tareas de Ofertas, que se
+ * escuchan desde el arranque para quien la ve — v66, ver task-loader.js y
+ * handleProjectsList) más el de
  * las propiedades de cada proyecto. Sin proyectos archivados: esos no se
  * cargan fuera de la vista Archivo. Ofertas solo está en `projects` para
  * quien puede verla (admin o el departamento con acceso), así que quien no
@@ -947,6 +1001,21 @@ function goToPersonFilter(uid) {
 }
 
 function openSearch() {
+  // v66: el buscador mira las tareas de TODOS los proyectos, que ya no se bajan al
+  // iniciar sesión: la primera vez de cada sesión las pide ahora y abre cuando llegan
+  // (con un tope de espera, por si una consulta falla). Las siguientes veces ya están.
+  if (searchLoadPending) return;
+  taskLoader.ensureAll();
+  if (taskLoader.isAllLoaded()) { openSearchNow(); return; }
+  searchLoadPending = true;
+  showToast("Cargando las tareas de todos los proyectos…");
+  taskLoader.whenAllLoaded(() => {
+    searchLoadPending = false;
+    if (currentUser) openSearchNow();
+  }, 8000);
+}
+
+function openSearchNow() {
   const everyTask = [...getAllProjectTasksDeduped(), ...myTasks.filter((t) => !t.projectId)];
 
   openSearchModal({
