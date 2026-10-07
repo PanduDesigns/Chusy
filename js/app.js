@@ -697,7 +697,7 @@ function renderTimelineContent() {
     expandedSections: timelineExpandedSections, onToggleSectionExpand: toggleTimelineSectionExpanded,
     showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
     onOpenTask: openTask,
-    exportTitle: "Chusy — Línea de tiempo global", groupLabel: "Proyecto", teamMembers,
+    exportTitle: "Chusy — Línea de tiempo global", groupLabel: "Proyecto", teamMembers, currentUser,
   });
 }
 
@@ -750,7 +750,7 @@ function renderProjectContent() {
   const filteredTasks = applyTaskFilters(currentTasks, activeFilters, searchText);
 
   if (currentView === "board") {
-    renderBoardView(mainContentEl, { project: currentProject, tasks: filteredTasks, teamMembers, tagsRegistry, onOpenTask: openTask, onAddTask: openNewProjectTask });
+    renderBoardView(mainContentEl, { project: currentProject, tasks: filteredTasks, teamMembers, tagsRegistry, onOpenTask: openTask, onAddTask: openNewProjectTask, currentUser });
   } else if (currentView === "calendar") {
     renderCalendarView(mainContentEl, {
       tasks: filteredTasks,
@@ -792,7 +792,7 @@ function renderProjectContent() {
       expandedSections: timelineExpandedSections, onToggleSectionExpand: toggleTimelineSectionExpanded,
       showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
       onOpenTask: openTask,
-      exportTitle: `${currentProject.name} — Línea de tiempo`, groupLabel: "Sección", teamMembers, project: currentProject,
+      exportTitle: `${currentProject.name} — Línea de tiempo`, groupLabel: "Sección", teamMembers, project: currentProject, currentUser,
     });
   } else {
     const sortedTasks = sortTasks(filteredTasks, sortState, { teamMembers, projects });

@@ -241,7 +241,7 @@ export function renderMyTasksView(container, opts) {
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const task = tasks.find((t) => t.id === row.dataset.taskId);
-      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask);
+      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser);
     });
     // Selección múltiple al estilo Asana, igual que en la vista de Lista:
     // Ctrl/Cmd+clic añade o quita esa tarea sola; Shift+clic selecciona

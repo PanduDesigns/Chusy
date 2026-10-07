@@ -25,6 +25,7 @@ import {
 } from "../data/tasks.js";
 import { celebrateBulk } from "./celebration.js";
 import { notifyBulkAssignment } from "../data/notifications.js";
+import { convertibleToOffers, convertToOffers } from "./convert-to-offers.js";
 
 export function removeBulkToolbar() {
   document.querySelectorAll(".bulk-toolbar-anchor").forEach((a) => a.remove());
@@ -246,6 +247,9 @@ function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser,
       { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers, selectedTasks, currentUser, projects }) },
       { label: "Combinar tareas duplicadas…", icon: "⧉", onClick: () => startMergeFlow(rect, { selectedTasks }) },
       { label: "Convertir en hitos", icon: "🚩", onClick: () => runAction(bulkUpdateTasks(ids, { isMilestone: true }), "Convertidas en hitos.") },
+      // v64: solo si alguna de las seleccionadas puede serlo (todas las que
+      // aún no son ofertas) y quien pulsa tiene acceso a Ofertas.
+      ...(convertibleToOffers(selectedTasks, currentUser).length ? [{ label: "Convertir en ofertas", icon: "💼", onClick: () => convertToOffers(selectedTasks, currentUser) }] : []),
       { divider: true },
       { label: "Mover a mis tareas", icon: "🔒", onClick: () => handleMoveToMyTasks(ids, currentUser) },
     ],

@@ -33,7 +33,8 @@
 // topbar.js y las vistas) decide qué hacer con lo que devuelven.
 // ============================================================================
 
-import { getTaskSectionForProject, getTaskProjectIds } from "./utils.js";
+import { getTaskSectionForProject, getTaskProjectIds, toDate } from "./utils.js";
+import { findLocationInDescription } from "./location.js";
 
 /** `exclusiveKey` del proyecto Ofertas (ver EXCLUSIVE_PROJECT_SEEDS en data/projects.js). */
 export const OFFERS_KEY = "ofertas";
@@ -382,4 +383,94 @@ export function filterableCustomFields(project) {
   const defs = (project && project.customFieldDefs) || [];
   const location = isOffersProject(project) ? findOfferLocationField(project) : null;
   return location ? defs.filter((f) => f.id !== location.id) : defs;
+}
+
+// ----------------------------------------------------------------------------
+// v64
+// ----------------------------------------------------------------------------
+
+/**
+ * ¿Se puede convertir esta tarea en oferta? Hace falta que exista el
+ * proyecto Ofertas y que la tarea no esté ya en él, ni como proyecto
+ * principal ni como adicional (en ese caso ya ES una oferta).
+ */
+export function canBecomeOffer(offersProject, task) {
+  return isOffersProject(offersProject) && !!task && !isTaskInOffers(offersProject, task);
+}
+
+/**
+ * La Ubicación que se le pondría a `task` al convertirla en oferta: la primera
+ * ruta de carpeta escrita en su descripción (findLocationInDescription,
+ * location.js), o "" si no hay ninguna, si la tarea ya tiene una Ubicación
+ * (se respeta), si Ofertas no tiene el campo, o si la tarea no se puede
+ * convertir. La usan planTaskToOffer y la confirmación de
+ * components/convert-to-offers.js (que cuenta cuántas la tendrán).
+ */
+export function offerLocationFromDescription(offersProject, task) {
+  if (!canBecomeOffer(offersProject, task)) return "";
+  const field = findOfferLocationField(offersProject);
+  if (!field) return "";
+  const current = task.customFields ? task.customFields[field.id] : "";
+  if (typeof current === "string" && current.trim()) return "";
+  return findLocationInDescription(task.description);
+}
+
+/**
+ * Los campos de Firestore que convierten `task` en una oferta (acción
+ * «Convertir en oferta» del clic derecho y de la selección múltiple), o
+ * `null` si no se puede (ver canBecomeOffer). Es un TRASLADO COMPLETO, como
+ * «Cambiar de proyecto»: la tarea queda en Ofertas y en ningún otro proyecto
+ * (`extraProjectIds`/`extraSections` se vacían), y se le pone lo mismo que a
+ * una oferta nueva (task-modal.js, applyOfferDefaults):
+ *
+ *  - Sección: «Nuevas» o, si la tarea ya estaba completada, «Entregadas»
+ *    (la misma regla que al completar una oferta, offerSectionOnCompletionChange).
+ *    Si falta esa sección (alguien la borró), cae a «Nuevas» y, si tampoco
+ *    está, queda «Sin sección».
+ *  - Versión A1 y Sector por defecto (`defaultSector`, el del departamento de
+ *    quien convierte: defaultSectorOf en departments.js) — solo si el campo
+ *    está vacío: una tarea que ya tuviera un valor ahí lo conserva.
+ *  - Ubicación: la primera ruta de carpeta escrita en la descripción de la
+ *    tarea, si la hay (offerLocationFromDescription, v65) — solo si el campo
+ *    está vacío. La descripción no se modifica.
+ *  - Histórico con la fila «A1 · Versión original» si le falta, fechada con el
+ *    día en que se creó la tarea (igual que hace el modal al abrir una oferta
+ *    antigua). Un histórico que ya tuviera se respeta.
+ *
+ * El resto (título, descripción, responsables, fechas, etiquetas, subtareas,
+ * adjuntos, comentarios…) no se toca; los campos personalizados del proyecto
+ * de origen se quedan guardados en la tarea, aunque Ofertas no los muestre.
+ * `makeId` genera el id de la fila del histórico y `now` es la hora actual:
+ * este archivo ni genera ids ni lee el reloj.
+ */
+export function planTaskToOffer(offersProject, task, { defaultSector, makeId, now }) {
+  if (!canBecomeOffer(offersProject, task)) return null;
+
+  const nuevas = findOffersSection(offersProject, "nuevas");
+  const delivered = task.isComplete ? findOffersSection(offersProject, OFFER_SECTION_DELIVERED) : null;
+  const section = delivered || nuevas;
+
+  const customFields = { ...(task.customFields || {}) };
+  const versionField = findOfferVersionField(offersProject);
+  if (versionField && !customFields[versionField.id]) customFields[versionField.id] = OFFER_FIRST_VERSION;
+  const sector = defaultSectorValue(offersProject, defaultSector);
+  if (sector && !customFields[sector.fieldId]) customFields[sector.fieldId] = sector.value;
+  const location = offerLocationFromDescription(offersProject, task);
+  if (location) customFields[findOfferLocationField(offersProject).id] = location;
+
+  const fields = {
+    projectId: offersProject.id,
+    sectionId: section ? section.id : null,
+    extraProjectIds: [],
+    extraSections: {},
+    customFields,
+  };
+
+  const revisions = task.revisions || [];
+  if (lacksOriginalRevision(revisions)) {
+    const created = toDate(task.createdAt);
+    const createdAt = (created && !isNaN(created.getTime()) ? created : now).toISOString();
+    fields.revisions = [makeOriginalRevision({ id: makeId(), createdAt }), ...revisions];
+  }
+  return fields;
 }

@@ -22,6 +22,7 @@ import { openSectionsModal } from "../components/sections-modal.js";
 import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, wireColumnReorder, openColumnsMenu } from "../components/table-columns.js";
 import { createSelectionController } from "../components/bulk-selection.js";
 import { renderBulkToolbar, removeBulkToolbar } from "../components/bulk-toolbar.js";
+import { convertibleToOffers, convertToOffers } from "../components/convert-to-offers.js";
 
 function tagPill(name, tagsRegistry) {
   const found = (tagsRegistry || []).find((t) => t.name.toLowerCase() === name.toLowerCase());
@@ -206,7 +207,7 @@ export function renderListView(container, opts) {
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const task = tasks.find((t) => t.id === row.dataset.taskId);
-      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask);
+      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser);
     });
     // Selección múltiple al estilo Asana: Ctrl/Cmd+clic añade o quita esa
     // tarea sola; Shift+clic selecciona todo el tramo desde la última
@@ -244,7 +245,10 @@ const PRIORITY_LABELS = { urgente: "Urgente", alta: "Alta", media: "Media", baja
 function priorityColor(p) { return PRIORITY_COLORS[p] || "var(--color-line-bright)"; }
 function priorityLabel(p) { return PRIORITY_LABELS[p] || p; }
 
-export function openTaskContextMenu(x, y, task, onOpenTask) {
+// v64: `currentUser` (el perfil de quien tiene la sesión) decide si se ofrece
+// «Convertir en oferta» — solo a quien tiene acceso a Ofertas — y qué Sector
+// se les pone. Sin él (una vista que no lo pase) la opción simplemente no sale.
+export function openTaskContextMenu(x, y, task, onOpenTask, currentUser) {
   // v61: una oferta con la Ubicación rellena ofrece «Abrir Ubicación» (el
   // mismo botón que la ficha de la oferta). Este menú lo comparten Lista,
   // Tablero, Mis tareas y la línea de tiempo, así que sale en todas.
@@ -255,6 +259,7 @@ export function openTaskContextMenu(x, y, task, onOpenTask) {
       { label: task.isComplete ? "Marcar como pendiente" : "Marcar como completada", icon: "✓", onClick: () => toggleTaskComplete(task, !task.isComplete) },
       { label: "Duplicar tarea", icon: "⧉", onClick: async () => { await duplicateTask(task); showToast("Tarea duplicada."); } },
       { label: task.isMilestone ? "Quitar de hitos" : "Convertir en hito", icon: "🚩", onClick: () => updateTask(task.id, { isMilestone: !task.isMilestone }) },
+      ...(convertibleToOffers([task], currentUser).length ? [{ label: "Convertir en oferta", icon: "💼", onClick: () => convertToOffers([task], currentUser) }] : []),
       { label: "Abrir detalles", icon: "↗", onClick: () => onOpenTask(task.id) },
       ...(hasLocation(offerLocation) ? [{ label: OPEN_LOCATION_TEXT, icon: OPEN_LOCATION_ICON, onClick: () => openLocation(offerLocation) }] : []),
       { divider: true },

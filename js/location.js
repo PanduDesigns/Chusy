@@ -99,3 +99,104 @@ export function projectLocation(project) {
 export function protocolUrl(path) {
   return `${LOCATION_PROTOCOL}:${encodeURIComponent(path)}`;
 }
+
+// ----------------------------------------------------------------------------
+// v65: buscar la Ubicación en la descripción de una tarea
+// ----------------------------------------------------------------------------
+// Quien pasa una tarea a oferta suele haber escrito ya la carpeta en su
+// descripción. Al convertirla (components/convert-to-offers.js) se aprovecha
+// como Ubicación de la oferta: aquí vive solo la búsqueda, sin DOM.
+
+const HTML_ENTITIES = { nbsp: " ", lt: "<", gt: ">", quot: '"', apos: "'", amp: "&" };
+
+/**
+ * El texto plano de una descripción (el HTML del editor, o texto plano en
+ * las tareas antiguas), con un salto de línea por cada bloque y cada <br>.
+ * Sin DOM a propósito: este archivo es puro. Las entidades se decodifican de
+ * una sola pasada, así que `&amp;lt;` queda como `&lt;` y no como `<`.
+ */
+function descriptionToText(description) {
+  let text = String(description ?? "");
+  if (/<\/?[a-z][^>]*>/i.test(text)) {
+    text = text
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(?:p|div|li|ul|ol|h[1-6]|blockquote|pre)>/gi, "\n")
+      .replace(/<[^>]*>/g, "");
+  }
+  return text.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (whole, name) => {
+    if (name[0] === "#") {
+      const code = name[1].toLowerCase() === "x" ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+      try { return String.fromCodePoint(code); } catch { return whole; }
+    }
+    const known = HTML_ENTITIES[name.toLowerCase()];
+    return known === undefined ? whole : known;
+  });
+}
+
+/** Comillas de apertura y su pareja de cierre (el Explorador de Windows pone comillas rectas al «Copiar como ruta de acceso»). */
+const OPENING_QUOTES = { '"': '"', "'": "'", "“": "”", "‘": "’", "«": "»" };
+
+/** Una ruta con forma de ruta: `Z:\algo`, `Z:/algo` o `\\servidor\recurso`. */
+const LOOKS_LIKE_PATH = /^(?:[A-Za-z]:[\\/][^\\/]|\\\\[^\\/\s]+[\\/][^\\/])/;
+
+function countOf(text, char) { return text.split(char).length - 1; }
+
+/** Quita el final que no es de la ruta: espacios y puntuación (una carpeta de Windows no acaba en punto), y un paréntesis o corchete de cierre sin su pareja. */
+function trimPathEnd(path) {
+  let p = path.replace(/[\s.,;:]+$/, "");
+  for (;;) {
+    const last = p[p.length - 1];
+    const open = last === ")" ? "(" : last === "]" ? "[" : null;
+    if (!open || countOf(p, last) <= countOf(p, open)) return p;
+    p = p.slice(0, -1).replace(/[\s.,;:]+$/, "");
+  }
+}
+
+/**
+ * La ruta que empieza en `start` dentro de `line` (`prev` es el carácter
+ * justo antes), o "" si lo que hay no es una ruta de carpeta. Entre comillas
+ * llega hasta la de cierre; si no, hasta el final de la línea (una ruta puede
+ * llevar espacios, así que no se puede cortar en el primero) o hasta un
+ * carácter que una ruta de Windows no admite.
+ */
+function pathFromLine(line, start, prev) {
+  let rest = line.slice(start);
+  const closing = OPENING_QUOTES[prev];
+  if (closing) {
+    const end = rest.indexOf(closing);
+    if (end !== -1) rest = rest.slice(0, end);
+  } else if (/^file:/i.test(rest)) {
+    rest = rest.split(/\s/)[0]; // un enlace file: no lleva espacios (van como %20)
+  }
+  rest = trimPathEnd(rest.split(/["|?*<>“”«»]/)[0].trim());
+  const { kind, value } = normalizeLocation(rest);
+  return kind === "folder" && LOOKS_LIKE_PATH.test(value) ? value : "";
+}
+
+/**
+ * La primera ruta de carpeta escrita en una descripción, o "" si no hay.
+ * Reconoce una ruta con letra de unidad (`Z:\Ofertas\Cliente X`), de red
+ * (`\\servidor\recurso\carpeta`) o un enlace `file:///…`, con o sin un
+ * rótulo delante («Ubicación: …»), con o sin comillas, y sin puntuación
+ * final. La devuelve ya limpia, como la guardaría normalizeLocation. NO
+ * reconoce direcciones web (https://…): una descripción puede llevar
+ * cualquier enlace y no todos son la carpeta de la oferta.
+ *
+ * Una ruta solo cuenta si empieza al principio de la línea o tras un espacio,
+ * comilla o paréntesis, para no confundir con un fragmento de otra cosa
+ * (`https://…` contiene `s:/`).
+ */
+export function findLocationInDescription(description) {
+  const text = descriptionToText(description);
+  for (const line of text.split(/\r\n|\n|\r/)) {
+    const starts = /[A-Za-z]:[\\/]|\\\\|file:\/\//gi;
+    let m;
+    while ((m = starts.exec(line))) {
+      const prev = m.index > 0 ? line[m.index - 1] : "";
+      if (prev && !/[\s"'“‘«(\[]/.test(prev)) continue;
+      const found = pathFromLine(line, m.index, prev);
+      if (found) return found;
+    }
+  }
+  return "";
+}

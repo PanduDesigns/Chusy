@@ -20,7 +20,7 @@ const PRIORITY_COLORS = {
   baja: "var(--color-text-faint)",
 };
 
-export function renderBoardView(container, { project, tasks, teamMembers, tagsRegistry, onOpenTask, onAddTask }) {
+export function renderBoardView(container, { project, tasks, teamMembers, tagsRegistry, onOpenTask, onAddTask, currentUser }) {
   const bySection = new Map(project.sections.map((s) => [s.id, []]));
   const noSectionTasks = [];
   tasks.forEach((t) => {
@@ -69,7 +69,7 @@ export function renderBoardView(container, { project, tasks, teamMembers, tagsRe
     card.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const task = tasks.find((t) => t.id === card.dataset.taskId);
-      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask);
+      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser);
     });
     card.addEventListener("dragstart", (e) => {
       card.classList.add("is-dragging");

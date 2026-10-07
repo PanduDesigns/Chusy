@@ -305,7 +305,7 @@ function buildSectionModeGroups(groups, currentProjectId) {
 export function renderTimelineView(container, {
   groups, zoom, onZoomChange, viewMode, onViewModeChange,
   expandedSections, onToggleSectionExpand,
-  showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project,
+  showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project, currentUser,
 }) {
   const unit = zoom || "day";
   // Mantener el scroll horizontal entre repintados (v49): antes, CADA
@@ -589,7 +589,7 @@ export function renderTimelineView(container, {
     elx.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const task = allTasksById.get(elx.dataset.taskId);
-      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask);
+      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser);
     });
   });
 }

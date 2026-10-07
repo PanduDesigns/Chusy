@@ -48,8 +48,8 @@ import {
   arrayUnion,
   arrayRemove,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
-import { toEditableHtml, escapeHtml, renderTitleHtml } from "../utils.js";
-import { offerCompletionFields } from "../offers.js";
+import { toEditableHtml, escapeHtml, renderTitleHtml, uid } from "../utils.js";
+import { offerCompletionFields, planTaskToOffer } from "../offers.js";
 import { getOffersProject } from "./projects.js";
 
 export async function createTask(projectId, data) {
@@ -463,6 +463,26 @@ export function bulkMoveToMyTasks(taskIds, uid) {
     extraProjectIds: [],
     extraSections: {},
   }));
+}
+
+/**
+ * «Convertir en oferta» (v64): traslada las tareas indicadas a Ofertas como
+ * ofertas nuevas — ver planTaskToOffer en offers.js para lo que se escribe en
+ * cada una (sección, versión A1, Sector por defecto, histórico). Las que ya
+ * son ofertas se saltan. `defaultSector` es el Sector del departamento de
+ * quien convierte (defaultSectorOf en departments.js; "" = ninguno).
+ * Devuelve cuántas se convirtieron y cuántas se saltaron.
+ */
+export async function bulkConvertToOffers(tasks, { defaultSector } = {}) {
+  const offersProject = getOffersProject();
+  const now = new Date();
+  const plans = new Map();
+  for (const t of tasks) {
+    const fields = planTaskToOffer(offersProject, t, { defaultSector, makeId: uid, now });
+    if (fields) plans.set(t.id, fields);
+  }
+  if (plans.size) await runBatchedUpdate([...plans.keys()], (id) => plans.get(id));
+  return { converted: plans.size, skipped: tasks.length - plans.size };
 }
 
 /**
