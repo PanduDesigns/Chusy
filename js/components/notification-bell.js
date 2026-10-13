@@ -23,6 +23,7 @@ import {
   notificationTaskCount,
   NOTIF_VISIBLE_LIMIT,
   NOTIF_TYPE_ASSIGNED_BULK,
+  NOTIF_TYPE_NEWS,
 } from "../data/notifications.js";
 
 function relativeTime(date) {
@@ -47,6 +48,7 @@ const BELL_SVG = `
   </svg>`;
 
 const isBulk = (n) => n.type === NOTIF_TYPE_ASSIGNED_BULK;
+const isNews = (n) => n.type === NOTIF_TYPE_NEWS; // v67: «Novedades de Chusy», no la asignación de una tarea
 
 /** "· Nombre del proyecto" en gris tras el texto de un aviso, o nada si es una tarea personal (sin proyecto) — para el listado del aviso grande y para el panel. */
 function projectBit(n) {
@@ -224,7 +226,7 @@ export function resetNotificationUi() {
  * de la forma que sea, marca como leídas las que enseñaba — ver la
  * cabecera de este archivo.
  */
-export function openNotifPanel(anchorBtn, { notifications, onOpenTask, onOpenProject }) {
+export function openNotifPanel(anchorBtn, { notifications, onOpenTask, onOpenProject, onOpenNews }) {
   if (activePanel) activePanel.close();
   document.querySelectorAll(".notif-panel").forEach((p) => p.remove());
   const rect = anchorBtn.getBoundingClientRect();
@@ -244,7 +246,9 @@ export function openNotifPanel(anchorBtn, { notifications, onOpenTask, onOpenPro
     // (apartado 3 del README), así que se pinta con renderTitleHtml() en
     // vez de escapeHtml() a secas, igual que en cualquier otro sitio
     // donde se muestra el título de una tarea.
-    const text = isBulk(n)
+    const text = isNews(n)
+      ? `🆕 <b>Novedades de Chusy</b> · ${escapeHtml(n.taskTitle || "")}`
+      : isBulk(n)
       ? `<b>${escapeHtml(n.fromName || "Alguien")}</b> te asignó ${notificationTaskCount(n)} tareas${projectBit(n)}`
       : `<b>${escapeHtml(n.fromName || "Alguien")}</b> te asignó «${renderTitleHtml(n.taskTitle || "una tarea")}»${projectBit(n)}`;
     return `
@@ -278,7 +282,8 @@ export function openNotifPanel(anchorBtn, { notifications, onOpenTask, onOpenPro
       // puede ser un modal, y el panel no debe quedarse debajo.
       closePanel();
       if (!n) return;
-      if (isBulk(n) && n.projectId) onOpenProject(n.projectId);
+      if (isNews(n)) onOpenNews(n);
+      else if (isBulk(n) && n.projectId) onOpenProject(n.projectId);
       else onOpenTask(n.taskId);
     });
   });

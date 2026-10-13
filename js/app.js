@@ -4,15 +4,19 @@
 // ============================================================================
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
-import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, deleteProjectWithTasks, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
+import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
 import { convertOfferToProject } from "./data/offer-conversion.js";
 import { getTask, subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { createTaskLoader } from "./task-loader.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
-import { subscribeToNotifications } from "./data/notifications.js";
+import { subscribeToNotifications, announceNews, NOTIF_TYPE_NEWS } from "./data/notifications.js";
+import { RELEASES, releasesBetween } from "./whats-new.js";
+import { openWhatsNewModal } from "./components/whats-new-modal.js";
 import { subscribeToQuickCreateConfig } from "./data/quick-create.js";
+import { subscribeToTrash, trashProject, restoreTrashItem, purgeTrashItems, purgeExpiredTrash } from "./data/trash.js";
+import { offerUndoForTrash, trashRestoreMessage, trashFailureMessage } from "./components/undo-toast.js";
 import {
   updateNotifBell,
   toggleNotifPanel,
@@ -29,6 +33,7 @@ import { renderBoardView } from "./views/board-view.js";
 import { renderCalendarView } from "./views/calendar-view.js";
 import { renderTimelineView } from "./views/timeline-view.js";
 import { renderMyTasksView } from "./views/my-tasks-view.js";
+import { renderTrashView, visibleTrashItems } from "./views/trash-view.js";
 import { renderArchiveView } from "./views/archive-view.js";
 import { renderMetricsView } from "./views/metrics-view.js";
 import { openProjectModal } from "./components/project-modal.js";
@@ -63,6 +68,7 @@ const notifDotEl = document.getElementById("notif-bell-dot");
 let currentUser = null;
 let projects = [];
 let archivedProjects = [];
+let trashItems = null; // v67: la papelera de esta persona (o de todos, si es admin); null = aún no ha contestado la suscripción, que no se abre hasta entrar en la Papelera
 let teamMembers = [];
 let myTasks = [];
 let tagsRegistry = [];
@@ -70,7 +76,7 @@ let currentProjectId = null;
 let currentProject = null;
 let currentTasks = [];
 let currentView = "list";
-let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'metrics'
+let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'trash' | 'metrics'
 let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
 let timelineShowHolidays = false;
@@ -220,6 +226,8 @@ function restoreLastLocation() {
     selectTimeline();
   } else if (saved && saved.mode === "archive") {
     selectArchive();
+  } else if (saved && saved.mode === "trash") {
+    selectTrash();
   } else if (saved && saved.mode === "metrics") {
     // selectMetrics() ya comprueba el rol antes de aplicar el modo — por
     // si la cuenta dejó de ser admin desde la última vez que se guardó
@@ -233,6 +241,7 @@ function restoreLastLocation() {
 
 let unsubProjects = null;
 let unsubArchivedProjects = null;
+let unsubTrash = null;
 let unsubUsers = null;
 let unsubMyTasks = null;
 let unsubTags = null;
@@ -241,6 +250,8 @@ let unsubCurrentTasks = null;
 let unsubNotifications = null;
 let unsubQuickCreateConfig = null;
 let hasRestoredLocation = false; // solo se restaura la sección al arrancar una vez por sesión — ver restoreLastLocation()
+let hasAnnouncedNews = false; // v67: se avisa de las novedades como mucho una vez por sesión — ver announceNews()
+let hasPurgedTrash = false; // v67: un admin purga lo caducado de la papelera como mucho una vez por sesión
 let hasSeededExclusiveProjects = false; // mismo criterio (v55): el sembrado de secciones exclusivas se intenta como mucho una vez por sesión — ver ensureExclusiveProjectsSeeded()
 
 function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
@@ -254,7 +265,12 @@ notifBellEl.addEventListener("click", () => toggleNotifPanel(notifBellEl, notifP
 // botón "Ver notificaciones") para abrir cosas — se lee `notifications` en
 // el momento de llamar, no ahora, para que sea siempre la lista actual.
 function notifPanelOptions() {
-  return { notifications, onOpenTask: openTask, onOpenProject: openProjectFromNotification };
+  return { notifications, onOpenTask: openTask, onOpenProject: openProjectFromNotification, onOpenNews: openNewsFromNotification };
+}
+
+// Una notificación de novedades (v67) abre el modal con las versiones que cubre.
+function openNewsFromNotification(n) {
+  openWhatsNewModal({ releases: releasesBetween(RELEASES, n.newsFrom || n.newsId, n.newsId) });
 }
 
 // El aviso del sistema (browser-notifications.js) espera un instante a que
@@ -303,16 +319,18 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications, unsubQuickCreateConfig].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications, unsubQuickCreateConfig].forEach((fn) => fn && fn());
   taskLoader.stopAll();
-  unsubProjects = unsubArchivedProjects = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = unsubQuickCreateConfig = null;
-  projects = []; rawProjects = []; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
+  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = unsubQuickCreateConfig = null;
+  projects = []; rawProjects = []; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
   sessionUid = null; searchLoadPending = false;
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
   activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
   quickCreateEnabled = false;
   hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
   hasSeededExclusiveProjects = false;
+  hasPurgedTrash = false;
+  hasAnnouncedNews = false;
   removeBulkToolbar();
   resetNotificationUi();
   notifBellEl.hidden = true;
@@ -351,7 +369,11 @@ function bootstrap() {
       notifications = list;
       updateNotifBell(notifDotEl, notifications);
     },
-    (newOnes) => {
+    (arrived) => {
+      // v67: las novedades de Chusy se avisan aparte (toast al crearlas, ver más
+      // abajo) — el aviso grande y el del sistema son para TAREAS ASIGNADAS.
+      const newOnes = arrived.filter((n) => n.type !== NOTIF_TYPE_NEWS);
+      if (!newOnes.length) return;
       // Aviso grande dentro de la app (siempre) + aviso del sistema fuera de
       // ella (solo si la persona lo activó en "Mi cuenta" y no tiene Chusy
       // delante) — con la lista ACUMULADA del aviso grande, para que varias
@@ -364,6 +386,19 @@ function bootstrap() {
       if (currentUser) showSystemNotificationSoon(currentUser.uid, shown);
     }
   );
+
+  // Novedades de Chusy (v67): una vez por sesión. Si a esta persona le quedan
+  // versiones por ver, se le escribe UNA notificación (la campana se enciende
+  // sola) y se le avisa con un toast para que la busque. Esta parte de bootstrap()
+  // solo se ejecuta una vez por cuenta (ver el «return» de arriba), así que el
+  // cambio de perfil que hace el propio aviso al apuntar `newsSeen` no la repite;
+  // la marca `hasAnnouncedNews` queda como segunda barrera.
+  if (!hasAnnouncedNews) {
+    hasAnnouncedNews = true;
+    announceNews(currentUser, RELEASES)
+      .then((result) => { if (result) showToast("🆕 Hay novedades en Chusy · míralas en la campana 🔔"); })
+      .catch((e) => console.error("announceNews:", e));
+  }
 
   if (unsubTags) unsubTags();
   unsubTags = subscribeToAllTags((tags) => { tagsRegistry = tags; renderShell(); });
@@ -405,6 +440,14 @@ function handleProjectsList(allProjects) {
   // en data/projects.js.
   projects = allProjects.filter((p) => isProjectVisibleToUser(p, currentUser));
   taskLoader.syncProjects(projects, isOffersProject); // v66: solo Ofertas (y lo que ya se pidió); ver task-loader.js
+  // Purga de la papelera (v67): sin servidor que lo haga, el primer snapshot de
+  // proyectos de una sesión de admin borra para siempre lo que lleva más de 30
+  // días en la papelera. Solo un admin puede borrar lo de todo el mundo. Va antes
+  // del posible «return» de abajo para que no dependa de en qué proyecto se esté.
+  if (!hasPurgedTrash && currentUser.role === "admin") {
+    hasPurgedTrash = true;
+    purgeExpiredTrash().catch((e) => console.error("purgeExpiredTrash:", e));
+  }
   if (mode === "project" && currentProjectId && !projects.find((p) => p.id === currentProjectId)) {
     // La sección recordada (o la que se acaba de seleccionar) ya no
     // existe, se archivó, o (v55) es una sección exclusiva a la que esta
@@ -481,6 +524,65 @@ function selectArchive() {
   saveLastLocation({ mode: "archive" });
   ensureArchivedProjects();
   renderShell();
+}
+
+/**
+ * Papelera (v67). La suscripción a `trash` no se abre al arrancar — la papelera
+ * no le cuesta lecturas a nadie hasta que se entra en ella — sino aquí, la primera
+ * vez; después se queda abierta hasta cerrar sesión (cleanup).
+ */
+function selectTrash() {
+  if (!unsubTrash && currentUser) {
+    unsubTrash = subscribeToTrash({ uid: currentUser.uid, isAdmin: currentUser.role === "admin" }, (list) => {
+      trashItems = list;
+      if (mode === "trash") renderShell();
+    });
+  }
+  mode = "trash";
+  saveLastLocation({ mode: "trash" });
+  renderShell();
+}
+
+async function restoreFromTrash(item) {
+  try {
+    const r = await restoreTrashItem(item, { user: currentUser });
+    if (!r.ok) {
+      showToast(r.reason === "exclusive-exists" ? "No se puede restaurar: ya hay una sección nueva con ese mismo nombre y quedarían duplicadas." : "No se pudo restaurar.", "error");
+      return;
+    }
+    showToast(trashRestoreMessage({
+      tasks: r.kind === "task" ? 1 : 0,
+      projects: r.kind === "project" ? 1 : 0,
+      projectTasks: r.kind === "project" ? r.restoredTasks : 0,
+      notes: r.notes,
+    }));
+  } catch (err) {
+    console.error(err);
+    showToast("No se pudo restaurar. Inténtalo de nuevo.", "error");
+  }
+}
+
+async function purgeFromTrash(items) {
+  try {
+    await purgeTrashItems(items, { isAdmin: currentUser.role === "admin" });
+    showToast(items.length === 1 ? "Eliminado para siempre." : `${items.length} elementos eliminados para siempre.`);
+  } catch (err) {
+    console.error(err);
+    showToast("No se pudo eliminar. Inténtalo de nuevo.", "error");
+  }
+}
+
+// Eliminar un proyecto archivado desde la vista de Archivo: a la papelera, con «Deshacer».
+async function deleteArchivedProject(id) {
+  const project = archivedProjects.find((p) => p.id === id);
+  if (!project) return;
+  try {
+    const { trashId } = await trashProject(project, { user: currentUser });
+    offerUndoForTrash("Proyecto eliminado · 30 días en la Papelera.", [trashId], currentUser);
+  } catch (err) {
+    console.error(err);
+    showToast(trashFailureMessage(err && err.code, 1, "project"), "error");
+  }
 }
 
 /**
@@ -605,6 +707,7 @@ function renderShell() {
     isMyTasksActive: mode === "mytasks",
     isTimelineActive: mode === "timeline",
     isArchiveActive: mode === "archive",
+    isTrashActive: mode === "trash",
     myTasksCount: myTasks.filter((t) => !t.isComplete).length,
     userProfile: currentUser,
     isCollapsed: sidebarCollapsed,
@@ -613,9 +716,11 @@ function renderShell() {
     onSelectMyTasks: () => { selectMyTasks(); sidebarEl.classList.remove("is-open"); },
     onSelectTimeline: () => { selectTimeline(); sidebarEl.classList.remove("is-open"); },
     onSelectArchive: () => { selectArchive(); sidebarEl.classList.remove("is-open"); },
+    onSelectTrash: () => { selectTrash(); sidebarEl.classList.remove("is-open"); },
     onSelectMetrics: () => { selectMetrics(); sidebarEl.classList.remove("is-open"); },
     onOpenSearch: () => openSearch(),
     onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
+    onOpenWhatsNew: () => openWhatsNewModal({ releases: RELEASES }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
     onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive) }),
     onOpenOutlookBridge: () => openOutlookBridgeModal({ currentUser }),
@@ -646,7 +751,21 @@ function renderShell() {
       archivedProjects,
       onOpenProject: (id) => selectProject(id),
       onUnarchive: (id) => archiveProject(id, false).then(() => showToast("Proyecto restaurado.")),
-      onDelete: (id) => deleteProjectWithTasks(id).then(() => showToast("Proyecto eliminado.")),
+      onDelete: (id) => deleteArchivedProject(id),
+    });
+    return;
+  }
+
+  if (mode === "trash") {
+    const count = Array.isArray(trashItems) ? visibleTrashItems(trashItems).length : null;
+    topbarEl.innerHTML = `<span class="topbar__title">Papelera</span>${count === null ? "" : `<span class="topbar__count">${count} ${count === 1 ? "elemento" : "elementos"}</span>`}`;
+    filterbarEl.innerHTML = "";
+    renderTrashView(mainContentEl, {
+      items: trashItems,
+      currentUser,
+      onRestore: (item) => restoreFromTrash(item),
+      onPurge: (item) => purgeFromTrash([item]),
+      onEmpty: (items) => purgeFromTrash(items),
     });
     return;
   }

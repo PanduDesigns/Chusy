@@ -7,6 +7,8 @@
 // planTaskToOffer (offers.js) y la escritura en lote en bulkConvertToOffers
 // (data/tasks.js).
 //
+// Se puede deshacer (v67): el aviso final lleva un botón «Deshacer».
+//
 // Solo se ofrece a quien tiene acceso a Ofertas (admin o un departamento
 // con acceso, ver isProjectVisibleToUser): convertir una tarea en oferta la
 // saca de su proyecto, y quien no ve Ofertas no podría volver a verla.
@@ -14,6 +16,8 @@
 // que al crear una oferta a mano o desde Outlook (defaultSectorOf).
 // ============================================================================
 import { showToast, plainTitleText, getTaskProjectIds } from "../utils.js";
+import { takeTaskSnapshot } from "../undo.js";
+import { offerUndoForTasks } from "./undo-toast.js";
 import { getOffersProject, isProjectVisibleToUser } from "../data/projects.js";
 import { bulkConvertToOffers } from "../data/tasks.js";
 import { canBecomeOffer, defaultSectorValue, offerLocationFromDescription } from "../offers.js";
@@ -53,7 +57,7 @@ function confirmText(todo, { sector, skipped, locations }) {
 
 /**
  * Convierte en ofertas las tareas que se puedan, tras pedir confirmación
- * (cambia dónde vive cada tarea, y no hay «deshacer»). Avisa del resultado
+ * (cambia dónde vive cada tarea). Avisa del resultado
  * con un toast, que nombra el Sector puesto si lo hubo. Las vistas se
  * actualizan solas con el listener en tiempo real.
  */
@@ -67,11 +71,12 @@ export async function convertToOffers(tasks, currentUser) {
   const locations = todo.map((t) => offerLocationFromDescription(getOffersProject(), t)).filter(Boolean);
 
   if (!confirm(confirmText(todo, { sector, skipped, locations }))) return;
+  const snapshot = takeTaskSnapshot(todo); // v67: para «Deshacer»
   try {
     const { converted } = await bulkConvertToOffers(todo, { defaultSector });
     const what = converted === 1 ? "Convertida en oferta" : `${converted} tareas convertidas en ofertas`;
     const where = !locations.length ? "" : converted === 1 ? " · Ubicación tomada de la descripción" : ` · Ubicación tomada de la descripción en ${locations.length}`;
-    showToast(`${what}${sector ? ` · Sector ${sector}` : ""}${where}.`);
+    offerUndoForTasks(`${what}${sector ? ` · Sector ${sector}` : ""}${where}.`, snapshot);
   } catch (err) {
     console.error(err);
     showToast("No se pudo convertir en oferta. Inténtalo de nuevo.", "error");

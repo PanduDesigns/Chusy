@@ -20,9 +20,11 @@ import {
   bulkAssignSingle,
   bulkRemoveAssigneeWithOwnerTransfer,
   bulkMoveToMyTasks,
-  bulkDeleteTasks,
   mergeTasks,
 } from "../data/tasks.js";
+import { trashTasks } from "../data/trash.js";
+import { takeTaskSnapshot } from "../undo.js";
+import { offerUndoForTasks, offerUndoForTrash, trashFailureMessage } from "./undo-toast.js";
 import { celebrateBulk } from "./celebration.js";
 import { notifyBulkAssignment } from "../data/notifications.js";
 import { convertibleToOffers, convertToOffers } from "./convert-to-offers.js";
@@ -95,7 +97,7 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
         // Este proyecto puede ser el principal de unas tareas seleccionadas
         // y un adicional de otras (ver extraProjectIds) — bulkMoveToSectionInProject
         // ya distingue cuál toca por tarea, a diferencia de bulkUpdateTasks.
-        onClick: () => runAction(bulkMoveToSectionInProject(selectedTasks, project.id, s.id), `Movidas a «${s.name}».`),
+        onClick: () => runAction(bulkMoveToSectionInProject(selectedTasks, project.id, s.id), `Movidas a «${s.name}».`, selectedTasks),
       })),
     });
   });
@@ -118,7 +120,8 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
           // selector de proyectos del propio modal de la tarea.
           runAction(
             bulkUpdateTasks(ids, { projectId: p.id, sectionId: firstSection ? firstSection.id : null, extraProjectIds: [], extraSections: {} }),
-            `Movidas a «${p.name}».`
+            `Movidas a «${p.name}».`,
+            selectedTasks
           );
         },
       })),
@@ -138,9 +141,10 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
           // asignación nueva y merecen un aviso; el resto simplemente
           // "seguía siendo suyas", reafirmarlo no es información nueva.
           const newlyAssignedTasks = selectedTasks.filter((t) => !(t.assigneeIds || []).includes(m.uid));
+          const snapshot = takeTaskSnapshot(selectedTasks);
           try {
             await bulkAssignSingle(selectedTasks, m.uid);
-            showToast(`Asignadas a ${m.name}.`);
+            offerUndoForTasks(`Asignadas a ${m.name}.`, snapshot);
             notifyBulkForPerson(m.uid, newlyAssignedTasks, { currentUser, teamMembers, projects });
           } catch (err) {
             console.error(err);
@@ -151,8 +155,8 @@ export function renderBulkToolbar({ selectedTasks, teamMembers, project, project
     });
   });
 
-  anchor.querySelector('[data-action="dates"]').addEventListener("click", (e) => openDatesPopover(e.currentTarget, ids));
-  anchor.querySelector('[data-action="delete"]').addEventListener("click", () => handleDelete(ids));
+  anchor.querySelector('[data-action="dates"]').addEventListener("click", (e) => openDatesPopover(e.currentTarget, ids, selectedTasks));
+  anchor.querySelector('[data-action="delete"]').addEventListener("click", () => handleDelete(selectedTasks, { currentUser, projects }));
   anchor.querySelector('[data-action="more"]').addEventListener("click", (e) =>
     openMoreMenu(e.currentTarget, { ids, selectedTasks, teamMembers, currentUser, projects })
   );
@@ -206,27 +210,40 @@ function notifyBulkForPerson(uid, tasks, { currentUser, teamMembers, projects })
   });
 }
 
-async function runAction(promise, successMsg) {
+/**
+ * Espera a una acción ya lanzada y avisa del resultado. Si se pasan `undoTasks`
+ * (las tareas sobre las que actúa), el aviso lleva un botón «Deshacer» (v67):
+ * la foto de cómo estaban se saca AQUÍ, en la primera línea — la acción acaba
+ * de empezar, pero las tareas de `undoTasks` son objetos ya leídos que nadie
+ * modifica (un cambio en vivo trae objetos nuevos), así que siguen siendo «lo
+ * de antes».
+ */
+async function runAction(promise, successMsg, undoTasks) {
+  const snapshot = undoTasks ? takeTaskSnapshot(undoTasks) : null;
   try {
     await promise;
-    if (successMsg) showToast(successMsg);
+    if (successMsg) {
+      if (snapshot) offerUndoForTasks(successMsg, snapshot);
+      else showToast(successMsg);
+    }
   } catch (err) {
     console.error(err);
     showToast("No se pudo aplicar el cambio. Inténtalo de nuevo.", "error");
   }
 }
 
-async function handleDelete(ids) {
-  const n = ids.length;
-  if (!confirm(`¿Eliminar ${n} ${n === 1 ? "tarea" : "tareas"}? No se puede deshacer.`)) return;
+async function handleDelete(tasks, { currentUser, projects }) {
+  const n = tasks.length;
+  if (!confirm(`¿Eliminar ${n} ${n === 1 ? "tarea" : "tareas"}? ${n === 1 ? "Se guardará" : "Se guardarán"} 30 días en la Papelera.`)) return;
   try {
-    const { succeededIds, failedIds } = await bulkDeleteTasks(ids);
-    if (failedIds.length && succeededIds.length) {
-      showToast(`Se eliminaron ${succeededIds.length} de ${n} tareas. El resto no se pudo borrar (sin permiso).`, "error");
+    const { trashed, failedIds, errorCode } = await trashTasks(tasks, { user: currentUser, projects });
+    const trashIds = trashed.map((t) => t.trashId);
+    if (failedIds.length && trashed.length) {
+      offerUndoForTrash(`Se eliminaron ${trashed.length} de ${n} tareas. El resto no se pudo eliminar (sin permiso).`, trashIds, currentUser);
     } else if (failedIds.length) {
-      showToast("No se pudieron eliminar esas tareas (sin permiso).", "error");
+      showToast(trashFailureMessage(errorCode, n), "error");
     } else {
-      showToast(`${succeededIds.length} ${succeededIds.length === 1 ? "tarea eliminada" : "tareas eliminadas"}.`);
+      offerUndoForTrash(`${n} ${n === 1 ? "tarea eliminada" : "tareas eliminadas"} · 30 días en la Papelera.`, trashIds, currentUser);
     }
   } catch (err) {
     console.error(err);
@@ -240,18 +257,18 @@ function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser,
     x: rect.left, y: rect.top,
     items: [
       { label: "Marcar como completadas", icon: "✓", onClick: () => {
-        runAction(bulkSetComplete(selectedTasks, true), "Marcadas como completadas.");
+        runAction(bulkSetComplete(selectedTasks, true), "Marcadas como completadas.", selectedTasks);
         celebrateBulk(ids.length); // la recompensa "grande" — varias de golpe
       } },
-      { label: "Marcar como sin finalizar", icon: "↺", onClick: () => runAction(bulkSetComplete(selectedTasks, false), "Marcadas como sin finalizar.") },
+      { label: "Marcar como sin finalizar", icon: "↺", onClick: () => runAction(bulkSetComplete(selectedTasks, false), "Marcadas como sin finalizar.", selectedTasks) },
       { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers, selectedTasks, currentUser, projects }) },
-      { label: "Combinar tareas duplicadas…", icon: "⧉", onClick: () => startMergeFlow(rect, { selectedTasks }) },
-      { label: "Convertir en hitos", icon: "🚩", onClick: () => runAction(bulkUpdateTasks(ids, { isMilestone: true }), "Convertidas en hitos.") },
+      { label: "Combinar tareas duplicadas…", icon: "⧉", onClick: () => startMergeFlow(rect, { selectedTasks, currentUser, projects }) },
+      { label: "Convertir en hitos", icon: "🚩", onClick: () => runAction(bulkUpdateTasks(ids, { isMilestone: true }), "Convertidas en hitos.", selectedTasks) },
       // v64: solo si alguna de las seleccionadas puede serlo (todas las que
       // aún no son ofertas) y quien pulsa tiene acceso a Ofertas.
       ...(convertibleToOffers(selectedTasks, currentUser).length ? [{ label: "Convertir en ofertas", icon: "💼", onClick: () => convertToOffers(selectedTasks, currentUser) }] : []),
       { divider: true },
-      { label: "Mover a mis tareas", icon: "🔒", onClick: () => handleMoveToMyTasks(ids, currentUser) },
+      { label: "Mover a mis tareas", icon: "🔒", onClick: () => handleMoveToMyTasks(ids, currentUser, selectedTasks) },
     ],
   });
 }
@@ -263,7 +280,7 @@ function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser,
  * avisa antes porque, a diferencia del resto de acciones masivas, esta
  * cambia quién puede ver la tarea, no solo un campo suyo.
  */
-async function handleMoveToMyTasks(ids, currentUser) {
+async function handleMoveToMyTasks(ids, currentUser, selectedTasks) {
   const n = ids.length;
   const ok = confirm(
     `¿Mover ${n} ${n === 1 ? "tarea" : "tareas"} a tus tareas personales? ${n === 1 ? "Saldrá" : "Saldrán"} de este proyecto, dejará${n === 1 ? "" : "n"} de ser visible${n === 1 ? "" : "s"} para el resto del equipo, y quedará${n === 1 ? "" : "n"} asignada${n === 1 ? "" : "s"} solo a ti.`
@@ -271,7 +288,8 @@ async function handleMoveToMyTasks(ids, currentUser) {
   if (!ok) return;
   runAction(
     bulkMoveToMyTasks(ids, currentUser.uid),
-    `${n} ${n === 1 ? "tarea movida" : "tareas movidas"} a Mis tareas.`
+    `${n} ${n === 1 ? "tarea movida" : "tareas movidas"} a Mis tareas.`,
+    selectedTasks
   );
 }
 
@@ -280,7 +298,7 @@ async function handleMoveToMyTasks(ids, currentUser) {
 // casilla — así se puede tocar solo el inicio, solo el límite, o ambos, y
 // dejar el campo vacío significa "borrar esa fecha" en vez de "ignorarla".
 // ----------------------------------------------------------------------
-function openDatesPopover(anchorBtn, ids) {
+function openDatesPopover(anchorBtn, ids, selectedTasks) {
   document.querySelectorAll(".bulk-date-popover").forEach((p) => p.remove());
   const rect = anchorBtn.getBoundingClientRect();
 
@@ -322,7 +340,7 @@ function openDatesPopover(anchorBtn, ids) {
       data[cb.dataset.enable] = input.value || null;
     });
     close();
-    if (Object.keys(data).length) runAction(bulkUpdateTasks(ids, data), "Fechas actualizadas.");
+    if (Object.keys(data).length) runAction(bulkUpdateTasks(ids, data), "Fechas actualizadas.", selectedTasks);
   });
 
   function close() {
@@ -403,7 +421,7 @@ function openCollabPopover(anchorRect, { ids, teamMembers, selectedTasks, curren
 // sobrevive (las demás se fusionan dentro de ella), y se pide
 // confirmación explícita antes de borrar nada.
 // ----------------------------------------------------------------------
-function startMergeFlow(anchorRect, { selectedTasks }) {
+function startMergeFlow(anchorRect, { selectedTasks, currentUser, projects }) {
   if (selectedTasks.length < 2) {
     showToast("Selecciona al menos 2 tareas para combinarlas.");
     return;
@@ -413,19 +431,19 @@ function startMergeFlow(anchorRect, { selectedTasks }) {
     items: selectedTasks.map((t) => ({
       label: `Combinar en «${plainTitleText(t.title)}»`,
       icon: "⭐",
-      onClick: () => confirmMerge(t, selectedTasks.filter((o) => o.id !== t.id)),
+      onClick: () => confirmMerge(t, selectedTasks.filter((o) => o.id !== t.id), { currentUser, projects }),
     })),
   });
 }
 
-async function confirmMerge(survivor, duplicates) {
+async function confirmMerge(survivor, duplicates, { currentUser, projects }) {
   const total = duplicates.length + 1;
   const ok = confirm(
-    `¿Combinar estas ${total} tareas en «${plainTitleText(survivor.title)}»? Se juntarán responsables, etiquetas, subtareas, adjuntos y comentarios en esa tarea, y las otras ${duplicates.length} se eliminarán. No se puede deshacer.`
+    `¿Combinar estas ${total} tareas en «${plainTitleText(survivor.title)}»? Se juntarán responsables, etiquetas, subtareas, adjuntos y comentarios en esa tarea, y las otras ${duplicates.length} se eliminarán (se guardan 30 días en la Papelera).`
   );
   if (!ok) return;
   try {
-    const result = await mergeTasks(survivor.id, duplicates.map((d) => d.id));
+    const result = await mergeTasks(survivor.id, duplicates.map((d) => d.id), { user: currentUser, projects });
     const skippedNote = result.skippedComments
       ? ` (${result.skippedComments} ${result.skippedComments === 1 ? "comentario no se pudo trasladar" : "comentarios no se pudieron trasladar"} por permisos.)`
       : "";

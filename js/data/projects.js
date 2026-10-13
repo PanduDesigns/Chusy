@@ -93,53 +93,9 @@ export function deleteProject(projectId) {
   return deleteDoc(doc(db, "projects", projectId));
 }
 
-/**
- * Borra el proyecto Y todas las tareas que lo tienen como PRINCIPAL (con
- * sus comentarios) — se hace en lotes de como mucho 450 operaciones para
- * no chocar con el límite de 500 escrituras por batch de Firestore, de
- * sobra para el tamaño de un departamento, pero así no revienta si algún
- * proyecto acumula muchas tareas con muchos comentarios.
- *
- * Las tareas que tienen este proyecto solo como ADICIONAL (ver
- * extraProjectIds en el modelo de datos) no se borran — seguirían
- * perteneciendo a su proyecto principal, o siendo un recordatorio de
- * alguien — solo se les quita la referencia a este proyecto concreto de
- * `extraProjectIds` y su entrada correspondiente dentro de
- * `extraSections`.
- */
-export async function deleteProjectWithTasks(projectId) {
-  const primarySnap = await getDocs(query(collection(db, "tasks"), where("projectId", "==", projectId)));
-  const extraSnap = await getDocs(
-    query(collection(db, "tasks"), where("extraProjectIds", "array-contains", projectId), where("projectId", "!=", null))
-  );
-
-  const deletions = [];
-  for (const taskDoc of primarySnap.docs) {
-    const commentsSnap = await getDocs(collection(db, "tasks", taskDoc.id, "comments"));
-    commentsSnap.forEach((c) => deletions.push(c.ref));
-    deletions.push(taskDoc.ref);
-  }
-  deletions.push(doc(db, "projects", projectId));
-
-  for (let i = 0; i < deletions.length; i += 450) {
-    const batch = writeBatch(db);
-    deletions.slice(i, i + 450).forEach((ref) => batch.delete(ref));
-    await batch.commit();
-  }
-
-  const primaryIds = new Set(primarySnap.docs.map((d) => d.id));
-  const extraOnlyDocs = extraSnap.docs.filter((d) => !primaryIds.has(d.id)); // por si acaso; no debería solaparse nunca
-  for (let i = 0; i < extraOnlyDocs.length; i += 450) {
-    const batch = writeBatch(db);
-    extraOnlyDocs.slice(i, i + 450).forEach((d) => {
-      batch.update(d.ref, {
-        extraProjectIds: arrayRemove(projectId),
-        [`extraSections.${projectId}`]: deleteField(),
-      });
-    });
-    await batch.commit();
-  }
-}
+// Eliminar un proyecto con sus tareas ya no se hace aquí: desde la v67 va a la
+// papelera (trashProject en data/trash.js), que lo guarda 30 días y permite
+// restaurarlo con sus tareas.
 
 export function addMemberToProject(projectId, uid) {
   return updateDoc(doc(db, "projects", projectId), { memberIds: arrayUnion(uid) });

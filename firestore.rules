@@ -342,5 +342,27 @@ service cloud.firestore {
       allow read: if isActiveUser();
       allow create, update, delete: if isAdmin();
     }
+
+    // ---- Papelera (v67): lo que se elimina se guarda aquí 30 días antes de
+    // borrarse para siempre (data/trash.js, apartado 3 del README). Cada
+    // documento es una copia de una tarea o de un proyecto eliminado, con quién
+    // la eliminó (`deletedBy`).
+    //  - Leer: cada persona SOLO lo que eliminó ella (la consulta tiene que
+    //    pedir `where("deletedBy", "==", su uid)`); un admin, todo.
+    //  - Crear: solo a nombre de uno mismo. Mover una tarea a la papelera es un
+    //    batch que crea la copia Y borra el original, así que el permiso de
+    //    borrar la tarea/proyecto sigue siendo el de siempre: si no se puede
+    //    borrar el original, el batch entero falla y no se crea ninguna copia.
+    //  - Borrar (eliminar para siempre, vaciar, restaurar): quien la eliminó o
+    //    un admin. La purga de lo caducado la hace un admin (purgeExpiredTrash).
+    //  - No se edita nunca.
+    match /trash/{trashId} {
+      allow read: if isActiveUser() && (resource.data.deletedBy == request.auth.uid || isAdmin());
+      allow create: if isActiveUser() &&
+        request.resource.data.deletedBy == request.auth.uid &&
+        request.resource.data.kind in ["task", "project"];
+      allow delete: if isActiveUser() && (resource.data.deletedBy == request.auth.uid || isAdmin());
+      allow update: if false;
+    }
   }
 }

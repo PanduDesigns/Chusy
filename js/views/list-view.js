@@ -10,7 +10,9 @@
 // el resto de proyectos (ver components/table-columns.js).
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml, getTaskSectionForProject, renderTitleHtml, plainTitleText } from "../utils.js";
-import { toggleTaskComplete, duplicateTask, updateTask, deleteTask } from "../data/tasks.js";
+import { toggleTaskComplete, duplicateTask, updateTask } from "../data/tasks.js";
+import { trashTasks } from "../data/trash.js";
+import { offerUndoForTrash, trashFailureMessage } from "../components/undo-toast.js";
 import { celebrateTask } from "../components/celebration.js";
 import { updateProject, saveProjectSections, getOffersProject } from "../data/projects.js";
 import { openContextMenu } from "../components/context-menu.js";
@@ -264,13 +266,14 @@ export function openTaskContextMenu(x, y, task, onOpenTask, currentUser) {
       ...(hasLocation(offerLocation) ? [{ label: OPEN_LOCATION_TEXT, icon: OPEN_LOCATION_ICON, onClick: () => openLocation(offerLocation) }] : []),
       { divider: true },
       { label: "Eliminar tarea", icon: "🗑", danger: true, onClick: async () => {
-        if (!confirm(`¿Eliminar "${plainTitleText(task.title)}"? No se puede deshacer.`)) return;
+        if (!confirm(`¿Eliminar "${plainTitleText(task.title)}"? Se guardará 30 días en la Papelera.`)) return;
         try {
-          await deleteTask(task.id);
-          showToast("Tarea eliminada.");
+          const { trashed, errorCode } = await trashTasks([task], { user: currentUser });
+          if (trashed.length) offerUndoForTrash("Tarea eliminada · 30 días en la Papelera.", trashed.map((t) => t.trashId), currentUser);
+          else showToast(trashFailureMessage(errorCode, 1), "error");
         } catch (err) {
           console.error(err);
-          showToast("No se pudo eliminar (sin permiso).", "error");
+          showToast("No se pudo eliminar. Inténtalo de nuevo.", "error");
         }
       } },
     ],

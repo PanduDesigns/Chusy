@@ -34,16 +34,18 @@
 // `onOpenProjectProperties(project)`: la ventana y el guardado los monta
 // app.js, igual que el resto de acciones que necesitan datos de fuera.
 // ============================================================================
-import { initials, colorFromString, escapeHtml, projectBadgeHtml, projectIcon } from "../utils.js";
+import { initials, colorFromString, escapeHtml, projectBadgeHtml, projectIcon, showToast } from "../utils.js";
 import { findDepartment } from "../departments.js";
 import { openContextMenu } from "./context-menu.js";
-import { updateProject, deleteProjectWithTasks, archiveProject } from "../data/projects.js";
+import { updateProject, archiveProject } from "../data/projects.js";
+import { trashProject } from "../data/trash.js";
+import { offerUndoForTrash, trashFailureMessage } from "./undo-toast.js";
 import { openCustomFieldsModal } from "./custom-fields-modal.js";
 import { openEditProjectModal } from "./edit-project-modal.js";
 import { openLocation } from "./open-location.js";
 import { hasLocation, projectLocation, OPEN_LOCATION_TEXT, OPEN_LOCATION_ICON } from "../location.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenOutlookBridge, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenOutlookBridge, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const regularProjects = projects.filter((p) => !p.exclusive);
@@ -105,6 +107,10 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       <span class="sidebar__item-icon">🗄️</span>
       <span class="sidebar__item-name sidebar__label">Archivo</span>
     </button>
+    <button class="sidebar__item sidebar__item--pinned${isTrashActive ? " is-active" : ""}" id="btn-trash" title="Papelera">
+      <span class="sidebar__item-icon">🗑️</span>
+      <span class="sidebar__item-name sidebar__label">Papelera</span>
+    </button>
     ${exclusiveItems}
 
     <span class="sidebar__section-label sidebar__label">Proyectos</span>
@@ -162,8 +168,13 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
           { label: "Archivar proyecto", icon: "🗄️", onClick: () => archiveProject(project.id, true) },
           { divider: true },
           { label: "Eliminar proyecto", icon: "🗑", danger: true, onClick: async () => {
-            if (confirm(`¿Eliminar "${project.name}" y TODAS sus tareas? No se puede deshacer.`)) {
-              await deleteProjectWithTasks(project.id);
+            if (!confirm(`¿Eliminar "${project.name}" y TODAS sus tareas? Se guardará 30 días en la Papelera.`)) return;
+            try {
+              const { trashId } = await trashProject(project, { user: userProfile });
+              offerUndoForTrash("Proyecto eliminado · 30 días en la Papelera.", [trashId], userProfile);
+            } catch (err) {
+              console.error(err);
+              showToast(trashFailureMessage(err && err.code, 1, "project"), "error");
             }
           } },
         ],
@@ -174,13 +185,17 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   container.querySelector("#btn-my-tasks").addEventListener("click", onSelectMyTasks);
   container.querySelector("#btn-timeline").addEventListener("click", onSelectTimeline);
   container.querySelector("#btn-archive").addEventListener("click", onSelectArchive);
+  container.querySelector("#btn-trash").addEventListener("click", onSelectTrash);
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
   container.querySelector("#btn-toggle-collapse").addEventListener("click", onToggleCollapse);
 
   container.querySelector("#btn-user-menu").addEventListener("click", (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const items = [{ label: "Mi cuenta", icon: "👤", onClick: onOpenAccount }];
+    const items = [
+      { label: "Mi cuenta", icon: "👤", onClick: onOpenAccount },
+      { label: "Novedades de Chusy", icon: "🆕", onClick: onOpenWhatsNew },
+    ];
     if (userProfile.role === "admin") {
       items.push({ label: "Administrar equipo", icon: "🛠️", onClick: onOpenTeamAdmin });
       items.push({ label: "Accesos por departamento", icon: "🔐", onClick: onOpenDepartmentAccess });

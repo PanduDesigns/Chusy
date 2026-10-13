@@ -47,10 +47,12 @@ import {
   writeBatch,
   arrayUnion,
   arrayRemove,
+  deleteField,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import { toEditableHtml, escapeHtml, renderTitleHtml, uid } from "../utils.js";
 import { offerCompletionFields, planTaskToOffer } from "../offers.js";
 import { getOffersProject } from "./projects.js";
+import { trashTasks } from "./trash.js";
 
 export async function createTask(projectId, data) {
   const ref = await addDoc(collection(db, "tasks"), {
@@ -111,9 +113,9 @@ export function updateTask(taskId, data) {
   return updateDoc(doc(db, "tasks", taskId), { ...data, updatedAt: serverTimestamp() });
 }
 
-export function deleteTask(taskId) {
-  return deleteDoc(doc(db, "tasks", taskId));
-}
+// Eliminar tareas ya no se hace aquí: desde la v67 va a la papelera (trashTasks
+// en data/trash.js), que las guarda 30 días. El borrado directo solo lo hace
+// la purga de la propia papelera.
 
 /**
  * Marca/desmarca UNA tarea como completada. Recibe la tarea entera (no solo
@@ -319,9 +321,10 @@ export function subscribeToMyTasks(uid, callback) {
 // equipo (ver firestore.rules), así que estas operaciones pueden ir en
 // writeBatch — son atómicas y rápidas. El BORRADO en cambio está
 // restringido a quien la creó/es su dueña o a un admin, así que
-// bulkDeleteTasks NO usa un batch (un solo documento sin permiso haría
-// fallar el lote entero): borra una a una con Promise.allSettled para
-// poder informar de cuántas se borraron de verdad.
+// trashTasks (data/trash.js, que es lo que usa «Eliminar» desde la v67) NO
+// mete todas las tareas en un mismo batch (un solo documento sin permiso
+// haría fallar el lote entero): usa un batch POR TAREA con Promise.allSettled
+// para poder informar de cuántas se eliminaron de verdad.
 //
 // Todas trocean en grupos de 450 para no chocar con el límite de 500
 // escrituras por batch de Firestore.
@@ -486,16 +489,22 @@ export async function bulkConvertToOffers(tasks, { defaultSector } = {}) {
 }
 
 /**
- * Borra varias tareas a la vez. Devuelve qué ids se borraron de verdad y
- * cuáles no (por ejemplo, por no ser ni su dueña ni admin) para poder
- * avisar en vez de fallar en silencio.
+ * «Deshacer» (v67): devuelve a cada tarea los valores que tenía ANTES de una
+ * acción (la foto que sacó takeTaskSnapshot, js/undo.js). Un campo que no
+ * existía se vuelve a quitar. Cada tarea va por su cuenta: si una ya no existe
+ * o ya no se puede editar (p. ej. una personal que acabas de asignar a otra
+ * persona), las demás sí se restauran. Devuelve cuántas se restauraron y cuántas no.
  */
-export async function bulkDeleteTasks(taskIds) {
-  const results = await Promise.allSettled(taskIds.map((id) => deleteDoc(doc(db, "tasks", id))));
-  const succeededIds = [];
-  const failedIds = [];
-  results.forEach((r, i) => (r.status === "fulfilled" ? succeededIds : failedIds).push(taskIds[i]));
-  return { succeededIds, failedIds };
+export async function restoreTaskSnapshot(snapshot) {
+  const results = await Promise.allSettled(
+    snapshot.map((entry) => {
+      const data = { ...entry.values };
+      entry.absent.forEach((field) => { data[field] = deleteField(); });
+      return updateDoc(doc(db, "tasks", entry.id), { ...data, updatedAt: serverTimestamp() });
+    })
+  );
+  const restored = results.filter((r) => r.status === "fulfilled").length;
+  return { restored, failed: results.length - restored };
 }
 
 /**
@@ -512,7 +521,7 @@ export async function bulkDeleteTasks(taskIds) {
  * tarea suelta desde el menú contextual, que tampoco limpia sus
  * comentarios) — por eso se cuentan aparte en `skippedComments`.
  */
-export async function mergeTasks(survivorId, duplicateIds) {
+export async function mergeTasks(survivorId, duplicateIds, { user, projects = [] }) {
   const survivorSnap = await getDoc(doc(db, "tasks", survivorId));
   if (!survivorSnap.exists()) throw new Error("La tarea principal ya no existe.");
   const survivor = survivorSnap.data();
@@ -565,11 +574,10 @@ export async function mergeTasks(survivorId, duplicateIds) {
     }
   }
 
-  for (let i = 0; i < dups.length; i += BATCH_CHUNK) {
-    const batch = writeBatch(db);
-    dups.slice(i, i + BATCH_CHUNK).forEach((t) => batch.delete(doc(db, "tasks", t.id)));
-    await batch.commit();
-  }
+  // Las duplicadas no se borran: van a la papelera (v67), por si la combinación
+  // fue un error. (Sus comentarios ya se han trasladado a la superviviente.)
+  const { trashed, failedIds } = await trashTasks(dups, { user, projects });
+  if (failedIds.length) throw new Error(`No se pudieron eliminar ${failedIds.length} de las tareas combinadas.`);
 
-  return { mergedCount: dups.length, skippedComments };
+  return { mergedCount: dups.length, skippedComments, trashIds: trashed.map((t) => t.trashId) };
 }

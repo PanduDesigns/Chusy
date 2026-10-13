@@ -55,6 +55,7 @@
 // para tocar las notificaciones de otra persona).
 // ============================================================================
 import { db } from "../firebase-init.js";
+import { unseenReleases, newsNotificationId } from "../whats-new.js";
 import {
   collection,
   doc,
@@ -70,6 +71,7 @@ import {
 export const NOTIF_VISIBLE_LIMIT = 20;
 export const NOTIF_TYPE_ASSIGNED = "task_assigned";
 export const NOTIF_TYPE_ASSIGNED_BULK = "tasks_assigned_bulk";
+export const NOTIF_TYPE_NEWS = "news"; // v67: «Novedades de Chusy» (ver announceNews, más abajo)
 
 /** Cuántas tareas representa un aviso: una (`task_assigned`) o las `count` de un resumen de "Nueva cabina" (`tasks_assigned_bulk`). */
 export function notificationTaskCount(n) {
@@ -254,3 +256,47 @@ export async function markAllNotificationsRead(notifications) {
     if (r.status === "rejected") console.warn("markAllNotificationsRead:", r.reason);
   });
 }
+
+// ----------------------------------------------------------------------------
+// Novedades de Chusy (v67)
+// ----------------------------------------------------------------------------
+
+/**
+ * Si a esta persona le quedan novedades por ver (js/whats-new.js), se escribe
+ * UNA notificación suya de tipo `news` — que cubre todas las que se perdió — y
+ * se apunta en su perfil hasta qué versión se le ha avisado (`newsSeen`), las dos
+ * cosas en un mismo batch. A partir de ahí es una notificación como las demás:
+ * la campana la pinta, se marca leída al cerrar el panel y la autolimpieza la
+ * recoge (la crea la propia persona, así que las reglas lo permiten: crear una
+ * notificación exige `fromUserId` = quien escribe, y editar el propio perfil
+ * está permitido salvo rol y departamento).
+ *
+ * El id del documento es fijo (newsNotificationId): si dos pestañas lo hacen a la
+ * vez, escriben lo mismo en vez de duplicarla. Devuelve `{ newsId, fromId }` o
+ * null si no había nada que avisar.
+ */
+export async function announceNews(profile, releases) {
+  const unseen = unseenReleases(releases, profile);
+  if (!unseen.length) return null;
+  const latest = unseen[0];
+  const fromId = unseen[unseen.length - 1].id;
+  const batch = writeBatch(db);
+  batch.set(doc(db, "notifications", newsNotificationId(profile.uid, latest.id)), {
+    userId: profile.uid,
+    type: NOTIF_TYPE_NEWS,
+    newsId: latest.id,
+    newsFrom: fromId,
+    fromUserId: profile.uid,
+    fromName: "Chusy",
+    taskId: null,
+    taskTitle: latest.title,
+    projectId: null,
+    projectName: null,
+    read: false,
+    createdAt: serverTimestamp(),
+  });
+  batch.update(doc(db, "users", profile.uid), { newsSeen: latest.id });
+  await batch.commit();
+  return { newsId: latest.id, fromId };
+}
+

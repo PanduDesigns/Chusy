@@ -2,7 +2,7 @@
 // Vista de Archivo: proyectos archivados (no aparecen en la lista principal
 // pero no se han borrado). Clic para abrirlos y consultarlos; clic derecho
 // para desarchivarlos (vuelven a la lista de proyectos activos) o
-// eliminarlos definitivamente — mismo patrón que el menú contextual de
+// eliminarlos (van a la Papelera, v67) — mismo patrón que el menú contextual de
 // los proyectos activos en la barra lateral.
 // ============================================================================
 import { escapeHtml, projectBadgeHtml } from "../utils.js";
@@ -52,7 +52,7 @@ export function renderArchiveView(container, { archivedProjects, onOpenProject, 
           ...(hasLocation(projectLocation(project)) ? [{ label: OPEN_LOCATION_TEXT, icon: OPEN_LOCATION_ICON, onClick: () => openLocation(projectLocation(project)) }] : []),
           { divider: true },
           { label: "Eliminar proyecto", icon: "🗑", danger: true, onClick: () => {
-            if (confirm(`¿Eliminar "${project.name}" y TODAS sus tareas? No se puede deshacer.`)) {
+            if (confirm(`¿Eliminar "${project.name}" y TODAS sus tareas? Se guardará 30 días en la Papelera.`)) {
               onDelete(project.id);
             }
           } },
