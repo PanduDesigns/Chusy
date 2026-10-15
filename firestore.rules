@@ -198,6 +198,17 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ---- Archivos en Google Drive (v68, apartado 3.13 del README): ¿se pueden
+    // subir archivos a las tareas?, ¿a qué «puente» de Apps Script llamar? y
+    // ¿cuánto pesa como máximo cada archivo? Lectura para cualquier cuenta
+    // activa (cada navegador necesita la dirección del puente; no es un
+    // secreto: el puente solo da permiso a quien presente una sesión activa de
+    // Chusy) y escritura solo para administradores. ----
+    match /meta/driveStorage {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
     // ---- Oferta desde Outlook (v61, apartado «Oferta desde Outlook» del
     // README): la clave compartida con la macro y el buzón de peticiones ----
     match /meta/outlookBridge {

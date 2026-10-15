@@ -61,6 +61,10 @@ import {
   deleteField,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import { toDate } from "../utils.js";
+// v68 — archivos adjuntos en Google Drive (apartado 3.13 del README): mientras una
+// tarea está en la Papelera sus archivos siguen intactos en Drive; solo al borrarla
+// PARA SIEMPRE (purgeTrashItems) se mandan a la papelera de Drive.
+import { trashFilesOfTasks } from "../drive-service.js";
 
 export const TRASH_DAYS = 30;
 const DAY_MS = 86400000;
@@ -435,6 +439,7 @@ export async function restoreTrashByIds(trashIds, { user }) {
  */
 export async function purgeTrashItems(items, { isAdmin = false } = {}) {
   const refs = new Map(); // ruta -> ref, para no borrar dos veces lo mismo
+  const purgedTasks = []; // v68: las tareas que se van para siempre (sus archivos de Drive se liberan al final)
   const add = (ref) => refs.set(ref.path, ref);
   const addComments = async (taskId) => {
     if (!isAdmin || !taskId) return;
@@ -446,14 +451,20 @@ export async function purgeTrashItems(items, { isAdmin = false } = {}) {
       const group = await getDocs(query(collection(db, "trash"), where("groupId", "==", item.id)));
       for (const d of group.docs) {
         await addComments(d.data().taskId);
+        purgedTasks.push(d.data().task);
         add(d.ref);
       }
     } else {
       await addComments(item.taskId);
+      purgedTasks.push(item.task);
     }
     add(doc(db, "trash", item.id));
   }
   await commitInChunks([...refs.values()].map((ref) => (batch) => batch.delete(ref)));
+  // v68: ya no hay forma de volver atrás, así que ahora sí sus archivos de Drive van a la
+  // papelera de Drive (recuperables 30 días desde la cuenta propietaria). Sin esperar y sin
+  // que un fallo de Drive estropee la purga: trashFilesOfTasks nunca lanza.
+  trashFilesOfTasks(purgedTasks);
   return items.length;
 }
 

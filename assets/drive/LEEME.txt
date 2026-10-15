@@ -1,0 +1,85 @@
+CHUSY · PUENTE CON GOOGLE DRIVE (v68) — PASO A PASO
+===================================================
+
+Qué es esto
+-----------
+Para que Chusy pueda guardar archivos en tu Google Drive hace falta un
+"puente": un pequeño script de Google Apps Script que se ejecuta con TU cuenta
+de Google y que solo hace una cosa: darle a Chusy, si quien pregunta tiene
+sesión activa en Chusy, un permiso de Drive de 1 hora para subir y descargar
+archivos de la carpeta "Chusy - archivos". Nadie necesita cuenta de Google.
+
+Hace falta hacerlo UNA sola vez (unos 10 minutos).
+
+Qué cuenta usar
+---------------
+La cuenta de Google en la que está el espacio (los 4 TB). Mejor una cuenta
+propia de la empresa (por ejemplo chusy@tu-empresa.com) que la de una persona
+que algún día pueda irse: los archivos quedan en el Drive de esa cuenta.
+El permiso que usa Chusy es de tipo "drive.file": solo alcanza a los archivos
+que crea Chusy, no al resto de ese Drive.
+
+Pasos
+-----
+1. Entra con esa cuenta en https://script.google.com y pulsa "Nuevo proyecto".
+   Ponle de nombre "Chusy Drive" (arriba a la izquierda).
+
+2. Código: en Chusy, menú de tu nombre → "Archivos en Google Drive" →
+   "Copiar el script". En el editor de Apps Script borra todo lo que hay en
+   Código.gs y pega lo copiado (ya lleva puesto el proyecto de Firebase de
+   Chusy). Pulsa el icono de guardar.
+   (Si lo prefieres, el mismo texto está en assets/drive/ChusyDrive.gs.)
+
+3. Permisos: en el menú de la izquierda, el engranaje "Configuración del
+   proyecto" → marca "Mostrar el archivo de manifiesto "appsscript.json" en el
+   editor". Vuelve a "Editor", abre appsscript.json, borra su contenido y pega
+   el que da Chusy con el botón "Copiar los permisos" (o el de
+   assets/drive/appsscript.json). Guarda.
+
+4. Servicio de Drive: en el editor, en "Servicios" (el + de la izquierda) elige
+   "Drive API", versión v3, y pulsa "Añadir". (Si ya aparece en la lista porque
+   lo trae el paso 3, no hace falta nada.) Este paso es necesario: sin él,
+   Google rechaza las subidas con un mensaje de "API no activada".
+
+5. Autorizar: arriba, en el desplegable de funciones, elige "autorizar" y pulsa
+   "Ejecutar". Google pedirá permisos:
+     - "Revisar permisos" → elige la cuenta
+     - sale "Google no ha verificado esta aplicación": pulsa "Configuración
+       avanzada" → "Ir a Chusy Drive (no seguro)" (es tu propio script)
+     - "Permitir"
+   Al terminar, el "Registro de ejecución" dice "Todo listo. Carpeta de Chusy
+   en tu Drive: https://drive.google.com/…". Esa carpeta ya existe en tu Drive.
+   Si en cambio sale un error en rojo, léelo: casi siempre es que falta el
+   paso 4 o el 3.
+
+6. Implementar: arriba a la derecha "Implementar" → "Nueva implementación" →
+   rueda "Seleccionar tipo" → "Aplicación web":
+     - Descripción: Chusy
+     - Ejecutar como: Yo (tu cuenta)             <- importante
+     - Quién tiene acceso: Cualquier usuario     <- importante
+   "Implementar". Copia la "URL de la aplicación web" (acaba en /exec).
+   (Si tu Google Workspace no deja elegir "Cualquier usuario", un administrador
+   de Workspace tiene que permitirlo — ver el README, apartado 7.)
+
+7. Activar en Chusy: menú de tu nombre → "Archivos en Google Drive":
+     - pega la URL del paso 6
+     - marca "Permitir subir archivos a las tareas"
+     - "Guardar"
+     - "Probar conexión": sube archivos de prueba, los descarga y los borra.
+       Si todo sale con ✓, ya se pueden subir archivos desde cualquier tarea.
+
+Cuando cambies el código del script más adelante
+------------------------------------------------
+Implementar → Administrar implementaciones → lápiz ✏️ → Versión: "Nueva
+versión" → Implementar. La URL sigue siendo la misma. (Si solo guardas el
+código sin hacer esto, la aplicación web sigue con el código antiguo.)
+
+Dónde están los archivos
+------------------------
+En el Drive de esa cuenta, carpeta "Chusy - archivos" (puedes moverla a otro
+sitio; no cambia nada). Cada archivo lleva su nombre original. Si quitas un
+adjunto de una tarea y guardas, el archivo va a la papelera de Drive (30 días
+para recuperarlo desde allí). Con una tarea eliminada pasa lo mismo, pero solo
+cuando se elimina PARA SIEMPRE de la Papelera de Chusy (a mano, vaciándola o
+a los 30 días): mientras está en la Papelera de Chusy sus archivos se conservan
+para poder restaurarla.

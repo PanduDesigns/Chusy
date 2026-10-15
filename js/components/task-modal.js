@@ -42,6 +42,15 @@
 // Igual que todo lo demás, solo se guarda al pulsar «Aceptar». El campo
 // «Sector» de las ofertas no necesita código aquí: es un campo
 // personalizado de tipo lista y renderCustomFields ya lo pinta.
+//
+// v68: archivos adjuntos en Google Drive. Si el almacenamiento está activado
+// (o la tarea ya tiene archivos), el formulario enseña una sección «Archivos»
+// (file-attachments.js) además de los «Enlaces adjuntos» de siempre; los dos
+// tipos viven mezclados en `draft.attachments` (el de Drive lleva
+// `kind: "drive"`, ver drive-files.js). Los archivos se SUBEN al elegirlos,
+// pero su ficha solo se guarda en la tarea con «Aceptar»; al cerrar sin
+// guardar, lo subido en esta apertura se manda a la papelera de Drive, y al
+// guardar, lo quitado también (ver finalizeSaved/discardUnsaved).
 // ============================================================================
 import { createTask, updateTask, getTask, nextPersonalOwnerId } from "../data/tasks.js";
 import { notifyNewAssignees } from "../data/notifications.js";
@@ -81,6 +90,9 @@ import { defaultSectorOf } from "../departments.js";
 import { createOpenLocationButton } from "./open-location.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
+import { driveService } from "../drive-service.js";
+import { isDriveAttachment } from "../drive-files.js";
+import { createFileAttachments } from "./file-attachments.js";
 
 const PRIORITIES = ["urgente", "alta", "media", "baja"];
 let lastPickedTagColor = TAG_COLOR_PALETTE[0];
@@ -177,6 +189,10 @@ export function openTaskModal({
   let originalRevisionChecked = false;
   // Desplegables de sugerencias enganchados a campos de este formulario.
   let suggestHandles = [];
+  // v68: la sección «Archivos» (null si no se muestra) y si el modal se cierra
+  // tras GUARDAR (decide si lo subido/quitado se confirma o se descarta).
+  let fileUi = null;
+  let savedOk = false;
 
   const overlay = el(`<div class="modal-overlay"><div class="modal"><div style="padding:40px;text-align:center;color:var(--color-text-lo);">Cargando…</div></div></div>`);
   root.appendChild(overlay);
@@ -228,6 +244,12 @@ export function openTaskModal({
   function close(skipCallback) {
     if (unsubComments) unsubComments();
     if (descriptionEditor) descriptionEditor.destroy();
+    if (fileUi) {
+      if (savedOk) fileUi.finalizeSaved();
+      else fileUi.discardUnsaved();
+      fileUi.destroy();
+      fileUi = null;
+    }
     suggestHandles.forEach((h) => h.destroy());
     suggestHandles = [];
     document.querySelectorAll(".project-add-popover").forEach((p) => p.remove());
@@ -322,6 +344,12 @@ export function openTaskModal({
             </div>
           </div>
 
+          ${showFilesSection() ? `
+          <div class="field">
+            <span class="field__label">Archivos</span>
+            <div id="t-files"></div>
+          </div>` : ""}
+
           <div class="field">
             <span class="field__label">Enlaces adjuntos</span>
             <div id="t-attachments" style="display:flex;flex-direction:column;gap:6px;"></div>
@@ -355,6 +383,7 @@ export function openTaskModal({
     renderTagChips();
     renderSubtasks();
     renderAttachments();
+    mountFileAttachments();
     if (!isNew) renderComments();
 
     descriptionEditor = createRichTextEditor(overlay.querySelector("#t-description-mount"), {
@@ -1085,10 +1114,34 @@ export function openTaskModal({
     });
   }
 
+  /** v68: ¿se enseña la sección «Archivos»? Si el almacenamiento está activado, o si la tarea ya tiene archivos de Drive. */
+  function showFilesSection() {
+    return driveService.isEnabled() || draft.attachments.some(isDriveAttachment);
+  }
+
+  function mountFileAttachments() {
+    const box = overlay.querySelector("#t-files");
+    if (!box) return;
+    fileUi = createFileAttachments({
+      container: box,
+      dropTarget: overlay.querySelector(".modal"),
+      pasteTarget: overlay,
+      storage: driveService,
+      getAttachments: () => draft.attachments,
+      addAttachment: (att) => { draft.attachments.push(att); markDirty(); },
+      removeAttachment: (id) => { draft.attachments = draft.attachments.filter((a) => a.id !== id); markDirty(); },
+      currentUser: currentUserProfile,
+      getTaskId: () => taskId || "",
+      onDirty: markDirty,
+    });
+  }
+
+  /** Solo los ENLACES: los archivos de Drive los pinta file-attachments.js (v68). */
   function renderAttachments() {
     const list = overlay.querySelector("#t-attachments");
-    if (!draft.attachments.length) { list.innerHTML = ""; return; }
-    list.innerHTML = draft.attachments
+    const links = draft.attachments.filter((a) => !isDriveAttachment(a));
+    if (!links.length) { list.innerHTML = ""; return; }
+    list.innerHTML = links
       .map((a) => `
       <div class="attachment-row">
         <a href="${escapeHtml(a.url)}" target="_blank" rel="noopener" class="attachment-row__name">🔗 ${escapeHtml(a.name)}</a>
@@ -1191,6 +1244,11 @@ export function openTaskModal({
     // pasaría la comprobación de "no está vacío" si se mirara la cadena
     // en crudo, aunque en pantalla no se vería ningún texto.
     if (!plainTitleText(draft.title).trim()) { titleInputEl.focus(); return; }
+    // v68: con archivos todavía subiéndose, la tarea se guardaría sin ellos.
+    if (fileUi && fileUi.isBusy()) {
+      showToast("Espera a que terminen de subirse los archivos (o cancélalos) antes de guardar.", "error");
+      return;
+    }
     // Ofertas (v56): una versión recién creada sin explicar qué cambió no
     // bloquea el guardado, pero se avisa una vez — de eso va el histórico.
     const offers = offersProject();
@@ -1272,6 +1330,7 @@ export function openTaskModal({
         }).catch((err) => console.error("notifyNewAssignees:", err));
       }
       dirty = false;
+      savedOk = true; // v68: confirma lo subido y manda a la papelera de Drive lo quitado (ver close)
       close();
       if (typeof afterSave === "function") afterSave();
     } catch (e) {

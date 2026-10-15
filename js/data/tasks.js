@@ -49,10 +49,16 @@ import {
   arrayRemove,
   deleteField,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
-import { toEditableHtml, escapeHtml, renderTitleHtml, uid } from "../utils.js";
+import { toEditableHtml, escapeHtml, renderTitleHtml, uid, showToast } from "../utils.js";
 import { offerCompletionFields, planTaskToOffer } from "../offers.js";
 import { getOffersProject } from "./projects.js";
 import { trashTasks } from "./trash.js";
+// v68 — archivos adjuntos en Google Drive (ver drive-service.js): duplicar una
+// tarea COPIA sus archivos en Drive, y combinar duplicadas no se lleva los de
+// la tarea que se conserva a la papelera. (Los archivos de las tareas eliminadas
+// van a la papelera de Drive al ELIMINAR PARA SIEMPRE, en data/trash.js.)
+import { copyAttachmentsForDuplicate } from "../drive-service.js";
+import { attachmentKey, isDriveAttachment } from "../drive-files.js";
 
 export async function createTask(projectId, data) {
   const ref = await addDoc(collection(db, "tasks"), {
@@ -86,9 +92,15 @@ export async function createTask(projectId, data) {
   return ref.id;
 }
 
-/** Copia una tarea existente (sin comentarios, sin marcar como completada). */
+/**
+ * Copia una tarea existente (sin comentarios, sin marcar como completada).
+ * v68: los archivos de Drive se COPIAN en Drive (la copia y el original no
+ * comparten archivo, o quitar el adjunto de una rompería el de la otra); los
+ * enlaces pasan tal cual. Si algún archivo no se pudo copiar se avisa.
+ */
 export async function duplicateTask(task) {
-  return createTask(task.projectId, {
+  const { attachments, skipped } = await copyAttachmentsForDuplicate(task.attachments || []);
+  const newId = await createTask(task.projectId, {
     ownerId: task.ownerId,
     sectionId: task.sectionId,
     extraProjectIds: task.extraProjectIds,
@@ -102,11 +114,13 @@ export async function duplicateTask(task) {
     tags: task.tags,
     dependsOn: [],
     subtasks: (task.subtasks || []).map((s) => ({ ...s, done: false })),
-    attachments: task.attachments,
+    attachments,
     isMilestone: task.isMilestone,
     createdBy: task.createdBy,
     order: Date.now(),
   });
+  if (skipped) showToast(`${skipped === 1 ? "Un archivo no se pudo copiar" : `${skipped} archivos no se pudieron copiar`} a la tarea duplicada.`, "error");
+  return newId;
 }
 
 export function updateTask(taskId, data) {
@@ -534,7 +548,10 @@ export async function mergeTasks(survivorId, duplicateIds, { user, projects = []
   const dependsOn = new Set(survivor.dependsOn || []);
   const subtasks = [...(survivor.subtasks || [])];
   const attachments = [...(survivor.attachments || [])];
-  const attachmentUrls = new Set(attachments.map((a) => a.url));
+  // v68: la clave de un adjunto es su URL (enlace) o su archivo de Drive; solo
+  // con la URL todos los archivos de Drive (que no tienen `url`) contarían
+  // como «el mismo» y se perderían al combinar.
+  const attachmentKeys = new Set(attachments.map(attachmentKey));
   let description = toEditableHtml(survivor.description || "");
 
   dups.forEach((t) => {
@@ -542,7 +559,7 @@ export async function mergeTasks(survivorId, duplicateIds, { user, projects = []
     (t.tags || []).forEach((tag) => { if (!tagsByLower.has(tag.toLowerCase())) tagsByLower.set(tag.toLowerCase(), tag); });
     (t.dependsOn || []).forEach((id) => dependsOn.add(id));
     (t.subtasks || []).forEach((s) => subtasks.push(s));
-    (t.attachments || []).forEach((a) => { if (!attachmentUrls.has(a.url)) { attachments.push(a); attachmentUrls.add(a.url); } });
+    (t.attachments || []).forEach((a) => { const k = attachmentKey(a); if (!attachmentKeys.has(k)) { attachments.push(a); attachmentKeys.add(k); } });
     if (t.description && t.description.trim()) {
       const dupHtml = toEditableHtml(t.description);
       if (dupHtml && dupHtml !== description) {
@@ -574,9 +591,24 @@ export async function mergeTasks(survivorId, duplicateIds, { user, projects = []
     }
   }
 
+  // v68: los archivos de Drive de las duplicadas ya son de la superviviente. Se
+  // les quitan a las duplicadas ANTES de mandarlas a la papelera: si no, al
+  // eliminarlas para siempre se mandarían a la papelera de Drive archivos que
+  // la superviviente sigue usando. (Restaurar una duplicada la devuelve sin
+  // sus archivos de Drive; los enlaces sí se los lleva.)
+  const dupsToTrash = [];
+  for (const t of dups) {
+    const attachmentsOfDup = t.attachments || [];
+    const linksOnly = attachmentsOfDup.filter((a) => !isDriveAttachment(a));
+    if (linksOnly.length !== attachmentsOfDup.length) {
+      try { await updateTask(t.id, { attachments: linksOnly }); } catch (e) { /* si no se puede editar, tampoco se podrá eliminar: se avisa abajo */ }
+    }
+    dupsToTrash.push({ ...t, attachments: linksOnly });
+  }
+
   // Las duplicadas no se borran: van a la papelera (v67), por si la combinación
   // fue un error. (Sus comentarios ya se han trasladado a la superviviente.)
-  const { trashed, failedIds } = await trashTasks(dups, { user, projects });
+  const { trashed, failedIds } = await trashTasks(dupsToTrash, { user, projects });
   if (failedIds.length) throw new Error(`No se pudieron eliminar ${failedIds.length} de las tareas combinadas.`);
 
   return { mergedCount: dups.length, skippedComments, trashIds: trashed.map((t) => t.trashId) };

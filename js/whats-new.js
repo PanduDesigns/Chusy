@@ -25,6 +25,15 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 68,
+    date: "2026-10-14",
+    title: "Archivos en las tareas",
+    items: [
+      "Las tareas y las ofertas pueden llevar archivos —imágenes, vídeos, PDF, planos…—: arrastra los archivos a la sección «Archivos» de la tarea, elígelos o pega una captura con Ctrl+V. Pulsa un archivo para verlo (imagen, vídeo, audio y PDF) o descargarlo.",
+      "La sección aparece en cuanto un administrador activa el almacenamiento: los archivos se guardan en el Google Drive de la empresa. Mientras una tarea está en la Papelera sus archivos se conservan; al eliminarla para siempre, también se van.",
+    ],
+  },
+  {
     id: 67,
     date: "2026-10-09",
     title: "Deshacer, Papelera y Novedades",

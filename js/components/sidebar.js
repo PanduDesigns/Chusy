@@ -45,7 +45,7 @@ import { openEditProjectModal } from "./edit-project-modal.js";
 import { openLocation } from "./open-location.js";
 import { hasLocation, projectLocation, OPEN_LOCATION_TEXT, OPEN_LOCATION_ICON } from "../location.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenOutlookBridge, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const regularProjects = projects.filter((p) => !p.exclusive);
@@ -201,6 +201,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       items.push({ label: "Accesos por departamento", icon: "🔐", onClick: onOpenDepartmentAccess });
       items.push({ label: "Importar desde Asana", icon: "📥", onClick: onOpenAsanaImport });
       items.push({ label: "Conexión con Outlook", icon: "📧", onClick: onOpenOutlookBridge });
+      items.push({ label: "Archivos en Google Drive", icon: "☁️", onClick: onOpenDriveStorage }); // v68
     }
     // Métricas (v54): admin Y Revisor — el único permiso que distingue a
     // Revisor de Miembro, así que va en su propia comprobación en vez de

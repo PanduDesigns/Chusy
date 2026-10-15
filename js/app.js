@@ -15,6 +15,8 @@ import { subscribeToNotifications, announceNews, NOTIF_TYPE_NEWS } from "./data/
 import { RELEASES, releasesBetween } from "./whats-new.js";
 import { openWhatsNewModal } from "./components/whats-new-modal.js";
 import { subscribeToQuickCreateConfig } from "./data/quick-create.js";
+import { subscribeToDriveConfig } from "./data/drive-config.js"; // v68: archivos en Google Drive
+import { setDriveConfig, resetDriveService } from "./drive-service.js";
 import { subscribeToTrash, trashProject, restoreTrashItem, purgeTrashItems, purgeExpiredTrash } from "./data/trash.js";
 import { offerUndoForTrash, trashRestoreMessage, trashFailureMessage } from "./components/undo-toast.js";
 import {
@@ -46,6 +48,7 @@ import { openAccountModal } from "./components/account-modal.js";
 import { openTeamAdminModal } from "./components/team-admin-modal.js";
 import { openDepartmentAccessModal } from "./components/department-access-modal.js";
 import { openOutlookBridgeModal } from "./components/outlook-bridge-modal.js";
+import { openDriveStorageModal } from "./components/drive-storage-modal.js";
 import { startOutlookListener, stopOutlookListener } from "./outlook-listener.js";
 import { openAsanaImportModal } from "./components/asana-import-modal.js";
 import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal.js";
@@ -249,6 +252,7 @@ let unsubCurrentProject = null;
 let unsubCurrentTasks = null;
 let unsubNotifications = null;
 let unsubQuickCreateConfig = null;
+let unsubDriveConfig = null; // v68: meta/driveStorage → drive-service.js (no repinta nada: el modal de tarea lo lee al abrirse)
 let hasRestoredLocation = false; // solo se restaura la sección al arrancar una vez por sesión — ver restoreLastLocation()
 let hasAnnouncedNews = false; // v67: se avisa de las novedades como mucho una vez por sesión — ver announceNews()
 let hasPurgedTrash = false; // v67: un admin purga lo caducado de la papelera como mucho una vez por sesión
@@ -319,9 +323,10 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications, unsubQuickCreateConfig].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig].forEach((fn) => fn && fn());
   taskLoader.stopAll();
-  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = unsubQuickCreateConfig = null;
+  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = null;
+  resetDriveService(); // v68: fuera el permiso de Drive y las miniaturas de la cuenta que sale
   projects = []; rawProjects = []; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
   sessionUid = null; searchLoadPending = false;
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
@@ -405,6 +410,11 @@ function bootstrap() {
 
   if (unsubQuickCreateConfig) unsubQuickCreateConfig();
   unsubQuickCreateConfig = subscribeToQuickCreateConfig((cfg) => { quickCreateEnabled = !!cfg.enabled; renderShell(); });
+
+  // v68: archivos en Google Drive — el ajuste del equipo (meta/driveStorage).
+  // Solo se vuelca al servicio; no hace falta repintar nada.
+  if (unsubDriveConfig) unsubDriveConfig();
+  unsubDriveConfig = subscribeToDriveConfig((cfg) => setDriveConfig(cfg));
 
   if (unsubMyTasks) unsubMyTasks();
   unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; renderShell(); });
@@ -724,6 +734,7 @@ function renderShell() {
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
     onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive) }),
     onOpenOutlookBridge: () => openOutlookBridgeModal({ currentUser }),
+    onOpenDriveStorage: () => openDriveStorageModal({ currentUser }),
     onOpenAsanaImport: () => openAsanaImportModal({ teamMembers, currentUser }),
     onOpenQuickCreateAdmin: () => openQuickCreateAdminModal({ currentUser, quickCreateEnabled }),
     onOpenProjectProperties: (project) => openProjectProperties(project),
