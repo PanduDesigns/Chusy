@@ -19,10 +19,16 @@
 //
 // v60: junto a la etiqueta de «Ubicación» hay un botón «Abrir Ubicación»
 // (ver components/open-location.js).
+//
+// v70: arriba del todo se ve el ID del proyecto (solo lectura, se copia con un
+// clic; ver project-codes.js). Al convertir una oferta se enseña el ID que el
+// proyecto va a HEREDAR de ella.
 // ============================================================================
 import { el, escapeHtml, uid, showToast, toDateInputValue } from "../utils.js";
 import { attachTextSuggest } from "./text-suggest.js";
 import { createOpenLocationButton } from "./open-location.js";
+import { idChipHtml, idPendingHtml, wireIdChips } from "./id-chip.js";
+import { isIdError } from "../project-codes.js";
 import { SECTOR_OPTIONS } from "../offers.js";
 import {
   PROPERTY_DATE_FIELDS,
@@ -55,7 +61,7 @@ function dateFieldHtml(key, value) {
  * `onSubmit({ name, properties })` hace el guardado de verdad; si lanza
  * un error el formulario se queda abierto y avisa.
  */
-function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, getCommercialOptions, onSubmit }) {
+function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, getCommercialOptions, onSubmit, idInfo }) {
   const root = document.getElementById("modal-root");
   const state = normalizeProperties(initial);
   let dirty = false;
@@ -71,6 +77,7 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
         <div class="modal__body">
           ${intro ? `<p class="field__hint" style="margin:0;">${escapeHtml(intro)}</p>` : ""}
           ${!nameField && state.sourceOfferId ? `<p class="field__hint" style="margin:0;">Procede de la oferta «${escapeHtml(state.sourceOfferTitle)}».</p>` : ""}
+          ${idInfo ? `<div class="props-id"><span class="field__label">${escapeHtml(idInfo.label)}</span>${idInfo.code ? idChipHtml(idInfo.code, idInfo.what) : idPendingHtml(idInfo.pendingText)}</div>` : ""}
           ${nameField ? `
           <label class="field">
             <span class="field__label">Nombre del proyecto</span>
@@ -115,6 +122,7 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
     </div>
   `);
   root.appendChild(overlay);
+  wireIdChips(overlay);
 
   function markDirty() { dirty = true; }
 
@@ -242,7 +250,7 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
       console.error(e);
       confirmBtn.disabled = false;
       confirmBtn.textContent = confirmLabel;
-      alert("No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
+      alert(isIdError(e) ? e.message : "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
     }
   });
 
@@ -258,6 +266,7 @@ export function openProjectPropertiesModal({ project, onSave, getCommercialOptio
   openPropertiesForm({
     title: `Propiedades — ${project.name}`,
     initial: project.properties,
+    idInfo: project.exclusive ? null : { label: "ID del proyecto", code: project.code || "", what: "proyecto", pendingText: "Sin ID todavía" },
     confirmLabel: "Guardar",
     getCommercialOptions,
     onSubmit: async ({ properties }) => {
@@ -282,6 +291,7 @@ export function openOfferConversionModal({ offer, offersProject, today, onConfir
       "Se creará un proyecto nuevo con los datos de la oferta. Revisa las propiedades antes de crearlo — podrás cambiarlas más tarde con «Propiedades» (clic derecho sobre el proyecto). La oferta se marcará como completada y quedará enlazada al proyecto.",
     nameField: { value: name },
     initial: properties,
+    idInfo: { label: "ID (lo hereda de la oferta)", code: offer.offerCode || "", what: "oferta", pendingText: "Se asignará al crear el proyecto" },
     confirmLabel: "Crear proyecto",
     getCommercialOptions,
     onSubmit: ({ name: finalName, properties: finalProperties }) => onConfirm({ name: finalName, properties: finalProperties }),

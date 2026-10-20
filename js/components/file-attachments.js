@@ -19,11 +19,17 @@
 //
 // El componente no sabe nada del modal: recibe callbacks para leer/añadir/quitar
 // adjuntos del borrador. Hasta 2 subidas a la vez; el resto espera en cola.
+//
+// Dónde queda cada archivo en Drive (v69; con el ID desde la v70): <ID> - <Nombre> /
+// <AAAA-MM>, con la oferta o el proyecto de la tarea en el momento de subirlo
+// (`getOwner()`, puede ser asíncrona: una oferta nueva pide su ID al subir el primer
+// archivo), o «Tareas personales» si no tiene. Ver driveFolderPath en drive-files.js.
 // ============================================================================
 import { escapeHtml, showToast, uid } from "../utils.js";
 import {
   isDriveAttachment,
   buildDriveAttachment,
+  driveFolderPath,
   formatBytes,
   fileKind,
   fileIconFor,
@@ -61,6 +67,7 @@ export function createFileAttachments({
   removeAttachment,
   currentUser,
   getTaskId,
+  getOwner, // v70: () => ({ code, name }) | ({ id, name }) | null — de quién es el archivo (puede devolver una promesa)
   onDirty,
   makeThumbnail = makeThumbnailBlob,
 }) {
@@ -218,9 +225,16 @@ export function createFileAttachments({
     let driveId = null;
     let thumbId = null;
     try {
+      // Una sola vez por archivo, y se usa para él y para su miniatura: si se cruza el fin
+      // de mes entre una subida y otra, no se quedan cada una en una carpeta.
+      const owner = (getOwner ? await getOwner() : null) || null;
+      const folderPath = driveFolderPath({ owner });
+      const code = (owner && owner.code) || "";
       const out = await storage.uploadFile(u.file, {
         taskId,
         uid: uidOfUser,
+        folderPath,
+        code,
         signal: u.controller.signal,
         onProgress: ({ loaded }) => { u.loaded = loaded; updateProgress(u); },
       });
@@ -235,6 +249,8 @@ export function createFileAttachments({
             name: `${u.name}.miniatura.jpg`,
             taskId,
             uid: uidOfUser,
+            folderPath,
+            code,
             signal: u.controller.signal,
           });
           thumbId = t.driveId;

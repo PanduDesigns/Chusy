@@ -377,7 +377,11 @@ function bootstrap() {
     (arrived) => {
       // v67: las novedades de Chusy se avisan aparte (toast al crearlas, ver más
       // abajo) — el aviso grande y el del sistema son para TAREAS ASIGNADAS.
-      const newOnes = arrived.filter((n) => n.type !== NOTIF_TYPE_NEWS);
+      // v69: y solo las SIN LEER: un aviso recién llegado nunca nace leído, así que
+      // uno leído que aparezca aquí es de los de siempre y no merece aviso. (La
+      // causa de que llegaran de golpe estaba en subscribeToNotifications; esto es
+      // un seguro por si alguna vez Firestore vuelve a entregar los viejos.)
+      const newOnes = arrived.filter((n) => n.type !== NOTIF_TYPE_NEWS && !n.read);
       if (!newOnes.length) return;
       // Aviso grande dentro de la app (siempre) + aviso del sistema fuera de
       // ella (solo si la persona lo activó en "Mi cuenta" y no tiene Chusy

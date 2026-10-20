@@ -3,6 +3,7 @@
 // ============================================================================
 import { el, uid, escapeHtml } from "../utils.js";
 import { mountAppearancePicker } from "./project-appearance-picker.js";
+import { isIdError } from "../project-codes.js";
 
 export function openProjectModal({ onCreate }) {
   const root = document.getElementById("modal-root");
@@ -114,8 +115,11 @@ export function openProjectModal({ onCreate }) {
       await onCreate({ name, description, color: appearance.color, icon: appearance.icon, sections: sections.map((s, i) => ({ ...s, order: i })) });
       close();
     } catch (e) {
+      console.error(e);
       createBtn.disabled = false;
       createBtn.textContent = "Crear proyecto";
+      // v70: crear un proyecto reparte su ID, y si eso falla no debe quedar en silencio.
+      alert(isIdError(e) ? e.message : "No se pudo crear el proyecto. Comprueba tu conexión e inténtalo de nuevo.");
     }
   });
 }

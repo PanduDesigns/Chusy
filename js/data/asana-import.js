@@ -46,6 +46,7 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import { slugifyTag, upsertTag } from "./tags.js";
+import { allocateProjectCode } from "./project-codes.js"; // v70: cada proyecto importado recibe su ID
 import { PROJECT_COLORS, CURATED_ICONS } from "../components/project-appearance-picker.js";
 
 const BATCH_LIMIT = 400; // por debajo del límite de 500 escrituras/lote de Firestore
@@ -391,6 +392,7 @@ export async function runImport(parsed, { currentUser, teamMembers, userMap, onP
       createdAt: serverTimestamp(),
       archived: p.archived,
       asanaGid: p.asanaGid,
+      code: await allocateProjectCode(), // v70: un ID por proyecto importado, en orden
     });
   }
   await flush();

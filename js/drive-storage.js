@@ -25,6 +25,11 @@
 //                        Es el protocolo del ejemplo oficial de Google
 //                        (googledrive/cors-upload-sample).
 //   papelera             PATCH { trashed: true } — recuperable 30 días desde Drive
+//   carpetas (v69)       antes de subir se busca —o se crea— <Proyecto>/<AAAA-MM> dentro de
+//                        la carpeta de Chusy, con la propia API de Drive desde el navegador
+//                        (ensureFolderPath); no hace falta tocar el puente. Cada carpeta
+//                        lleva en `appProperties.folder` una clave estable (v70: el ID de la
+//                        oferta o del proyecto, no su nombre) y así se encuentra siempre.
 // ============================================================================
 import {
   DRIVE_API,
@@ -42,6 +47,8 @@ import {
   parseRangeHeader,
   isDriveAttachment,
   buildDriveAttachment,
+  driveQueryString,
+  TEST_FOLDER_PATH,
 } from "./drive-files.js";
 
 const NETWORK_MESSAGE = "No se pudo conectar con Google Drive. Comprueba tu conexión e inténtalo de nuevo.";
@@ -50,6 +57,8 @@ const GATEWAY_UNREACHABLE_MESSAGE =
 const MAX_RETRIES = 6;
 /** Cuánto se reutiliza el permiso del puente antes de pedir otro (Google lo da por ~1 hora). */
 const TOKEN_REUSE_SECONDS = 15 * 60;
+/** Cuánto se recuerda el id de la carpeta de un proyecto/mes antes de volver a preguntarle a Drive. */
+const FOLDER_REUSE_SECONDS = 15 * 60;
 
 export class DriveError extends Error {
   constructor(code, message, extra = {}) {
@@ -115,6 +124,7 @@ export function createDriveStorage({
 }) {
   let tokenInfo = null;
   let tokenPromise = null;
+  const folderCache = new Map(); // «<carpeta madre>/<clave>» → { promise: Promise<{ id, created }>, expiresAt }
   const thumbCache = new Map(); // thumbId → Promise<url de blob>
   const thumbUrls = new Map(); // thumbId → url de blob ya resuelta (para revocarlas)
   let thumbActive = 0;
@@ -198,6 +208,7 @@ export function createDriveStorage({
     thumbUrls.forEach((url) => { try { revokeObjectURL(url); } catch (e) { /* ya revocada */ } });
     thumbUrls.clear();
     thumbCache.clear();
+    folderCache.clear();
   }
 
   // -------------------------------------------------------------------------
@@ -257,6 +268,118 @@ export function createDriveStorage({
   }
 
   const backoff = (n) => Math.min(30000, 1000 * 2 ** (n - 1)) + Math.floor(Math.random() * 250);
+
+  // -------------------------------------------------------------------------
+  // Carpetas (v69): <Proyecto>/<AAAA-MM> dentro de «Chusy - archivos»
+  // -------------------------------------------------------------------------
+
+  /** La carpeta hija de `parentId` con esa clave (la más antigua si, por una carrera entre dos personas, hubiera dos), o null. */
+  async function findFolder(parentId, key) {
+    const q = [
+      "mimeType = 'application/vnd.google-apps.folder'",
+      "trashed = false",
+      `${driveQueryString(parentId)} in parents`,
+      `appProperties has { key='folder' and value=${driveQueryString(key)} }`,
+    ].join(" and ");
+    const res = await driveFetch(`${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent("files(id)")}&orderBy=createdTime&pageSize=10`);
+    if (!res.ok) throw await driveHttpError(res);
+    const data = parseJson(await res.text());
+    const files = data && Array.isArray(data.files) ? data.files : [];
+    return files.length ? files[0] : null;
+  }
+
+  async function createFolder(parentId, seg) {
+    const res = await driveFetch(`${DRIVE_API}/files?fields=id`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: seg.name,
+        mimeType: "application/vnd.google-apps.folder",
+        parents: [parentId],
+        description: "Carpeta creada por Chusy para ordenar los archivos adjuntos.",
+        appProperties: { chusy: "1", role: "folder", folder: seg.key },
+      }),
+    });
+    if (!res.ok) throw await driveHttpError(res);
+    const data = parseJson(await res.text());
+    if (!data || !data.id) throw new DriveError("bad_folder_response", "Google Drive no devolvió el identificador de la carpeta.");
+    return data.id;
+  }
+
+  /**
+   * Busca —y si no está, crea— la carpeta `seg` ({ key, name }) dentro de `parentId`.
+   * Se guarda la PROMESA, no solo el resultado: dos subidas a la vez al mismo
+   * proyecto (Chusy sube de 2 en 2) esperan la misma búsqueda en vez de crear
+   * cada una su carpeta. A propósito NO recibe la señal de cancelación de quien
+   * la pide: es una promesa compartida, y cancelar una subida no debe hacer
+   * fallar la otra.
+   */
+  function ensureFolder(parentId, seg) {
+    const cacheKey = `${parentId}/${seg.key}`;
+    const hit = folderCache.get(cacheKey);
+    if (hit && now() < hit.expiresAt) return hit.promise;
+    const promise = (async () => {
+      const found = await findFolder(parentId, seg.key);
+      if (found) return { id: found.id, created: false };
+      return { id: await createFolder(parentId, seg), created: true };
+    })();
+    folderCache.set(cacheKey, { promise, expiresAt: now() + FOLDER_REUSE_SECONDS * 1000 });
+    promise.catch(() => { // un fallo no se queda guardado
+      const cur = folderCache.get(cacheKey);
+      if (cur && cur.promise === promise) folderCache.delete(cacheKey);
+    });
+    return promise;
+  }
+
+  /**
+   * Prepara la cadena de carpetas `path` (lo que da driveFolderPath, de fuera
+   * adentro) dentro de «Chusy - archivos» y devuelve { folderId, created }: el
+   * id de la última, y si hubo que crear alguna. Lanza si Drive no deja.
+   */
+  async function ensureFolderPath(path) {
+    const tok = await getToken();
+    let parentId = tok.folderId;
+    let created = false;
+    for (const seg of path || []) {
+      const r = await ensureFolder(parentId, seg);
+      parentId = r.id;
+      created = created || r.created;
+    }
+    return { folderId: parentId, created };
+  }
+
+  /**
+   * Dónde va un archivo nuevo: la carpeta de `folderPath` o, si no se pide
+   * ninguna o Drive no deja prepararla, la carpeta principal. Ordenar es un
+   * extra: nunca debe impedir una subida (el motivo queda en la consola, y
+   * «Probar conexión» lo enseña).
+   */
+  async function parentFor(tok, folderPath) {
+    if (!folderPath || !folderPath.length) return tok.folderId;
+    try {
+      return (await ensureFolderPath(folderPath)).folderId;
+    } catch (e) {
+      console.warn("Drive: no se pudieron preparar las carpetas; el archivo va a la carpeta principal", e);
+      return tok.folderId;
+    }
+  }
+
+  /** La carpeta de un archivo de Drive y su ID (`appProperties.code`, v70): `{ parentId, code }`, con null/"" para lo que no se pueda saber. */
+  async function infoOf(driveId) {
+    const none = { parentId: null, code: "" };
+    try {
+      const res = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(driveId)}?fields=parents,appProperties`);
+      if (!res.ok) return none;
+      const data = parseJson(await res.text());
+      if (!data) return none;
+      return {
+        parentId: Array.isArray(data.parents) && data.parents[0] ? data.parents[0] : null,
+        code: data.appProperties && data.appProperties.code ? String(data.appProperties.code) : "",
+      };
+    } catch (e) {
+      return none;
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Subida
@@ -394,10 +517,15 @@ export function createDriveStorage({
    *   allowFallback  false = si la subida reanudable no está disponible, fallar en vez de
    *                  caer en la subida de una vez (lo usa «Probar conexión», que debe
    *                  avisar de ese problema aunque los archivos pequeños sigan funcionando)
+   *   folderPath  (v69) las carpetas donde va, de fuera adentro — ver driveFolderPath en
+   *               drive-files.js. Sin ella, a la carpeta principal de Chusy.
+   *   code        (v70) el ID de la oferta o del proyecto al que pertenece el archivo: se anota
+   *               en el archivo (`appProperties.code` y la descripción) para poder localizarlo
+   *               por él aunque alguien lo mueva de carpeta.
    * Devuelve { driveId, name, mimeType, size }.
    */
   async function uploadFile(file, opts = {}) {
-    const { taskId = "", uid = "", role = "file", name, onProgress, signal, chunkBytes = CHUNK_BYTES, forceResumable = false, allowFallback = true } = opts;
+    const { taskId = "", uid = "", role = "file", name, onProgress, signal, chunkBytes = CHUNK_BYTES, forceResumable = false, allowFallback = true, folderPath = null, code = "" } = opts;
     if (!isEnabled()) throw new DriveError("disabled", "El almacenamiento de archivos no está activado.");
     const size = Number(file && file.size) || 0;
     if (size <= 0) throw new DriveError("empty", "El archivo está vacío.");
@@ -409,24 +537,33 @@ export function createDriveStorage({
     const fileName = sanitizeFileName(name || file.name, role === "thumb" ? "miniatura.jpg" : "archivo");
     const report = (loaded) => { if (onProgress) onProgress({ loaded: Math.min(loaded, size), total: size }); };
     const tok = await getToken();
+    const parentId = await parentFor(tok, folderPath);
+    if (signal && signal.aborted) throw abortError(); // se canceló mientras se preparaban las carpetas
     const meta = {
       name: fileName,
       mimeType: mime,
-      parents: [tok.folderId],
-      description: "Subido desde Chusy",
-      appProperties: { chusy: "1", role, ...(taskId ? { task: String(taskId) } : {}), ...(uid ? { by: String(uid) } : {}) },
+      parents: [parentId],
+      description: code ? `Subido desde Chusy · ID ${code}` : "Subido desde Chusy",
+      appProperties: { chusy: "1", role, ...(taskId ? { task: String(taskId) } : {}), ...(uid ? { by: String(uid) } : {}), ...(code ? { code: String(code) } : {}) },
     };
     let result;
-    if (!forceResumable && size <= MULTIPART_LIMIT_BYTES) {
-      result = await uploadMultipart(file, meta, mime, report, signal);
-    } else {
-      result = await uploadResumable(file, meta, mime, size, report, signal, chunkBytes);
-      if (result === null) {
-        if (!allowFallback || size > MULTIPART_FALLBACK_LIMIT_BYTES) {
-          throw new DriveError("no_session_uri", "Google Drive no devolvió la dirección de la subida reanudable (la cabecera «Location» no llegó al navegador). Los archivos pequeños se subirían igualmente, pero los grandes no.");
-        }
+    try {
+      if (!forceResumable && size <= MULTIPART_LIMIT_BYTES) {
         result = await uploadMultipart(file, meta, mime, report, signal);
+      } else {
+        result = await uploadResumable(file, meta, mime, size, report, signal, chunkBytes);
+        if (result === null) {
+          if (!allowFallback || size > MULTIPART_FALLBACK_LIMIT_BYTES) {
+            throw new DriveError("no_session_uri", "Google Drive no devolvió la dirección de la subida reanudable (la cabecera «Location» no llegó al navegador). Los archivos pequeños se subirían igualmente, pero los grandes no.");
+          }
+          result = await uploadMultipart(file, meta, mime, report, signal);
+        }
       }
+    } catch (e) {
+      // 404 al subir = la carpeta de destino ya no existe (alguien la borró en Drive mientras estaba en la
+      // caché): se olvida, y el «Reintentar» de la subida la vuelve a buscar o crear en vez de repetir el error.
+      if (folderPath && e && e.code === "drive_notFound") folderCache.clear();
+      throw e;
     }
     if (!result || !result.id) throw new DriveError("bad_upload_response", "Google Drive no devolvió el identificador del archivo.");
     report(size);
@@ -522,17 +659,24 @@ export function createDriveStorage({
     return out;
   }
 
-  /** Copia un archivo de Drive (dentro de Drive, sin descargarlo) y devuelve el id de la copia. */
+  /**
+   * Copia un archivo de Drive (dentro de Drive, sin descargarlo) y devuelve el id de la copia.
+   * v69: la copia va a la MISMA carpeta que el original (la del proyecto y mes en que se
+   * subió; la principal si es de antes de las carpetas, o si no se puede saber). v70: y
+   * lleva el mismo ID anotado.
+   */
   async function copyFile(driveId, { name, taskId = "", uid = "", role = "file" } = {}) {
     const tok = await getToken();
+    const { parentId: sourceParent, code } = await infoOf(driveId);
+    const parentId = sourceParent || tok.folderId;
     const res = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(driveId)}/copy?fields=id`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: sanitizeFileName(name),
-        parents: [tok.folderId],
-        description: "Subido desde Chusy",
-        appProperties: { chusy: "1", role, ...(taskId ? { task: String(taskId) } : {}), ...(uid ? { by: String(uid) } : {}) },
+        parents: [parentId],
+        description: code ? `Subido desde Chusy · ID ${code}` : "Subido desde Chusy",
+        appProperties: { chusy: "1", role, ...(taskId ? { task: String(taskId) } : {}), ...(uid ? { by: String(uid) } : {}), ...(code ? { code } : {}) },
       }),
     });
     if (!res.ok) throw await driveHttpError(res);
@@ -605,7 +749,7 @@ export function createDriveStorage({
       if (created.length) {
         await run("trash", "Mandar los archivos de prueba a la papelera", async () => {
           const r = await trashFiles(created);
-          if (r.failed) throw new Error(`${r.failed} archivo(s) de prueba no se pudieron borrar; bórralos a mano de la carpeta «Chusy - archivos».`);
+          if (r.failed) throw new Error(`${r.failed} archivo(s) de prueba no se pudieron borrar; bórralos a mano de la carpeta «Pruebas de conexión» (dentro de «Chusy - archivos»).`);
           return "";
         });
       }
@@ -622,17 +766,27 @@ export function createDriveStorage({
       return t.folderId ? "carpeta de Chusy lista" : "";
     }))) return finish();
 
-    if (!(await run("small", "Subir un archivo pequeño", async () => {
+    let testFolderId = null;
+    if (!(await run("folders", "Preparar la carpeta de pruebas (como las de proyecto y mes)", async () => {
+      const r = await ensureFolderPath(TEST_FOLDER_PATH);
+      testFolderId = r.folderId;
+      return r.created ? "carpeta «Pruebas de conexión» creada" : "carpeta «Pruebas de conexión» ya existente";
+    }))) return finish();
+
+    if (!(await run("small", "Subir un archivo pequeño a esa carpeta", async () => {
       const blob = new Blob([testBytes(2048)], { type: "text/plain" });
-      const r = await uploadFile(blob, { role: "test", name: "chusy-prueba-pequena.txt" });
+      const r = await uploadFile(blob, { role: "test", name: "chusy-prueba-pequena.txt", folderPath: TEST_FOLDER_PATH });
       created.push(r.driveId);
+      const { parentId: parent } = await infoOf(r.driveId);
+      if (!parent) throw new Error("El archivo se subió, pero no se pudo comprobar en qué carpeta quedó.");
+      if (parent !== testFolderId) throw new Error("El archivo se subió, pero no quedó dentro de la carpeta de pruebas: las carpetas por proyecto y mes no funcionarían (los archivos irían a la carpeta principal).");
       return "";
     }))) return finish();
 
     let bigId = null;
     if (!(await run("resumable", "Subir un archivo por trozos (reanudable)", async () => {
       const blob = new Blob([testBytes(600000)], { type: "application/octet-stream" });
-      const r = await uploadFile(blob, { role: "test", name: "chusy-prueba-trozos.bin", forceResumable: true, chunkBytes: 262144, allowFallback: false });
+      const r = await uploadFile(blob, { role: "test", name: "chusy-prueba-trozos.bin", forceResumable: true, chunkBytes: 262144, allowFallback: false, folderPath: TEST_FOLDER_PATH });
       created.push(r.driveId);
       bigId = r.driveId;
       return "3 trozos";
@@ -659,6 +813,7 @@ export function createDriveStorage({
     resetToken,
     reset,
     uploadFile,
+    ensureFolderPath,
     downloadBlob,
     getThumbUrl,
     trashFiles,

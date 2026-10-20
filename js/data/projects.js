@@ -12,6 +12,8 @@ import {
   isOffersProject,
   planOfferRepositioning,
 } from "../offers.js";
+import { PROJECT_CODE_SEED } from "../project-codes.js";
+import { allocateProjectCode, backfillProjectCodes, healProjectCodes } from "./project-codes.js";
 import {
   collection,
   doc,
@@ -55,8 +57,16 @@ const DEFAULT_SECTIONS = [
  * las manda la conversión de una oferta en proyecto (offer-conversion.js);
  * "+ Nuevo proyecto" no las pregunta, y se rellenan después desde
  * "Propiedades" en el menú de clic derecho del proyecto.
+ *
+ * `code` (v70) — el ID del proyecto (XXXYY, ver project-codes.js). Si no se
+ * pasa, se reparte uno nuevo ahora; solo lo pasa la conversión de una oferta
+ * (offer-conversion.js), porque el proyecto HEREDA el ID de la oferta. Los
+ * proyectos exclusivos (Ofertas, la «sección», no una oferta) no llevan ID.
+ * Si no se puede repartir (sin conexión, reglas sin publicar), lanza y el
+ * proyecto NO se crea: no debe haber proyectos sin ID.
  */
-export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments, seedVersion, properties }) {
+export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments, seedVersion, properties, code }) {
+  const projectCode = exclusive ? null : code || (await allocateProjectCode());
   const ref = await addDoc(collection(db, "projects"), {
     name,
     description: description || "",
@@ -77,6 +87,7 @@ export async function createProject({ name, description, color, icon, creatorUid
     ...(exclusive ? { exclusive: true, exclusiveKey, allowedDepartments: allowedDepartments || [] } : {}),
     ...(seedVersion ? { seedVersion } : {}),
     ...(properties ? { properties } : {}),
+    ...(projectCode ? { code: projectCode } : {}),
   });
   return ref.id;
 }
@@ -221,7 +232,7 @@ export function isProjectVisibleToUser(project, user) {
 const EXCLUSIVE_PROJECT_SEEDS = [
   {
     exclusiveKey: OFFERS_KEY,
-    seedVersion: 3,
+    seedVersion: PROJECT_CODE_SEED, // 4 (v70): numera las ofertas y proyectos que ya existían — no añade ningún campo ni sección
     fieldsAddedIn: { 2: ["ubicacion"], 3: ["sector"] }, // v56: Ubicación · v58: Sector
     sectionsAddedIn: { 3: [OFFER_SECTION_DELIVERED, OFFER_SECTION_CLOSED] }, // v58: Entregadas, Cerradas
     name: "Ofertas",
@@ -259,10 +270,13 @@ const EXCLUSIVE_PROJECT_SEEDS = [
  * la `seedVersion`. Así, si algo falla a medias, la próxima vez que un
  * admin entre se repite entero (todos los pasos son idempotentes) en vez
  * de darse por hecho con las ofertas sin recolocar.
+ *
+ * v70: el paso 4 de la semilla de Ofertas solo numera lo que ya existía (ver
+ * backfillProjectCodes, data/project-codes.js). Devuelve true si numeró.
  */
 async function migrateSeededProject(project, seed) {
   const have = project.seedVersion || 1;
-  if (have >= seed.seedVersion) return;
+  if (have >= seed.seedVersion) return false;
   const defs = [...(project.customFieldDefs || [])];
   const sections = [...(project.sections || [])];
   let nextOrder = sections.reduce((max, s) => Math.max(max, Number.isFinite(s.order) ? s.order : -1), -1) + 1;
@@ -283,7 +297,13 @@ async function migrateSeededProject(project, seed) {
   const updated = { ...project, customFieldDefs: defs, sections };
   await updateProject(project.id, { customFieldDefs: defs, sections });
   if (isOffersProject(project) && have < 3) await repositionExistingOffers(updated);
+  // v70: numerar las ofertas y proyectos de antes. Como el resto de pasos, es idempotente
+  // y va ANTES de guardar la `seedVersion`: si se corta a medias, la próxima vez que
+  // entre un admin continúa donde se quedó.
+  const numbered = isOffersProject(project) && have < PROJECT_CODE_SEED;
+  if (numbered) await backfillProjectCodes({ offersProject: updated });
   await updateProject(project.id, { seedVersion: seed.seedVersion });
+  return numbered;
 }
 
 /**
@@ -319,11 +339,12 @@ async function repositionExistingOffers(project) {
 }
 
 export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid) {
+  let numbered = false;
   for (const seed of EXCLUSIVE_PROJECT_SEEDS) {
     const existing = currentProjects.find((p) => p.exclusiveKey === seed.exclusiveKey);
     try {
       if (existing) {
-        await migrateSeededProject(existing, seed);
+        numbered = (await migrateSeededProject(existing, seed)) || numbered;
         continue;
       }
       await createProject({
@@ -341,6 +362,12 @@ export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid)
     } catch (e) {
       console.error("ensureExclusiveProjectsSeeded:", seed.exclusiveKey, e);
     }
+  }
+  // v70: cada vez que entra un admin, los proyectos que se hayan quedado sin ID (uno
+  // restaurado de la Papelera que era de antes de la v70, por ejemplo) reciben el suyo.
+  // Si la migración acaba de numerar todo, no hace falta: esta lista es la de antes.
+  if (!numbered) {
+    try { await healProjectCodes(currentProjects); } catch (e) { console.error("healProjectCodes:", e); }
   }
 }
 

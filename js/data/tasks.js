@@ -52,6 +52,7 @@ import {
 import { toEditableHtml, escapeHtml, renderTitleHtml, uid, showToast } from "../utils.js";
 import { offerCompletionFields, planTaskToOffer } from "../offers.js";
 import { getOffersProject } from "./projects.js";
+import { allocateProjectCode } from "./project-codes.js";
 import { trashTasks } from "./trash.js";
 // v68 — archivos adjuntos en Google Drive (ver drive-service.js): duplicar una
 // tarea COPIA sus archivos en Drive, y combinar duplicadas no se lleva los de
@@ -60,7 +61,19 @@ import { trashTasks } from "./trash.js";
 import { copyAttachmentsForDuplicate } from "../drive-service.js";
 import { attachmentKey, isDriveAttachment } from "../drive-files.js";
 
+/**
+ * Crea una tarea. v70: si es una OFERTA (pertenece a Ofertas, como proyecto
+ * principal o como adicional) nace con su ID (`offerCode`, ver project-codes.js).
+ * `data.offerCode` lo trae quien ya lo había pedido antes de guardar (el
+ * formulario de una oferta nueva con archivos subidos: van a la carpeta de Drive
+ * de ese ID); si no viene, se reparte uno aquí — así toda vía de crear ofertas
+ * (formulario, macro de Outlook, duplicar) lo recibe sin hacer nada. Si no se
+ * puede repartir, lanza y la oferta NO se crea.
+ */
 export async function createTask(projectId, data) {
+  const offers = getOffersProject();
+  const isOffer = !!offers && (projectId === offers.id || (data.extraProjectIds || []).includes(offers.id));
+  const offerCode = isOffer ? data.offerCode || (await allocateProjectCode()) : null;
   const ref = await addDoc(collection(db, "tasks"), {
     projectId: projectId || null,
     ownerId: data.ownerId || null,
@@ -81,6 +94,7 @@ export async function createTask(projectId, data) {
     // v57: solo una oferta lo manda (nace con su fila A1 «Versión original»,
     // ver task-modal.js); una tarea normal no gana un `revisions` vacío.
     ...(Array.isArray(data.revisions) ? { revisions: data.revisions } : {}),
+    ...(offerCode ? { offerCode } : {}),
     isComplete: data.isComplete || false,
     isMilestone: data.isMilestone || false,
     completedAt: null,
@@ -496,7 +510,8 @@ export async function bulkConvertToOffers(tasks, { defaultSector } = {}) {
   const plans = new Map();
   for (const t of tasks) {
     const fields = planTaskToOffer(offersProject, t, { defaultSector, makeId: uid, now });
-    if (fields) plans.set(t.id, fields);
+    // v70: una tarea que pasa a ser oferta recibe su ID (uno por tarea, en orden)
+    if (fields) plans.set(t.id, { ...fields, offerCode: t.offerCode || (await allocateProjectCode({ date: now })) });
   }
   if (plans.size) await runBatchedUpdate([...plans.keys()], (id) => plans.get(id));
   return { converted: plans.size, skipped: tasks.length - plans.size };

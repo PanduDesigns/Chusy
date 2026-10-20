@@ -25,6 +25,16 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 70,
+    date: "2026-10-17",
+    title: "ID único para ofertas y proyectos",
+    items: [
+      "Cada oferta y cada proyecto tiene ahora un ID de cinco cifras, por ejemplo 00126: las tres primeras son el número de orden, que vuelve a empezar en 000 cada año, y las dos últimas, el año en que se creó (la primera de 2027 será la 00027, la segunda la 00127…). Nace con la oferta y el proyecto en que se convierte lo hereda; un proyecto nuevo recibe el suyo al crearse. Las ofertas y proyectos que ya existían se numeran de más antiguo a más nuevo.",
+      "Lo ves en la cabecera de la ventana de la oferta y en «Propiedades» del proyecto (clic derecho sobre él); un clic lo copia.",
+      "Los archivos de Drive se guardan ahora en una carpeta con ese ID, la misma para la oferta y para su proyecto.",
+    ],
+  },
+  {
     id: 68,
     date: "2026-10-14",
     title: "Archivos en las tareas",

@@ -78,35 +78,54 @@ export function notificationTaskCount(n) {
   return n && n.type === NOTIF_TYPE_ASSIGNED_BULK ? Math.max(1, Number(n.count) || 1) : 1;
 }
 
+// Cómo se leen los datos de un aviso: un `serverTimestamp()` aún sin confirmar por el
+// servidor (un aviso recién escrito por ESTA sesión, como el de novedades) llega como
+// `null` con la lectura normal; con `estimate` llega con la hora local, y así se ordena
+// como lo que es, el más nuevo, y no como el más antiguo.
+const SNAP_OPTIONS = { serverTimestamps: "estimate" };
+
+const createdMs = (n) => n.createdAt?.toMillis?.() ?? 0;
+
 /**
  * `onNewNotifications`, si se pasa, se llama SOLO con notificaciones que
  * llegan de verdad mientras la sesión ya está abierta — nunca con las
- * que ya existieran al arrancar la suscripción (el primer snapshot de
- * Firestore siempre trae TODO el resultado actual marcado como "added",
- * así que hace falta descartar explícitamente esa primera vuelta, o
- * cualquiera que abriera la app con notificaciones pendientes vería un
- * aviso emergente por cada una de golpe). Pensado para el aviso
- * "llamativo" de notification-bell.js — el puntito de la campana, en
- * cambio, sí debe reflejar también las que ya hubiera de antes, por eso
- * `callback` (la lista completa) no tiene este filtro.
+ * que ya existieran al arrancar la suscripción. Hace falta descartarlas
+ * explícitamente: la primera tanda de Firestore trae TODO el resultado actual
+ * marcado como "added", y sin descartarla cualquiera que abriera la app con
+ * notificaciones pendientes vería un aviso emergente por cada una de golpe.
+ * Pensado para el aviso "llamativo" de notification-bell.js — el puntito de la
+ * campana, en cambio, sí debe reflejar también las que ya hubiera de antes,
+ * por eso `callback` (la lista completa) no tiene este filtro.
+ *
+ * (v69) «La primera tanda» NO es «la primera vez que Firestore llama»: es la
+ * primera instantánea CONFIRMADA POR EL SERVIDOR (`metadata.fromCache === false`).
+ * Si justo después de suscribirse se escribe un aviso propio —lo hace
+ * announceNews() al entrar tras cada versión nueva—, Firestore llama primero con
+ * una instantánea hecha solo con esa escritura local (un único documento,
+ * `fromCache: true`) y solo después con lo que trae el servidor: todos los avisos
+ * de siempre, que entonces llegaban como «added» y salían como «Tienes N tareas
+ * nuevas» aunque ya estuvieran leídas. De ahí `includeMetadataChanges: true`: sin
+ * él, Firestore no avisa del paso de caché a servidor cuando no cambia ningún
+ * documento, y la carga inicial podría no darse nunca por terminada.
  */
 export function subscribeToNotifications(uid, callback, onNewNotifications) {
   const q = query(collection(db, "notifications"), where("userId", "==", uid));
-  let isFirstSnapshot = true;
+  let initialLoadDone = false; // pasa a true con la primera instantánea del servidor
   return onSnapshot(
     q,
+    { includeMetadataChanges: true },
     (snap) => {
       const list = [];
-      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      list.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+      snap.forEach((d) => list.push({ id: d.id, ...d.data(SNAP_OPTIONS) }));
+      list.sort((a, b) => createdMs(b) - createdMs(a));
       callback(list);
-      if (!isFirstSnapshot && onNewNotifications) {
+      if (initialLoadDone && onNewNotifications) {
         const added = snap.docChanges()
           .filter((c) => c.type === "added")
-          .map((c) => ({ id: c.doc.id, ...c.doc.data() }));
+          .map((c) => ({ id: c.doc.id, ...c.doc.data(SNAP_OPTIONS) }));
         if (added.length) onNewNotifications(added);
       }
-      isFirstSnapshot = false;
+      if (!snap.metadata.fromCache) initialLoadDone = true; // esta misma instantánea (la inicial) ya se ha descartado arriba
       enforceNotificationLimits(list).catch((err) => console.error("enforceNotificationLimits:", err));
     },
     (err) => {
@@ -137,7 +156,7 @@ async function enforceNotificationLimits(list) {
   if (excess > 0) {
     const readOldestFirst = list
       .filter((n) => n.read || autoRead.has(n.id))
-      .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
+      .sort((a, b) => createdMs(a) - createdMs(b));
     readOldestFirst.slice(0, excess).forEach((n) => {
       batch.delete(doc(db, "notifications", n.id));
       touched = true;

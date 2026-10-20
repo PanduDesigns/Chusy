@@ -15,6 +15,11 @@
 //      además a la sección «Cerradas» (la de las ofertas ya convertidas),
 //      en esa misma escritura.
 //
+// v70 — el ID: el proyecto HEREDA el ID de la oferta (`offerCode` → `code`, el
+// mismo valor), que es lo que une los archivos de Drive de la oferta con los del
+// proyecto. Una oferta que por lo que sea no tuviera ID (anterior a la v70 y aún
+// sin numerar) recibe uno ahora, y el proyecto el mismo.
+//
 // No son una única operación atómica (son dos documentos y el proyecto tiene
 // que existir antes de poder enlazarlo). Si la segunda falla —sin conexión
 // justo en ese momento, por ejemplo— el proyecto queda creado igualmente y
@@ -24,6 +29,7 @@
 // ============================================================================
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import { createProject } from "./projects.js";
+import { allocateProjectCode } from "./project-codes.js";
 import { updateTask } from "./tasks.js";
 import { findOffersSection, offerSectionFields, OFFER_SECTION_CLOSED } from "../offers.js";
 
@@ -36,12 +42,14 @@ import { findOffersSection, offerSectionFields, OFFER_SECTION_CLOSED } from "../
  * @returns {Promise<{ projectId: string, linked: boolean }>}
  */
 export async function convertOfferToProject({ offer, name, properties, creatorUid, offersProject }) {
-  const projectId = await createProject({ name, creatorUid, properties });
+  const code = offer.offerCode || (await allocateProjectCode());
+  const projectId = await createProject({ name, creatorUid, properties, code });
   const closed = offersProject ? findOffersSection(offersProject, OFFER_SECTION_CLOSED) : null;
   try {
     await updateTask(offer.id, {
       convertedProjectId: projectId,
       convertedAt: serverTimestamp(),
+      ...(offer.offerCode ? {} : { offerCode: code }),
       isComplete: true,
       ...(offer.isComplete ? {} : { completedAt: serverTimestamp() }),
       ...(closed ? offerSectionFields(offersProject, offer, closed.id) : {}),

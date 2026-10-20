@@ -60,6 +60,13 @@ rules_version = '2';
 //  - meta/outlookBridge: `{key}` — la clave compartida con la macro de
 //    Outlook (v61, «Conexión con Outlook»). Solo un admin la lee o la
 //    cambia; borrarla apaga la conexión.
+//  - meta/projectCounter y meta/projectCounter-27, -28…: `{next}` — los contadores
+//    de los que sale el número de orden del ID de cada oferta y proyecto (v70,
+//    XXXYY, apartado 3.14 del README): uno por año, porque el número se reinicia
+//    cada año (el de 2026 es `projectCounter`; los siguientes se crean solos).
+//    Los lee y los sube cualquier cuenta activa (quien crea una oferta o un
+//    proyecto reparte el siguiente número, en una transacción), pero SOLO de uno
+//    en uno: nada puede rebobinarlos —repetiría un ID— y nadie los borra.
 //  - offerInbox/{id}: peticiones de oferta que deja la macro «Crear
 //    carpeta de proyecto» de Outlook para que la pestaña de Chusy abierta
 //    de su destinatario (`targetEmail`) cree la oferta (v61). Es la ÚNICA
@@ -207,6 +214,39 @@ service cloud.firestore {
     match /meta/driveStorage {
       allow read: if isActiveUser();
       allow write: if isAdmin();
+    }
+
+    // ---- ID de oferta y de proyecto (v70, apartado 3.14 del README): el contador
+    // de 2026, `{ next }` (el próximo número de orden libre de ese año). Repartir
+    // un ID es una transacción que lo lee y escribe `next + 1`; por eso una cuenta
+    // activa puede crearlo (solo con valor 1, la primera vez) y subirlo, pero
+    // únicamente de uno en uno — ni saltos ni marcha atrás: un contador que baja
+    // repite IDs. ----
+    match /meta/projectCounter {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser() &&
+        request.resource.data.keys().hasOnly(['next']) &&
+        request.resource.data.next == 1;
+      allow update: if isActiveUser() &&
+        request.resource.data.keys().hasOnly(['next']) &&
+        request.resource.data.next == resource.data.next + 1;
+      allow delete: if false;
+    }
+
+    // ---- Los contadores de los años siguientes: `projectCounter-27`, `-28`…
+    // (v71: el número de orden se reinicia cada año). Cada uno se crea solo al
+    // pedir el primer ID de su año (con valor 1) y luego sube de uno en uno, igual
+    // que el de 2026. El comodín solo concede algo a los documentos con ESE nombre:
+    // los demás `meta/...` siguen rigiéndose por sus propios bloques. ----
+    match /meta/{counterId} {
+      allow read: if isActiveUser() && counterId.matches('projectCounter-[0-9][0-9]');
+      allow create: if isActiveUser() && counterId.matches('projectCounter-[0-9][0-9]') &&
+        request.resource.data.keys().hasOnly(['next']) &&
+        request.resource.data.next == 1;
+      allow update: if isActiveUser() && counterId.matches('projectCounter-[0-9][0-9]') &&
+        request.resource.data.keys().hasOnly(['next']) &&
+        request.resource.data.next == resource.data.next + 1;
+      allow delete: if false;
     }
 
     // ---- Oferta desde Outlook (v61, apartado «Oferta desde Outlook» del

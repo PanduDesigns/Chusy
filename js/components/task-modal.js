@@ -51,6 +51,13 @@
 // pero su ficha solo se guarda en la tarea con «Aceptar»; al cerrar sin
 // guardar, lo subido en esta apertura se manda a la papelera de Drive, y al
 // guardar, lo quitado también (ver finalizeSaved/discardUnsaved).
+//
+// v70: una OFERTA tiene un ID (`offerCode`, ver project-codes.js) que se ve en la
+// cabecera del formulario (solo lectura; un clic lo copia). Nace al crearla —a
+// más tardar al guardar— y lo usa Drive para ordenar sus archivos: una oferta
+// NUEVA con archivos subidos antes de guardar lo pide al subir el primero
+// (`resolveOfferCode`) y createTask lo recibe después con el resto de campos.
+// Igual que `revisions`, vive aparte de `draft`: no se vuelca entero en Firestore.
 // ============================================================================
 import { createTask, updateTask, getTask, nextPersonalOwnerId } from "../data/tasks.js";
 import { notifyNewAssignees } from "../data/notifications.js";
@@ -93,6 +100,9 @@ import { createRichTextEditor } from "./rich-text-editor.js";
 import { driveService } from "../drive-service.js";
 import { isDriveAttachment } from "../drive-files.js";
 import { createFileAttachments } from "./file-attachments.js";
+import { allocateProjectCode } from "../data/project-codes.js";
+import { createCodeResolver, isIdError, PROJECT_CODE_SEED } from "../project-codes.js";
+import { idChipHtml, idPendingHtml, wireIdChips } from "./id-chip.js";
 
 const PRIORITIES = ["urgente", "alta", "media", "baja"];
 let lastPickedTagColor = TAG_COLOR_PALETTE[0];
@@ -193,6 +203,27 @@ export function openTaskModal({
   // tras GUARDAR (decide si lo subido/quitado se confirma o se descarta).
   let fileUi = null;
   let savedOk = false;
+  // v70: el ID de la oferta (null = todavía sin ID) y si se lo ha dado ESTA apertura del
+  // modal a una oferta que ya existía sin él (entonces hay que guardarlo con «Aceptar»).
+  let offerCode = null;
+  let offerCodeAssignedHere = false;
+  // Pide el ID cuando hace falta y UNA sola vez, aunque varias subidas lo pidan a la vez.
+  const resolveOfferCode = createCodeResolver({
+    get: () => offerCode,
+    // Una oferta NUEVA ya puede recibirlo. Una que ya existía sin ID, solo cuando la migración de la v70
+    // ya numeró lo anterior (si no, el recorrido de la primera vez la numerará por orden de creación).
+    canAllocate: () => {
+      const offers = offersProject();
+      if (!offers) return false;
+      return isNew || (offers.seedVersion || 1) >= PROJECT_CODE_SEED;
+    },
+    allocate: () => allocateProjectCode(),
+    onAllocated: (code) => {
+      offerCode = code;
+      offerCodeAssignedHere = !isNew;
+      renderCodeChip();
+    },
+  });
 
   const overlay = el(`<div class="modal-overlay"><div class="modal"><div style="padding:40px;text-align:center;color:var(--color-text-lo);">Cargando…</div></div></div>`);
   root.appendChild(overlay);
@@ -212,6 +243,7 @@ export function openTaskModal({
       loadedOwnerId = t.ownerId || null;
       loadedAssigneeIds = t.assigneeIds || [];
       convertedProjectId = t.convertedProjectId || null;
+      offerCode = t.offerCode || null;
       convertedAtIso = toIso(t.convertedAt);
       taskCreatedIso = toIso(t.createdAt);
       revisions = (t.revisions || []).map((r) => ({
@@ -273,6 +305,7 @@ export function openTaskModal({
           <button class="task-row__check${draft.isComplete ? " is-checked" : ""}" id="t-complete" title="Marcar como completada" style="width:22px;height:22px;">${draft.isComplete ? "✓" : ""}</button>
           <input class="modal__title-input" id="t-title" value="${escapeHtml(draft.title)}" placeholder="Título de la ${offersProject() ? "oferta" : "tarea"}">
           <button type="button" class="modal__title-bold-btn" id="t-title-bold" title="Negrita: selecciona texto del título y pulsa (o Ctrl/Cmd+B)">B</button>
+          <span id="t-code-slot"></span>
           <button class="modal__close" id="t-close">✕</button>
         </div>
         <div class="modal__title-preview" id="t-title-preview"></div>
@@ -687,6 +720,33 @@ export function openTaskModal({
     }
   }
 
+  /** El ID de la oferta en la cabecera (solo si la tarea es una oferta): se copia con un clic; sin ID todavía, un aviso de cuándo lo tendrá. */
+  function renderCodeChip() {
+    const slot = overlay.querySelector("#t-code-slot");
+    if (!slot) return;
+    if (!offersProject()) { slot.innerHTML = ""; return; }
+    slot.innerHTML = offerCode ? idChipHtml(offerCode, "oferta") : idPendingHtml(isNew ? "ID: al crear la oferta" : "Sin ID todavía");
+    wireIdChips(slot);
+  }
+
+  /**
+   * De quién son los archivos que se suben ahora, para que Drive los ordene (ver
+   * driveFolderPath en drive-files.js): la OFERTA (con su ID, que se pide aquí si
+   * hace falta), o el proyecto principal — con su ID, o sin él si es de antes de
+   * la v70 y aún no se numeró —, o nadie (tarea personal).
+   */
+  async function folderOwner() {
+    const offers = offersProject();
+    if (offers) {
+      const code = await resolveOfferCode();
+      if (code) return { code, name: plainTitleText(draft.title).trim() || "Oferta" };
+      return { id: offers.id, name: offers.name }; // oferta anterior a la v70 que aún no se numeró
+    }
+    const main = draft.projectIds[0] ? projects.find((p) => p.id === draft.projectIds[0]) : null;
+    if (!main) return null;
+    return main.code ? { code: main.code, name: main.name } : { id: main.id, name: main.name };
+  }
+
   /**
    * Histórico de revisiones + botón "Nueva versión" — solo si la tarea es
    * una oferta (si no, el hueco #t-revisions se queda vacío). Se vuelve a
@@ -695,6 +755,7 @@ export function openTaskModal({
    * frase): ahí solo se actualiza la fila correspondiente de `revisions`.
    */
   function renderRevisions() {
+    renderCodeChip();
     const mount = overlay.querySelector("#t-revisions");
     if (!mount) return;
     if (!offersProject()) { mount.innerHTML = ""; return; }
@@ -1132,6 +1193,10 @@ export function openTaskModal({
       removeAttachment: (id) => { draft.attachments = draft.attachments.filter((a) => a.id !== id); markDirty(); },
       currentUser: currentUserProfile,
       getTaskId: () => taskId || "",
+      // v69/v70: la oferta o el proyecto PRINCIPAL (el primero de la lista) decide la carpeta de
+      // Drive, por su ID; sin proyecto (tarea personal), «Tareas personales». Se lee en cada
+      // subida: si se cambia de proyecto en el modal, los archivos siguientes van a la carpeta del nuevo.
+      getOwner: folderOwner,
       onDirty: markDirty,
     });
   }
@@ -1264,6 +1329,9 @@ export function openTaskModal({
     acceptBtn.disabled = true;
     acceptBtn.textContent = "Guardando…";
     try {
+      // v70: una oferta que ya existía sin ID (o una tarea a la que se acaba de añadir Ofertas)
+      // lo recibe al guardar. Las nuevas lo reciben en createTask si no lo pidieron antes.
+      if (offers && !isNew && !offerCode) await resolveOfferCode();
       const [primaryId, ...extraIds] = draft.projectIds;
       const extraSections = {};
       extraIds.forEach((pid) => { extraSections[pid] = draft.sectionByProject[pid] || null; });
@@ -1284,6 +1352,7 @@ export function openTaskModal({
           // v57: una oferta nueva nace con su fila A1 «Versión original»
           // (antes el histórico solo se guardaba al EDITAR una oferta).
           ...(offers ? { revisions: revisionsForSave() } : {}),
+          ...(offers && offerCode ? { offerCode } : {}),
           createdBy: currentUserProfile.uid,
           order: Date.now(),
         });
@@ -1312,6 +1381,8 @@ export function openTaskModal({
           // tarea de Ofertas en este modal tampoco borra su histórico (no
           // se manda, así que Firestore lo deja como estaba).
           ...(offers ? { revisions: revisionsForSave() } : {}),
+          // v70: solo si se lo ha dado ESTA apertura; si ya lo tenía, no se vuelve a escribir.
+          ...(offers && offerCodeAssignedHere ? { offerCode } : {}),
         });
         onSaved(taskId);
         // Tarea existente: solo avisa a quien esté en la lista nueva pero
@@ -1337,7 +1408,7 @@ export function openTaskModal({
       console.error(e);
       acceptBtn.disabled = false;
       acceptBtn.textContent = "Aceptar";
-      alert("No se pudo guardar la tarea. Comprueba tu conexión e inténtalo de nuevo.");
+      alert(isIdError(e) ? e.message : "No se pudo guardar la tarea. Comprueba tu conexión e inténtalo de nuevo.");
     }
   }
 }

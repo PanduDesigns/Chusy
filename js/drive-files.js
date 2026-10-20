@@ -132,6 +132,65 @@ export function sanitizeFileName(name, fallback = "archivo") {
   return s;
 }
 
+// ---------------------------------------------------------------------------
+// Carpetas (v69): cómo se ordenan los archivos dentro de «Chusy - archivos»
+// ---------------------------------------------------------------------------
+
+/** Carpeta de las tareas sin proyecto. */
+export const PERSONAL_FOLDER_NAME = "Tareas personales";
+
+/** Carpeta de «Probar conexión»: los archivos de prueba no ensucian las carpetas de proyectos. */
+export const TEST_FOLDER_PATH = [{ key: "test", name: "Pruebas de conexión" }];
+
+/** Nombre de carpeta seguro: sin separadores de ruta ni caracteres de control, máx. 100 letras. */
+export function sanitizeFolderName(name, fallback = "Sin nombre") {
+  const s = String(name ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100)
+    .trim();
+  return !s || /^\.+$/.test(s) ? fallback : s;
+}
+
+/** «AAAA-MM» de una fecha, con la hora local de quien sube el archivo. */
+export function monthFolderName(date = new Date()) {
+  const d = date instanceof Date && !isNaN(date) ? date : new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Dónde va un archivo dentro de la carpeta de Chusy, como una lista de tramos
+ * `{ key, name }` (de fuera adentro):
+ *
+ *   <ID> - <Nombre> / <AAAA-MM>        una oferta o un proyecto CON ID (v70)
+ *   <Proyecto> / <AAAA-MM>             un proyecto sin ID todavía (los de antes de la v70)
+ *   Tareas personales / <AAAA-MM>      una tarea sin proyecto
+ *
+ * `owner` es `{ code, name }` (con ID), `{ id, name }` (sin él) o null. El ID de una
+ * oferta pasa íntegro al proyecto en que se convierte, así que los archivos de
+ * la oferta y los del proyecto caen en LA MISMA carpeta. Por eso la carpeta se
+ * identifica por el ID (`key` = `c:<ID>`) y su nombre es solo una etiqueta:
+ * `<ID> - <Nombre>`, que además se puede buscar en Drive por el ID. No se
+ * renombra después, ni cuando cambia el nombre de la oferta o del proyecto.
+ */
+export function driveFolderPath({ owner = null, date = new Date() } = {}) {
+  const month = monthFolderName(date);
+  const monthSeg = { key: `m:${month}`, name: month };
+  if (owner && owner.code) {
+    const label = owner.name ? `${owner.code} - ${owner.name}` : owner.code;
+    return [{ key: `c:${owner.code}`, name: sanitizeFolderName(label, owner.code) }, monthSeg];
+  }
+  if (owner && owner.id) return [{ key: `p:${owner.id}`, name: sanitizeFolderName(owner.name, "Proyecto") }, monthSeg];
+  return [{ key: "personal", name: PERSONAL_FOLDER_NAME }, monthSeg];
+}
+
+/** Un texto entre comillas simples para el parámetro `q` de Drive (hay que escapar `\` y `'`). */
+export function driveQueryString(value) {
+  return `'${String(value ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
 /**
  * El tipo MIME con el que se manda el archivo a Drive. Nunca uno de
  * `application/vnd.google-apps.*` (Drive intentaría convertirlo en un Doc/Hoja

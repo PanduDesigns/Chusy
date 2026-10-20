@@ -1915,3 +1915,32 @@ body.tl-dragging-bar { user-select: none; }
 .ds-summary { padding: 8px 10px; border-radius: var(--radius-sm); font-size: 12.5px; }
 .ds-summary--ok { background: var(--color-success-soft); color: var(--color-success); }
 .ds-summary--error { background: var(--color-danger-soft); color: var(--color-danger); }
+
+/* ---------------------------------------------------------------------------
+   ID de oferta / proyecto (v70): la «pastilla» con el ID (components/id-chip.js),
+   en la cabecera de la ventana de la oferta y en las Propiedades del proyecto.
+   --------------------------------------------------------------------------- */
+#t-code-slot:empty { display: none; }
+.id-chip {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-line-bright);
+  background: var(--color-panel-raised);
+  color: var(--color-text-hi);
+  font: 600 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+button.id-chip:hover { border-color: var(--color-signal-dim); color: var(--color-signal-text); }
+.id-chip--pending {
+  cursor: default;
+  color: var(--color-text-faint);
+  font-family: inherit;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.props-id { display: flex; align-items: center; gap: 10px; }
