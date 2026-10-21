@@ -9,6 +9,7 @@ import { isOffersProject, findOfferCommercialField, collectSuggestions, filterab
 import { convertOfferToProject } from "./data/offer-conversion.js";
 import { getTask, subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { createTaskLoader } from "./task-loader.js";
+import { store } from "./store.js";
 import { subscribeToAllTags } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
 import { subscribeToNotifications, announceNews, NOTIF_TYPE_NEWS } from "./data/notifications.js";
@@ -102,12 +103,27 @@ const taskLoader = createTaskLoader({
   // El panel de métricas usa esta misma bolsa de datos (ver
   // getAllProjectTasksDeduped) — sin este aviso se quedaría desactualizado si
   // alguien completa/crea una tarea mientras un admin lo tiene abierto.
-  onChange: () => { if (mode === "timeline" || mode === "metrics") renderShell(); },
+  // v73: también alimenta `currentTasks` — la lista del proyecto abierto sale de
+  // esta misma suscripción, ya no hay una segunda (ver selectProject).
+  onChange: (projectId) => {
+    const isCurrent = projectId === currentProjectId;
+    if (isCurrent) syncCurrentTasks();
+    if (mode === "timeline" || mode === "metrics" || (mode === "project" && isCurrent)) renderShell();
+  },
 });
 // { [projectId]: tasks[] } — objeto VIVO del cargador (no se reasigna). Solo trae
 // los proyectos que se han pedido: fuera de la línea de tiempo global, Métricas
 // y el buscador (que antes piden todos con taskLoader.ensureAll()) pueden faltar.
 const globalTasksByProject = taskLoader.tasksByProject;
+/**
+ * v73: `currentTasks` es la lista del proyecto abierto, tomada de la bolsa del
+ * cargador (el MISMO array, no una copia). Hasta que llegan las del proyecto
+ * nuevo se queda lo anterior, como siempre.
+ */
+function syncCurrentTasks() {
+  const tasks = currentProjectId ? globalTasksByProject[currentProjectId] : undefined;
+  if (tasks) currentTasks = tasks;
+}
 let rawProjects = []; // v66: la última lista de proyectos SIN filtrar por departamento (ver handleProjectsList)
 let projectsLoaded = false; // ya llegó la primera lista de proyectos
 let archivedProjectsLoaded = false; // v66: la lista de archivados solo se pide al entrar en Archivo
@@ -249,7 +265,6 @@ let unsubUsers = null;
 let unsubMyTasks = null;
 let unsubTags = null;
 let unsubCurrentProject = null;
-let unsubCurrentTasks = null;
 let unsubNotifications = null;
 let unsubQuickCreateConfig = null;
 let unsubDriveConfig = null; // v68: meta/driveStorage → drive-service.js (no repinta nada: el modal de tarea lo lee al abrirse)
@@ -323,9 +338,10 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubCurrentTasks, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig].forEach((fn) => fn && fn());
   taskLoader.stopAll();
-  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubCurrentTasks = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = null;
+  store.stopAll(); // v73: por si acaso, que no quede en memoria nada de la cuenta que sale
+  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = null;
   resetDriveService(); // v68: fuera el permiso de Drive y las miniaturas de la cuenta que sale
   projects = []; rawProjects = []; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
   sessionUid = null; searchLoadPending = false;
@@ -453,7 +469,9 @@ function handleProjectsList(allProjects) {
   // comprobación en cada uno de esos sitios — ver isProjectVisibleToUser
   // en data/projects.js.
   projects = allProjects.filter((p) => isProjectVisibleToUser(p, currentUser));
-  taskLoader.syncProjects(projects, isOffersProject); // v66: solo Ofertas (y lo que ya se pidió); ver task-loader.js
+  // v66: solo Ofertas (y lo que ya se pidió); ver task-loader.js. v73: el proyecto que se está
+  // viendo no se suelta aunque no esté en la lista (uno archivado abierto desde «Archivo»).
+  taskLoader.syncProjects(projects, isOffersProject, currentProjectId ? [currentProjectId] : []);
   // Purga de la papelera (v67): sin servidor que lo haga, el primer snapshot de
   // proyectos de una sesión de admin borra para siempre lo que lleva más de 30
   // días en la papelera. Solo un admin puede borrar lo de todo el mundo. Va antes
@@ -504,14 +522,16 @@ function selectProject(projectId) {
   searchText = "";
   sortState = loadSortState(`project:${projectId}`);
   if (unsubCurrentProject) unsubCurrentProject();
-  if (unsubCurrentTasks) unsubCurrentTasks();
 
   unsubCurrentProject = subscribeToProject(projectId, (project) => { currentProject = project; renderShell(); });
-  unsubCurrentTasks = subscribeToProjectTasks(projectId, (tasks) => { currentTasks = tasks; renderShell(); });
-  // v66: además se pide al cargador de tareas, que lo mantiene escuchado hasta
-  // cerrar la sesión: al volver a este proyecto no se vuelve a bajar entero. Es
-  // la MISMA consulta que la de arriba, así que Firestore no cobra dos veces.
+  // v73: UNA sola suscripción a las tareas del proyecto, la del cargador (que la
+  // mantiene escuchada hasta cerrar la sesión: al volver a este proyecto no se
+  // vuelve a bajar entero). Antes se abría además otra aquí, con su propia copia
+  // en memoria (`currentTasks`). Si el proyecto ya se escucha, no se abre nada y
+  // el aviso de onChange llega al instante con lo que hay en memoria (si no
+  // llega, es que aún no ha contestado: las tareas entrarán por onChange).
   taskLoader.ensureProject(projectId);
+  syncCurrentTasks();
   renderShell();
 }
 

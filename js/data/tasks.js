@@ -54,6 +54,10 @@ import { offerCompletionFields, planTaskToOffer } from "../offers.js";
 import { getOffersProject } from "./projects.js";
 import { allocateProjectCode } from "./project-codes.js";
 import { trashTasks } from "./trash.js";
+// v73 (Etapa 1 del Store): las tareas de un proyecto se escuchan a través del
+// store (js/store.js), que las guarda UNA vez en memoria y no abre dos veces la
+// misma escucha — ver subscribeToProjectTasks y getTask más abajo.
+import { store } from "../store.js";
 // v68 — archivos adjuntos en Google Drive (ver drive-service.js): duplicar una
 // tarea COPIA sus archivos en Drive, y combinar duplicadas no se lleva los de
 // la tarea que se conserva a la papelera. (Los archivos de las tareas eliminadas
@@ -177,10 +181,44 @@ export function moveTask(taskId, sectionId, order, contextProjectId, isExtraProj
   return updateDoc(doc(db, "tasks", taskId), { ...fields, order, updatedAt: serverTimestamp() });
 }
 
-/** Lectura única (no en tiempo real) — usada al abrir el modal para editar. */
+/**
+ * Copia de un documento de tarea que se puede modificar sin tocar el original:
+ * listas y objetos planos se copian a fondo; lo demás (un Timestamp de
+ * Firestore, que es inmutable) se deja tal cual. Mismo criterio que `copy` en
+ * undo.js. Hace falta porque el modal de tarea se queda con las listas del
+ * documento (subtareas, adjuntos…) y las edita en su borrador: sin copia,
+ * cancelar el modal dejaría esos cambios a medias en las listas de la pantalla.
+ */
+function cloneTaskDoc(value) {
+  if (Array.isArray(value)) return value.map(cloneTaskDoc);
+  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = cloneTaskDoc(v);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Una tarea por su id — usada al abrir el modal para editar (y la oferta que se
+ * va a convertir en proyecto). v73: primero se busca en el store, que ya tiene
+ * al día (por su escucha en tiempo real) todas las tareas de los proyectos que
+ * se han abierto: si está, se devuelve al instante, sin gastar una lectura de
+ * Firestore. Solo si NO está (una tarea de un proyecto que aún no se ha cargado,
+ * un enlace directo, o una personal de «Mis tareas», que todavía no pasa por el
+ * store) se hace el `getDoc` de siempre. Devuelve `null` si no existe. Siempre
+ * es una copia: quien la reciba puede modificarla sin tocar la del store.
+ */
 export async function getTask(taskId) {
+  const cached = store.getById("tasks", taskId);
+  if (cached) return cloneTaskDoc(cached);
   const snap = await getDoc(doc(db, "tasks", taskId));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+/** Claves de las dos escuchas (en el store) de las tareas de un proyecto. */
+export function projectTasksListenerKeys(projectId) {
+  return { primary: `tasks:project:${projectId}:primary`, extra: `tasks:project:${projectId}:extra` };
 }
 
 /**
@@ -194,66 +232,67 @@ export async function getTask(taskId) {
  * task-modal.js), pero hace falta escribirlo en la propia consulta para
  * que Firestore pueda demostrar que cumple la regla de lectura sin tener
  * que confiar en ese invariante a ciegas.
+ *
+ * v73: las dos escuchas pasan por el store (js/store.js) con una clave por
+ * proyecto y consulta (`tasks:project:<id>:primary` / `:extra`):
+ *   · si ya hay una escucha abierta con esa clave NO se abre otro `onSnapshot`:
+ *     se reutiliza y `callback` recibe al instante lo que ya hay en memoria;
+ *   · las instantáneas entran por `docChanges()` (solo se toca el documento que
+ *     cambió) y cada tarea existe UNA vez en el store aunque la traigan las dos
+ *     consultas, o dos proyectos a la vez;
+ *   · `callback(tasks)` recibe el array de ese proyecto (principales + adicionales,
+ *     sin duplicados) cuando ya han contestado las dos consultas — o una ha
+ *     fallado (índice que falta, permisos…): se enseña lo que trajo la otra
+ *     antes que dejar el proyecto sin tareas a la espera de algo que no llegará.
+ *     Se vuelve a llamar solo cuando cambia algo de ESTE proyecto.
+ * Devuelve la función que cancela: suelta las dos escuchas, y el store las cierra
+ * (y olvida sus tareas) cuando nadie más las usa.
  */
 export function subscribeToProjectTasks(projectId, callback) {
-  let primaryTasks = [];
-  let extraTasks = [];
-  let primaryLoaded = false;
-  let extraLoaded = false;
+  const keys = projectTasksListenerKeys(projectId);
+  let released = false;
+  let sentOnce = false;
+  let primary = null;
+  let extra = null;
+
+  const ready = () => store.isLoaded(keys.primary) && store.isLoaded(keys.extra);
   const emit = () => {
-    if (!primaryLoaded || !extraLoaded) return;
+    if (released || !primary || !extra || !ready()) return;
     const byId = new Map();
-    [...primaryTasks, ...extraTasks].forEach((t) => byId.set(t.id, t));
+    [...primary.docs(), ...extra.docs()].forEach((t) => byId.set(t.id, t));
+    sentOnce = true;
     callback([...byId.values()]);
   };
 
-  const qPrimary = query(collection(db, "tasks"), where("projectId", "==", projectId));
-  const unsubPrimary = onSnapshot(
-    qPrimary,
-    (snap) => {
-      primaryTasks = [];
-      snap.forEach((d) => primaryTasks.push({ id: d.id, ...d.data() }));
-      primaryLoaded = true;
-      emit();
-    },
-    (err) => {
-      console.error("subscribeToProjectTasks (principal):", err);
-      // Si esta consulta falla (índice que falta, red, permisos…), no dejar
-      // el proyecto entero sin mostrar NINGUNA tarea a la espera de una
-      // consulta que quizá nunca llegue a resolver — mejor enseñar lo que
-      // sí haya traído la otra que dejar la vista completamente vacía.
-      primaryLoaded = true;
-      emit();
-    }
-  );
+  // Se suscribe al store ANTES de abrir las escuchas: si una llega de inmediato
+  // (una simulada, o una ya cargada) no se pierde el aviso.
+  const unsubStore = store.subscribe("tasks", (_data, change) => {
+    // «sync» (el servidor confirma lo que ya había) no cambia nada que enseñar.
+    if (change.type === "sync" || (change.key !== keys.primary && change.key !== keys.extra)) return;
+    emit();
+  });
 
+  const qPrimary = query(collection(db, "tasks"), where("projectId", "==", projectId));
   const qExtra = query(
     collection(db, "tasks"),
     where("extraProjectIds", "array-contains", projectId),
     where("projectId", "!=", null)
   );
-  const unsubExtra = onSnapshot(
-    qExtra,
-    (snap) => {
-      extraTasks = [];
-      snap.forEach((d) => extraTasks.push({ id: d.id, ...d.data() }));
-      extraLoaded = true;
-      emit();
-    },
-    (err) => {
-      console.error("subscribeToProjectTasks (adicional):", err);
-      extraLoaded = true;
-      emit();
-    }
-  );
+  // keepAlive: false → las escuchas se cierran cuando se suelta la última petición
+  // (el cargador de tareas, task-loader.js, es quien decide cuánto se quedan abiertas).
+  primary = store.listen(keys.primary, "tasks", (observer) => onSnapshot(qPrimary, observer), { keepAlive: false });
+  extra = store.listen(keys.extra, "tasks", (observer) => onSnapshot(qExtra, observer), { keepAlive: false });
 
-  return () => { unsubPrimary(); unsubExtra(); };
-}
+  // Escuchas que ya estaban abiertas y cargadas: no habrá instantánea nueva, se enseña lo que hay.
+  if (!sentOnce) emit();
 
-export function subscribeToTask(taskId, callback) {
-  return onSnapshot(doc(db, "tasks", taskId), (snap) => {
-    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
-  });
+  return () => {
+    if (released) return;
+    released = true;
+    unsubStore();
+    primary.release();
+    extra.release();
+  };
 }
 
 /**

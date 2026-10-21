@@ -20,6 +20,15 @@
 // Este archivo no sabe nada de Firestore ni del DOM: recibe la función que
 // suscribe (subscribeToProjectTasks) y avisa por `onChange`. Así se puede
 // probar suelto, con una suscripción simulada.
+//
+// v73 (Etapa 1 del Store): `subscribeToProjectTasks` (data/tasks.js) ya pasa por
+// js/store.js, así que las tareas viven UNA vez en el store y esa suscripción
+// reutiliza la escucha si ya está abierta. Este cargador sigue decidiendo QUÉ
+// proyectos se escuchan y hasta cuándo (soltar la suscripción = el store cierra
+// la escucha), pero su `tasksByProject` ya no es una copia de los documentos:
+// cada array es solo la lista de ese proyecto, hecha de los mismos objetos que
+// tiene el store. Es la ÚNICA suscripción de tareas por proyecto de la app:
+// app.js ya no abre una suya para el proyecto que se está viendo.
 // ============================================================================
 
 /**
@@ -34,6 +43,7 @@ export function createTaskLoader({ subscribe, onChange = () => {} }) {
    * { [projectId]: tasks[] } — OBJETO VIVO: nunca se reasigna, solo se le
    * añaden y quitan claves, para que quien guarde la referencia (app.js) vea
    * siempre lo último. Un proyecto que todavía no se ha pedido NO tiene clave.
+   * (Los objetos de tarea son los del store; aquí solo está la lista por proyecto.)
    */
   const tasksByProject = {};
   /** { [projectId]: { unsub, active } } — escuchas abiertas ahora mismo. */
@@ -91,11 +101,15 @@ export function createTaskLoader({ subscribe, onChange = () => {} }) {
     /**
      * Dice qué proyectos existen (y son visibles) ahora. Deja de escuchar los
      * que ya no están y empieza por los que corresponda: todos si ya se pidió
-     * ensureAll(), y siempre los que `isAlways(proyecto)` marque.
+     * ensureAll(), y siempre los que `isAlways(proyecto)` marque. Los de `keepIds`
+     * (ver abajo) no se dejan de escuchar aunque no estén en la lista.
      */
-    syncProjects(projects, isAlways = () => false) {
+    syncProjects(projects, isAlways = () => false, keepIds = []) {
       knownIds = projects.map((p) => p.id);
-      const keep = new Set(knownIds);
+      // `keepIds`: proyectos que no están en la lista pero se están viendo (uno
+      // ARCHIVADO abierto desde «Archivo»): se siguen escuchando, no cuentan
+      // para «todo cargado». v73: antes eso lo hacía una suscripción aparte en app.js.
+      const keep = new Set([...knownIds, ...keepIds]);
       Object.keys(entries).forEach((id) => { if (!keep.has(id)) stop(id); });
       projects.forEach((p) => { if (wantAll || isAlways(p)) start(p.id); });
       flushWaiters(); // la lista pudo encogerse y dejar «todo cargado»
@@ -110,6 +124,9 @@ export function createTaskLoader({ subscribe, onChange = () => {} }) {
       knownIds.forEach(start);
       flushWaiters();
     },
+
+    /** ¿Ha llegado ya la primera tanda de ESTE proyecto (o su error)? */
+    isProjectLoaded(projectId) { return tasksByProject[projectId] !== undefined; },
 
     /** ¿Ha llegado ya la primera tanda de TODOS los proyectos visibles? */
     isAllLoaded,
