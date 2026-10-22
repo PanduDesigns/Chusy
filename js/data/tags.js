@@ -12,6 +12,7 @@ import {
   onSnapshot,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
+import { subscribeToStoreList } from "./store-subscriptions.js";
 
 export const TAG_COLOR_PALETTE = [
   "#B892FF", // violeta
@@ -48,11 +49,13 @@ export function upsertTag({ name, color }) {
   );
 }
 
+/** Todas las etiquetas del registro. v74: por el store, clave `tags:all` (ver store-subscriptions.js). */
 export function subscribeToAllTags(callback) {
-  return onSnapshot(collection(db, "tags"), (snap) => {
-    const tags = [];
-    snap.forEach((d) => tags.push({ id: d.id, ...d.data() }));
-    tags.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    callback(tags);
+  return subscribeToStoreList({
+    key: "tags:all",
+    slice: "tags",
+    attach: (observer) => onSnapshot(collection(db, "tags"), observer),
+    sort: (a, b) => (a.name || "").localeCompare(b.name || ""),
+    callback,
   });
 }

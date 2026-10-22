@@ -95,9 +95,11 @@ import {
 import { attachTextSuggest } from "./text-suggest.js";
 import { defaultSectorOf } from "../departments.js";
 import { createOpenLocationButton } from "./open-location.js";
+import { localFolderName } from "../location.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
-import { driveService } from "../drive-service.js";
+import { driveService, renameDriveFolder } from "../drive-service.js";
+import { rememberProjectDriveFolder } from "../data/projects.js";
 import { isDriveAttachment } from "../drive-files.js";
 import { createFileAttachments } from "./file-attachments.js";
 import { allocateProjectCode } from "../data/project-codes.js";
@@ -207,6 +209,15 @@ export function openTaskModal({
   // modal a una oferta que ya existía sin él (entonces hay que guardarlo con «Aceptar»).
   let offerCode = null;
   let offerCodeAssignedHere = false;
+  // v75: la carpeta de Drive de esta oferta (`driveFolderId`: la que ya tenía anotada al abrir, o la que
+  // se ha creado al subir el primer archivo en esta apertura) y con qué nombre se creó/renombró, para
+  // renombrarla si el título cambia antes de guardar. `knownProjectFolders`: lo mismo para los proyectos
+  // cuyas carpetas se han creado en esta apertura (project id → carpeta).
+  let offerDriveFolderId = null;
+  let loadedOfferDriveFolderId = null;
+  let offerFolderTitle = null; // el título con que se pidió la carpeta en la última subida (o el de al abrir)
+  let loadedOfferTitle = null; // el título al abrir: si cambia, hay que renombrar su carpeta
+  const knownProjectFolders = new Map();
   // Pide el ID cuando hace falta y UNA sola vez, aunque varias subidas lo pidan a la vez.
   const resolveOfferCode = createCodeResolver({
     get: () => offerCode,
@@ -244,6 +255,8 @@ export function openTaskModal({
       loadedAssigneeIds = t.assigneeIds || [];
       convertedProjectId = t.convertedProjectId || null;
       offerCode = t.offerCode || null;
+      offerDriveFolderId = loadedOfferDriveFolderId = t.driveFolderId || null;
+      loadedOfferTitle = plainTitleText(t.title || "").trim();
       convertedAtIso = toIso(t.convertedAt);
       taskCreatedIso = toIso(t.createdAt);
       revisions = (t.revisions || []).map((r) => ({
@@ -629,7 +642,7 @@ export function openTaskModal({
           <span class="field__label">${escapeHtml(f.name)}</span>
           <span class="field__label-action" data-open-location-slot></span>
         </span>
-        <input class="field__input" type="text" data-custom-field="${f.id}" value="${escapeHtml(draft.customFields[f.id] ?? "")}" placeholder="Escribe…">
+        <input class="field__input" type="text" data-custom-field="${f.id}" value="${escapeHtml(draft.customFields[f.id] ?? "")}" placeholder="${escapeHtml(offerCode ? `Carpeta sugerida: ${localFolderName(offerCode, plainTitleText(draft.title))}` : "Escribe…")}">
       </div>` : `
       <label class="field">
         <span class="field__label">${escapeHtml(f.name)}${f.isPersonalField ? ` <span style="color:var(--color-text-faint);font-weight:400;">· personal</span>` : ""}</span>
@@ -670,7 +683,7 @@ export function openTaskModal({
     const locationSlot = mount.querySelector("[data-open-location-slot]");
     if (locationSlot) {
       const locationInput = locationSlot.closest(".field").querySelector("input");
-      const openButton = createOpenLocationButton({ getValue: () => locationInput.value, compact: true });
+      const openButton = createOpenLocationButton({ getValue: () => locationInput.value, getCode: () => offerCode, compact: true });
       locationSlot.appendChild(openButton.el);
       locationInput.addEventListener("input", openButton.refresh);
       locationInput.addEventListener("change", openButton.refresh);
@@ -739,12 +752,56 @@ export function openTaskModal({
     const offers = offersProject();
     if (offers) {
       const code = await resolveOfferCode();
-      if (code) return { code, name: plainTitleText(draft.title).trim() || "Oferta" };
+      if (code) {
+        const name = plainTitleText(draft.title).trim() || "Oferta";
+        offerFolderTitle = name;
+        // v75: `kind` decide si la carpeta nace en Ofertas o en Proyectos; `folderId`, la que ya tiene anotada
+        return { code, name, kind: "offer", folderId: offerDriveFolderId };
+      }
       return { id: offers.id, name: offers.name }; // oferta anterior a la v70 que aún no se numeró
     }
     const main = draft.projectIds[0] ? projects.find((p) => p.id === draft.projectIds[0]) : null;
     if (!main) return null;
-    return main.code ? { code: main.code, name: main.name } : { id: main.id, name: main.name };
+    return main.code
+      ? { code: main.code, name: main.name, kind: "project", id: main.id, folderId: main.driveFolderId || knownProjectFolders.get(main.id) || null }
+      : { id: main.id, name: main.name };
+  }
+
+  /**
+   * v75: file-attachments.js avisa con el id de la carpeta del ID (oferta o proyecto) donde acaba de
+   * dejar un archivo. Se anota como `driveFolderId`: la oferta lo guarda con «Aceptar» (va en su
+   * propio guardado); el proyecto, al momento y por su cuenta (rememberProjectDriveFolder), porque
+   * el proyecto no se guarda con esta ventana. Nunca lanza: anotarlo es un extra.
+   */
+  function onOwnerFolder(folderId, owner) {
+    if (!folderId || !owner) return;
+    if (owner.kind === "offer") { offerDriveFolderId = folderId; return; }
+    if (owner.kind === "project" && owner.id && owner.folderId !== folderId && knownProjectFolders.get(owner.id) !== folderId) {
+      knownProjectFolders.set(owner.id, folderId);
+      Promise.resolve(rememberProjectDriveFolder(owner.id, folderId)).catch((e) => console.warn("driveFolderId del proyecto:", e));
+    }
+  }
+
+  /**
+   * v75: tras guardar una OFERTA, su carpeta de Drive lleva el título de ahora: si se editó el título
+   * (o el título con que se creó la carpeta al subir el primer archivo ya no es el definitivo) se renombra
+   * a `XXXYY - Título`. Sin carpeta o con Drive apagado no pasa nada; y si la oferta no tenía anotado el
+   * id de su carpeta (es de antes de la v75) y se encuentra, se anota. Va por su cuenta: no hace esperar
+   * a «Aceptar» ni puede hacerlo fallar.
+   */
+  function syncOfferFolderAfterSave(savedTaskId) {
+    if (!offerCode) return;
+    const title = plainTitleText(draft.title).trim();
+    if (!title) return;
+    // Una oferta NUEVA: su carpeta (si la hay) se creó con el título del último archivo subido. Una que ya
+    // existía: se compara con el título con que se abrió (la carpeta puede ser de antes, con el nombre viejo,
+    // y una subida solo le pone el ID por delante, no la renombra). Renombrar «de más» es inocuo: no cambia nada.
+    if (isNew ? !offerDriveFolderId || title === offerFolderTitle : title === loadedOfferTitle) return;
+    renameDriveFolder({ code: offerCode, name: title, folderId: offerDriveFolderId })
+      .then((r) => {
+        if (r.folderId && !loadedOfferDriveFolderId && !offerDriveFolderId && savedTaskId) return updateTask(savedTaskId, { driveFolderId: r.folderId });
+      })
+      .catch((e) => console.warn("syncOfferFolderAfterSave:", e));
   }
 
   /**
@@ -1197,6 +1254,7 @@ export function openTaskModal({
       // Drive, por su ID; sin proyecto (tarea personal), «Tareas personales». Se lee en cada
       // subida: si se cambia de proyecto en el modal, los archivos siguientes van a la carpeta del nuevo.
       getOwner: folderOwner,
+      onOwnerFolder, // v75: el id de la carpeta del ID donde quedó cada archivo (→ `driveFolderId`)
       onDirty: markDirty,
     });
   }
@@ -1353,9 +1411,11 @@ export function openTaskModal({
           // (antes el histórico solo se guardaba al EDITAR una oferta).
           ...(offers ? { revisions: revisionsForSave() } : {}),
           ...(offers && offerCode ? { offerCode } : {}),
+          ...(offers && offerCode && offerDriveFolderId ? { driveFolderId: offerDriveFolderId } : {}),
           createdBy: currentUserProfile.uid,
           order: Date.now(),
         });
+        if (offers) syncOfferFolderAfterSave(newId);
         onSaved(newId);
         // Tarea nueva: cualquier responsable puesto ya de entrada es
         // "nuevo" (no había nada antes que comparar).
@@ -1383,7 +1443,10 @@ export function openTaskModal({
           ...(offers ? { revisions: revisionsForSave() } : {}),
           // v70: solo si se lo ha dado ESTA apertura; si ya lo tenía, no se vuelve a escribir.
           ...(offers && offerCodeAssignedHere ? { offerCode } : {}),
+          // v75: solo si ha cambiado (la carpeta se creó en esta apertura); si ya lo tenía, no se vuelve a escribir.
+          ...(offers && offerDriveFolderId && offerDriveFolderId !== loadedOfferDriveFolderId ? { driveFolderId: offerDriveFolderId } : {}),
         });
+        if (offers) syncOfferFolderAfterSave(taskId);
         onSaved(taskId);
         // Tarea existente: solo avisa a quien esté en la lista nueva pero
         // NO estuviera ya antes de abrir el modal (loadedAssigneeIds) —

@@ -13,7 +13,13 @@ import {
   planOfferRepositioning,
 } from "../offers.js";
 import { PROJECT_CODE_SEED } from "../project-codes.js";
+// v74 (Etapa 2 del Store): proyectos, archivados, proyecto abierto y personas se
+// escuchan a través del store (js/store.js) — ver store-subscriptions.js.
+import { store } from "../store.js";
+import { subscribeToStoreList } from "./store-subscriptions.js";
 import { allocateProjectCode, backfillProjectCodes, healProjectCodes } from "./project-codes.js";
+// v75: al editar el nombre de un proyecto con carpeta en Drive, esa carpeta se renombra (`XXXYY - Nombre`).
+import { renameDriveFolder } from "../drive-service.js";
 import {
   collection,
   doc,
@@ -64,8 +70,12 @@ const DEFAULT_SECTIONS = [
  * proyectos exclusivos (Ofertas, la «sección», no una oferta) no llevan ID.
  * Si no se puede repartir (sin conexión, reglas sin publicar), lanza y el
  * proyecto NO se crea: no debe haber proyectos sin ID.
+ *
+ * `driveFolderId` (v75) — la carpeta de Google Drive del proyecto: solo la manda la conversión de una
+ * oferta que ya tenía carpeta (offer-conversion.js); el proyecto CONSERVA ese mismo id, porque la carpeta
+ * es la misma (pasa de `Ofertas` a `Proyectos`).
  */
-export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments, seedVersion, properties, code }) {
+export async function createProject({ name, description, color, icon, creatorUid, sections, customFieldDefs, exclusive, exclusiveKey, allowedDepartments, seedVersion, properties, code, driveFolderId }) {
   const projectCode = exclusive ? null : code || (await allocateProjectCode());
   const ref = await addDoc(collection(db, "projects"), {
     name,
@@ -88,12 +98,44 @@ export async function createProject({ name, description, color, icon, creatorUid
     ...(seedVersion ? { seedVersion } : {}),
     ...(properties ? { properties } : {}),
     ...(projectCode ? { code: projectCode } : {}),
+    ...(projectCode && driveFolderId ? { driveFolderId } : {}),
   });
   return ref.id;
 }
 
-export function updateProject(projectId, data) {
-  return updateDoc(doc(db, "projects", projectId), data);
+/**
+ * Cambia campos de un proyecto. v75: si cambia el NOMBRE de un proyecto con ID, su carpeta de Drive
+ * (si tiene) se renombra a `XXXYY - Nombre nuevo`, por su cuenta y sin hacer esperar: ordenar Drive nunca
+ * debe impedir ni retrasar guardar el proyecto (ver renameDriveFolder en drive-service.js).
+ */
+export async function updateProject(projectId, data) {
+  // Se mira ANTES de escribir (el store aún tiene el nombre de antes); sin el proyecto en memoria no se renombra.
+  const before = data && data.name !== undefined ? store.getById("projects", projectId) : null;
+  await updateDoc(doc(db, "projects", projectId), data);
+  if (before && !before.exclusive && before.code && String(before.name || "").trim() !== String(data.name || "").trim()) {
+    syncProjectDriveFolder(projectId, before, data.name);
+  }
+}
+
+/** Renombra la carpeta de Drive de un proyecto (si la tiene) y anota su `driveFolderId` si faltaba. Nunca lanza. */
+function syncProjectDriveFolder(projectId, project, newName) {
+  renameDriveFolder({ code: project.code, name: newName, folderId: project.driveFolderId || null })
+    .then((r) => {
+      if (r.folderId && r.folderId !== project.driveFolderId) return updateDoc(doc(db, "projects", projectId), { driveFolderId: r.folderId });
+    })
+    .catch((e) => console.warn("syncProjectDriveFolder:", e));
+}
+
+/**
+ * v75: anota la carpeta de Drive del proyecto (`driveFolderId`) cuando se sube un archivo a una carpeta
+ * recién creada o encontrada. Solo escribe si es distinta de la anotada. Un extra: si falla, la carpeta
+ * se sigue encontrando por el ID del proyecto.
+ */
+export async function rememberProjectDriveFolder(projectId, folderId) {
+  if (!projectId || !folderId) return;
+  const current = store.getById("projects", projectId);
+  if (current && current.driveFolderId === folderId) return;
+  await updateDoc(doc(db, "projects", projectId), { driveFolderId: folderId });
 }
 
 export function archiveProject(projectId, archived = true) {
@@ -371,21 +413,28 @@ export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid)
   }
 }
 
+const byName = (a, b) => (a.name || "").localeCompare(b.name || "");
+
 /**
  * Escucha en tiempo real TODOS los proyectos del equipo (no solo los tuyos):
  * en un departamento pequeño, todo el mundo debe poder ver cualquier
  * proyecto y las tareas que haya dentro, esté o no asignado a esa persona.
+ *
+ * v74: pasa por el store (clave `projects:active`, ver store-subscriptions.js).
  */
 export function subscribeToAllProjects(callback) {
   const q = query(collection(db, "projects"), where("archived", "==", false));
-  const unsubscribe = onSnapshot(q, (snap) => {
-    const projects = [];
-    snap.forEach((d) => projects.push({ id: d.id, ...d.data() }));
-    projects.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    // v58: se guarda SIN filtrar por departamento (ver getOffersProject).
-    offersProjectCache = projects.find((p) => isOffersProject(p)) || null;
-    callback(projects);
-  }, (err) => console.error("subscribeToAllProjects:", err));
+  const unsubscribe = subscribeToStoreList({
+    key: "projects:active",
+    slice: "projects",
+    attach: (observer) => onSnapshot(q, observer),
+    sort: byName,
+    callback: (projects) => {
+      // v58: se guarda SIN filtrar por departamento (ver getOffersProject).
+      offersProjectCache = projects.find((p) => isOffersProject(p)) || null;
+      callback(projects);
+    },
+  });
   return () => { unsubscribe(); offersProjectCache = null; };
 }
 
@@ -406,29 +455,85 @@ export function getOffersProject() {
   return offersProjectCache;
 }
 
-/** Proyectos archivados (el "Archivo") — se guardan, no se ven en la lista principal. */
+/** Proyectos archivados (el "Archivo") — se guardan, no se ven en la lista principal. (v74: por el store, clave `projects:archived`.) */
 export function subscribeToArchivedProjects(callback) {
   const q = query(collection(db, "projects"), where("archived", "==", true));
-  return onSnapshot(q, (snap) => {
-    const projects = [];
-    snap.forEach((d) => projects.push({ id: d.id, ...d.data() }));
-    projects.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    callback(projects);
-  }, (err) => console.error("subscribeToArchivedProjects:", err));
-}
-
-export function subscribeToProject(projectId, callback) {
-  return onSnapshot(doc(db, "projects", projectId), (snap) => {
-    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+  return subscribeToStoreList({
+    key: "projects:archived",
+    slice: "projects",
+    attach: (observer) => onSnapshot(q, observer),
+    sort: byName,
+    callback,
   });
 }
 
-/** Lista completa de personas del equipo (para selectores de responsable/miembros). */
+/**
+ * Un proyecto por su id, en tiempo real (el que se está viendo). v74: sale del
+ * store — la lista de proyectos (o la de archivados) ya lo tiene al día, así
+ * que NO se abre una escucha propia: se avisa al instante con lo que hay y de
+ * cada cambio de ESE documento. Solo si el store no lo tiene (un proyecto
+ * archivado antes de abrir «Archivo», un enlace directo) o lo pierde de las
+ * listas (se archivó, o se borró) se abre la escucha del documento
+ * (`project:<id>`), que además es la que sabe decir «ya no existe» → `null`.
+ * El objeto es el del store: quien lo reciba no debe modificarlo.
+ */
+export function subscribeToProject(projectId, callback) {
+  const docKey = `project:${projectId}`;
+  let released = false;
+  let docHandle = null;
+  let fallbackTimer = null;
+
+  const openDoc = () => {
+    if (docHandle || released) return;
+    docHandle = store.listen(
+      docKey,
+      "projects",
+      (observer) => onSnapshot(doc(db, "projects", projectId), observer),
+      { keepAlive: false }
+    );
+  };
+  // Al archivar (o restaurar) un proyecto, una lista dice «quitado» y la otra «añadido»
+  // en dos avisos seguidos, en el orden que sea: se espera un instante antes de dar el
+  // proyecto por perdido, para no abrir una escucha propia por una pérdida de un instante.
+  const scheduleFallback = () => {
+    if (fallbackTimer) return;
+    fallbackTimer = setTimeout(() => {
+      fallbackTimer = null;
+      if (!released && !store.getById("projects", projectId)) openDoc();
+    }, 0);
+  };
+  const emit = (isFirst) => {
+    if (released) return;
+    const project = store.getById("projects", projectId);
+    if (project) { callback(project); return; }
+    if (!docHandle) { if (isFirst) openDoc(); else scheduleFallback(); return; } // no está en ninguna lista: se pide el documento
+    if (store.isLoaded(docKey)) callback(null); // el documento dice que ya no existe
+  };
+
+  const unsubStore = store.subscribe("projects", (_data, change) => {
+    if (change.type === "sync" || change.type === "reset") return;
+    const touches = (list) => list.some((d) => d.id === projectId);
+    if (change.key === docKey || touches(change.added) || touches(change.modified) || touches(change.removed)) emit(false);
+  });
+
+  emit(true);
+
+  return () => {
+    if (released) return;
+    released = true;
+    clearTimeout(fallbackTimer);
+    unsubStore();
+    if (docHandle) docHandle.release();
+  };
+}
+
+/** Lista completa de personas del equipo (para selectores de responsable/miembros). v74: por el store, clave `users:all`. */
 export function subscribeToAllUsers(callback) {
-  return onSnapshot(collection(db, "users"), (snap) => {
-    const users = [];
-    snap.forEach((d) => users.push({ uid: d.id, ...d.data() }));
-    users.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    callback(users);
+  return subscribeToStoreList({
+    key: "users:all",
+    slice: "users",
+    attach: (observer) => onSnapshot(collection(db, "users"), observer),
+    sort: byName,
+    callback,
   });
 }

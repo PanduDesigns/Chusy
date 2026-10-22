@@ -30,6 +30,10 @@
 //                        (ensureFolderPath); no hace falta tocar el puente. Cada carpeta
 //                        lleva en `appProperties.folder` una clave estable (v70: el ID de la
 //                        oferta o del proyecto, no su nombre) y así se encuentra siempre.
+//                        v75: las de ID viven en `Ofertas/` o `Proyectos/` y se llaman
+//                        `XXXYY - Nombre`; se mueven (oferta → proyecto, moveCodeFolderToProjects)
+//                        y se renombran (renameCodeFolder) con un PATCH de Drive — también desde el
+//                        navegador, tampoco hace falta tocar el puente.
 // ============================================================================
 import {
   DRIVE_API,
@@ -49,7 +53,10 @@ import {
   buildDriveAttachment,
   driveQueryString,
   TEST_FOLDER_PATH,
+  DRIVE_ROOTS,
+  codedFolderName,
 } from "./drive-files.js";
+import { hasCodePrefix } from "./project-codes.js";
 
 const NETWORK_MESSAGE = "No se pudo conectar con Google Drive. Comprueba tu conexión e inténtalo de nuevo.";
 const GATEWAY_UNREACHABLE_MESSAGE =
@@ -273,15 +280,20 @@ export function createDriveStorage({
   // Carpetas (v69): <Proyecto>/<AAAA-MM> dentro de «Chusy - archivos»
   // -------------------------------------------------------------------------
 
-  /** La carpeta hija de `parentId` con esa clave (la más antigua si, por una carrera entre dos personas, hubiera dos), o null. */
+  /**
+   * La carpeta con esa clave (la más antigua si, por una carrera entre dos personas, hubiera dos), o null.
+   * Con `parentId`, solo dentro de esa carpeta; con `null` (v75), DONDE esté: una carpeta de ID se mueve
+   * de `Ofertas` a `Proyectos` al convertir la oferta, y las de la v70 cuelgan directamente de «Chusy - archivos».
+   * Con el permiso `drive.file` Drive solo enseña lo que ha creado Chusy, así que buscar sin madre no ve nada ajeno.
+   */
   async function findFolder(parentId, key) {
     const q = [
       "mimeType = 'application/vnd.google-apps.folder'",
       "trashed = false",
-      `${driveQueryString(parentId)} in parents`,
+      ...(parentId ? [`${driveQueryString(parentId)} in parents`] : []),
       `appProperties has { key='folder' and value=${driveQueryString(key)} }`,
     ].join(" and ");
-    const res = await driveFetch(`${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent("files(id)")}&orderBy=createdTime&pageSize=10`);
+    const res = await driveFetch(`${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent("files(id,name,parents,appProperties)")}&orderBy=createdTime&pageSize=10`);
     if (!res.ok) throw await driveHttpError(res);
     const data = parseJson(await res.text());
     const files = data && Array.isArray(data.files) ? data.files : [];
@@ -331,37 +343,186 @@ export function createDriveStorage({
     return promise;
   }
 
+  /** La carpeta (no en la papelera) con ese id, con lo que hace falta para decidir qué retocarle; `null` si ya no existe o no es una carpeta. */
+  async function getFolder(id) {
+    if (!id) return null;
+    const res = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(id)}?fields=${encodeURIComponent("id,name,parents,trashed,mimeType,appProperties")}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw await driveHttpError(res);
+    const data = parseJson(await res.text());
+    if (!data || data.trashed || data.mimeType !== "application/vnd.google-apps.folder") return null;
+    return data;
+  }
+
+  /**
+   * v75: la carpeta de un ID donde esté. Primero por la pista (`driveFolderId`, el id que la oferta o el
+   * proyecto tiene anotado: se acepta solo si de verdad es la carpeta de ESE ID, `appProperties.folder`), y
+   * si no, buscándola por su clave `c:<ID>`. Un error de Drive (red, permisos) se propaga: dar por
+   * «no existe» una carpeta que no se pudo mirar crearía otra repetida.
+   */
+  async function locateCodeFolder(code, hintId) {
+    const key = `c:${code}`;
+    if (hintId) {
+      const hinted = await getFolder(hintId);
+      if (hinted && hinted.appProperties && hinted.appProperties.folder === key) return hinted;
+    }
+    return findFolder(null, key);
+  }
+
+  /** PATCH de una carpeta: nuevo nombre y/o moverla (`move` = { add, remove[] }). Un solo viaje a Drive. */
+  async function patchFolder(id, { name = null, move = null } = {}) {
+    const qs = new URLSearchParams({ fields: "id,name,parents" });
+    if (move && move.add) qs.set("addParents", move.add);
+    if (move && move.remove && move.remove.length) qs.set("removeParents", move.remove.join(","));
+    const res = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(id)}?${qs.toString()}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(name ? { name } : {}),
+    });
+    if (!res.ok) throw await driveHttpError(res);
+  }
+
+  /** Olvida lo recordado de la carpeta de un ID (después de renombrarla o moverla). */
+  function forgetCodeFolder(code) {
+    const prefix = `code/c:${code}/`;
+    for (const k of [...folderCache.keys()]) if (k.startsWith(prefix)) folderCache.delete(k);
+  }
+
+  /** La carpeta madre `Ofertas` o `Proyectos` (se crea la primera vez), dentro de «Chusy - archivos». */
+  function ensureRoot(rootName, tok) {
+    return ensureFolder(tok.folderId, DRIVE_ROOTS[rootName] || DRIVE_ROOTS.proyectos);
+  }
+
+  /**
+   * v75: encuentra —o crea— la carpeta de un ID (`seg`, ver driveFolderPath) y la deja «en regla»:
+   *   · se busca DONDE esté, no solo dentro de una madre (por la pista `seg.hint` y por su clave);
+   *   · si existe pero su nombre no lleva el ID por delante (alguien la renombró a mano) se le pone
+   *     `XXXYY - …` (se conserva lo que escribió esa persona; el nombre de la oferta o del proyecto lo
+   *     sincroniza renameCodeFolder cuando se edita, no una subida);
+   *   · si es de un PROYECTO y no está en `Proyectos` (se quedó en `Ofertas` porque falló el traspaso al
+   *     convertir, o es de la v70, suelta en «Chusy - archivos») se mueve a `Proyectos`; si es de una OFERTA,
+   *     solo se recoge la que quedó suelta en «Chusy - archivos» (una que ya está en `Proyectos` es la de una
+   *     oferta ya convertida: se deja donde está);
+   *   · si no existe, se crea con su nombre dentro de `Ofertas` o `Proyectos`.
+   * Ordenar es un extra: si retocarla falla (permisos, red) la carpeta se usa igualmente tal como está
+   * (queda un aviso en la consola); lo que SÍ se propaga es no poder buscarla o crearla.
+   * Se guarda la PROMESA (dos subidas a la vez comparten la misma comprobación y no crean dos carpetas).
+   */
+  function ensureCodeFolder(seg, tok) {
+    const cacheKey = `code/${seg.key}/${seg.root}`;
+    const hit = folderCache.get(cacheKey);
+    if (hit && now() < hit.expiresAt) return hit.promise;
+    const promise = (async () => {
+      const root = await ensureRoot(seg.root, tok);
+      const found = await locateCodeFolder(seg.code, seg.hint);
+      if (!found) return { id: await createFolder(root.id, seg), created: true, renamed: false, moved: false };
+      const parents = Array.isArray(found.parents) ? found.parents : [];
+      const rename = !hasCodePrefix(found.name, seg.code) ? codedFolderName(seg.code, found.name) : null;
+      const shouldMove = seg.root === "proyectos" ? !parents.includes(root.id) : parents.includes(tok.folderId);
+      if (rename || shouldMove) {
+        try {
+          await patchFolder(found.id, { name: rename, move: shouldMove ? { add: root.id, remove: parents.filter((p) => p !== root.id) } : null });
+        } catch (e) {
+          console.warn("Drive: no se pudo ordenar la carpeta de", seg.code, "(se usa tal como está)", e);
+          return { id: found.id, created: false, renamed: false, moved: false };
+        }
+      }
+      return { id: found.id, created: false, renamed: !!rename, moved: shouldMove };
+    })();
+    folderCache.set(cacheKey, { promise, expiresAt: now() + FOLDER_REUSE_SECONDS * 1000 });
+    promise.catch(() => { // un fallo no se queda guardado
+      const cur = folderCache.get(cacheKey);
+      if (cur && cur.promise === promise) folderCache.delete(cacheKey);
+    });
+    return promise;
+  }
+
   /**
    * Prepara la cadena de carpetas `path` (lo que da driveFolderPath, de fuera
-   * adentro) dentro de «Chusy - archivos» y devuelve { folderId, created }: el
-   * id de la última, y si hubo que crear alguna. Lanza si Drive no deja.
+   * adentro) dentro de «Chusy - archivos» y devuelve { folderId, created, codeFolderId }: el
+   * id de la última, si hubo que crear alguna y (v75) el id de la carpeta del ID de la
+   * oferta o del proyecto si el camino lleva una (lo que se anota como `driveFolderId`).
+   * Lanza si Drive no deja.
    */
   async function ensureFolderPath(path) {
     const tok = await getToken();
     let parentId = tok.folderId;
     let created = false;
+    let codeFolderId = null;
     for (const seg of path || []) {
-      const r = await ensureFolder(parentId, seg);
+      let r;
+      if (seg.code) {
+        r = await ensureCodeFolder(seg, tok);
+        codeFolderId = r.id;
+      } else {
+        r = await ensureFolder(parentId, seg);
+      }
       parentId = r.id;
       created = created || r.created;
     }
-    return { folderId: parentId, created };
+    return { folderId: parentId, created, codeFolderId };
   }
 
   /**
    * Dónde va un archivo nuevo: la carpeta de `folderPath` o, si no se pide
    * ninguna o Drive no deja prepararla, la carpeta principal. Ordenar es un
    * extra: nunca debe impedir una subida (el motivo queda en la consola, y
-   * «Probar conexión» lo enseña).
+   * «Probar conexión» lo enseña). Devuelve `{ parentId, codeFolderId }`.
    */
   async function parentFor(tok, folderPath) {
-    if (!folderPath || !folderPath.length) return tok.folderId;
+    if (!folderPath || !folderPath.length) return { parentId: tok.folderId, codeFolderId: null };
     try {
-      return (await ensureFolderPath(folderPath)).folderId;
+      const r = await ensureFolderPath(folderPath);
+      return { parentId: r.folderId, codeFolderId: r.codeFolderId };
     } catch (e) {
       console.warn("Drive: no se pudieron preparar las carpetas; el archivo va a la carpeta principal", e);
-      return tok.folderId;
+      return { parentId: tok.folderId, codeFolderId: null };
     }
+  }
+
+  /**
+   * v75: pone a la carpeta de un ID el nombre `XXXYY - Nombre` de ahora (la oferta o el proyecto cambió de
+   * nombre). NO crea nada: si esa oferta o proyecto aún no tiene carpeta (nunca se subió un archivo),
+   * devuelve `{ folderId: null }`. Sin nombre no se renombra (no se sabe a qué).
+   * Devuelve `{ folderId, renamed }`; `folderId` es el que hay que anotar si la ficha aún no lo tenía.
+   */
+  async function renameCodeFolder({ code, name, folderId = null }) {
+    if (!code) return { folderId: null, renamed: false };
+    const found = await locateCodeFolder(String(code), folderId);
+    if (!found) return { folderId: null, renamed: false };
+    forgetCodeFolder(code);
+    if (!String(name ?? "").trim()) return { folderId: found.id, renamed: false };
+    const want = codedFolderName(code, name);
+    if (found.name === want) return { folderId: found.id, renamed: false };
+    await patchFolder(found.id, { name: want });
+    return { folderId: found.id, renamed: true };
+  }
+
+  /**
+   * v75: al convertir una oferta en proyecto, su carpeta pasa de `Ofertas` a `Proyectos` y se renombra a
+   * `XXXYY - Nombre del proyecto`, en UNA sola operación de Drive (el id de la carpeta no cambia, y todo lo
+   * de dentro —los adjuntos de la oferta, con sus ids— se va con ella). No crea nada: sin carpeta (la oferta
+   * nunca tuvo archivos) devuelve `{ folderId: null }`. Si ya está en `Proyectos`, solo la renombra.
+   * Devuelve `{ folderId, moved, renamed }`.
+   */
+  async function moveCodeFolderToProjects({ code, name, folderId = null }) {
+    if (!code) return { folderId: null, moved: false, renamed: false };
+    const tok = await getToken();
+    const found = await locateCodeFolder(String(code), folderId);
+    if (!found) return { folderId: null, moved: false, renamed: false };
+    const root = await ensureRoot("proyectos", tok);
+    forgetCodeFolder(code);
+    const parents = Array.isArray(found.parents) ? found.parents : [];
+    const moved = !parents.includes(root.id);
+    const want = String(name ?? "").trim() ? codedFolderName(code, name) : null;
+    const renamed = !!want && found.name !== want;
+    if (moved || renamed) {
+      await patchFolder(found.id, {
+        name: renamed ? want : null,
+        move: moved ? { add: root.id, remove: parents.filter((p) => p !== root.id) } : null,
+      });
+    }
+    return { folderId: found.id, moved, renamed };
   }
 
   /** La carpeta de un archivo de Drive y su ID (`appProperties.code`, v70): `{ parentId, code }`, con null/"" para lo que no se pueda saber. */
@@ -522,7 +683,9 @@ export function createDriveStorage({
    *   code        (v70) el ID de la oferta o del proyecto al que pertenece el archivo: se anota
    *               en el archivo (`appProperties.code` y la descripción) para poder localizarlo
    *               por él aunque alguien lo mueva de carpeta.
-   * Devuelve { driveId, name, mimeType, size }.
+   * Devuelve { driveId, name, mimeType, size, folderId }: `folderId` (v75) es el id de la carpeta del ID
+   * de la oferta o del proyecto donde quedó (null si no iba a una carpeta de ID): es lo que se anota
+   * como `driveFolderId`.
    */
   async function uploadFile(file, opts = {}) {
     const { taskId = "", uid = "", role = "file", name, onProgress, signal, chunkBytes = CHUNK_BYTES, forceResumable = false, allowFallback = true, folderPath = null, code = "" } = opts;
@@ -537,7 +700,7 @@ export function createDriveStorage({
     const fileName = sanitizeFileName(name || file.name, role === "thumb" ? "miniatura.jpg" : "archivo");
     const report = (loaded) => { if (onProgress) onProgress({ loaded: Math.min(loaded, size), total: size }); };
     const tok = await getToken();
-    const parentId = await parentFor(tok, folderPath);
+    const { parentId, codeFolderId } = await parentFor(tok, folderPath);
     if (signal && signal.aborted) throw abortError(); // se canceló mientras se preparaban las carpetas
     const meta = {
       name: fileName,
@@ -567,7 +730,7 @@ export function createDriveStorage({
     }
     if (!result || !result.id) throw new DriveError("bad_upload_response", "Google Drive no devolvió el identificador del archivo.");
     report(size);
-    return { driveId: result.id, name: result.name || fileName, mimeType: mime, size };
+    return { driveId: result.id, name: result.name || fileName, mimeType: mime, size, folderId: codeFolderId || null };
   }
 
   // -------------------------------------------------------------------------
@@ -773,6 +936,25 @@ export function createDriveStorage({
       return r.created ? "carpeta «Pruebas de conexión» creada" : "carpeta «Pruebas de conexión» ya existente";
     }))) return finish();
 
+    // v75: lo que hace falta al convertir una oferta en proyecto (y al renombrar): crear una carpeta de ID
+    // en `Ofertas`, pasarla a `Proyectos` renombrada y comprobar que Drive lo ha hecho con el permiso
+    // `drive.file`. Es la prueba de que esos dos PATCH funcionan en el Google real.
+    if (!(await run("move", "Crear una carpeta de oferta, renombrarla y pasarla a «Proyectos»", async () => {
+      const code = "PRUEBA";
+      const seg = { key: `c:${code}`, name: codedFolderName(code, "carpeta de prueba"), code, root: "ofertas", hint: null };
+      const first = await ensureFolderPath([seg]);
+      created.push(first.codeFolderId);
+      const before = await getFolder(first.codeFolderId);
+      if (!before) throw new Error("La carpeta de prueba se creó pero no se puede leer.");
+      const r = await moveCodeFolderToProjects({ code, name: "carpeta renombrada", folderId: first.codeFolderId });
+      if (r.folderId !== first.codeFolderId) throw new Error("Drive no encontró la carpeta de prueba que acababa de crear.");
+      const after = await getFolder(first.codeFolderId);
+      if (!after) throw new Error("La carpeta de prueba desapareció al moverla.");
+      if (after.name !== codedFolderName(code, "carpeta renombrada")) throw new Error(`La carpeta no se renombró (se llama «${after.name}»). Convertir una oferta no podría renombrar su carpeta.`);
+      if (!after.parents || !after.parents[0] || after.parents[0] === (before.parents || [])[0]) throw new Error("La carpeta no cambió de madre. Convertir una oferta no podría pasar su carpeta a «Proyectos».");
+      return "oferta → proyecto, renombrada";
+    }))) return finish();
+
     if (!(await run("small", "Subir un archivo pequeño a esa carpeta", async () => {
       const blob = new Blob([testBytes(2048)], { type: "text/plain" });
       const r = await uploadFile(blob, { role: "test", name: "chusy-prueba-pequena.txt", folderPath: TEST_FOLDER_PATH });
@@ -814,6 +996,8 @@ export function createDriveStorage({
     reset,
     uploadFile,
     ensureFolderPath,
+    renameCodeFolder,
+    moveCodeFolderToProjects,
     downloadBlob,
     getThumbUrl,
     trashFiles,

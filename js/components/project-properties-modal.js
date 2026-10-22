@@ -27,6 +27,7 @@
 import { el, escapeHtml, uid, showToast, toDateInputValue } from "../utils.js";
 import { attachTextSuggest } from "./text-suggest.js";
 import { createOpenLocationButton } from "./open-location.js";
+import { localFolderName } from "../location.js";
 import { idChipHtml, idPendingHtml, wireIdChips } from "./id-chip.js";
 import { isIdError } from "../project-codes.js";
 import { SECTOR_OPTIONS } from "../offers.js";
@@ -61,7 +62,7 @@ function dateFieldHtml(key, value) {
  * `onSubmit({ name, properties })` hace el guardado de verdad; si lanza
  * un error el formulario se queda abierto y avisa.
  */
-function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, getCommercialOptions, onSubmit, idInfo }) {
+function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, getCommercialOptions, onSubmit, idInfo, folderName = "" }) {
   const root = document.getElementById("modal-root");
   const state = normalizeProperties(initial);
   let dirty = false;
@@ -157,7 +158,18 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
   // mientras esté vacía. Aquí la etiqueta SÍ es un <label for>: el botón va
   // fuera de ella, en su fila, así que clicar el texto sigue enfocando la casilla.
   const ubicacionInput = overlay.querySelector("#pp-ubicacion");
-  const openLocationButton = createOpenLocationButton({ getValue: () => ubicacionInput.value, compact: true });
+  // v75: con ID, la casilla sugiere cómo se llamaría la carpeta (`XXXYY - Nombre`, como la de Drive) y el
+  // botón avisa si la carpeta escrita no lleva el ID. El nombre es el del campo «Nombre del proyecto» al
+  // convertir (se actualiza al escribirlo) o el del proyecto en «Propiedades».
+  const idCode = (idInfo && idInfo.code) || "";
+  const nameInputEl = nameField ? overlay.querySelector("#pp-name") : null;
+  const refreshLocationHint = () => {
+    if (!idCode) return;
+    ubicacionInput.placeholder = `Carpeta sugerida: ${localFolderName(idCode, nameInputEl ? nameInputEl.value : folderName)}`;
+  };
+  refreshLocationHint();
+  if (nameInputEl) nameInputEl.addEventListener("input", refreshLocationHint);
+  const openLocationButton = createOpenLocationButton({ getValue: () => ubicacionInput.value, getCode: () => idCode, compact: true });
   overlay.querySelector("#pp-open-location-slot").appendChild(openLocationButton.el);
   ubicacionInput.addEventListener("input", (e) => { state.ubicacion = e.target.value; markDirty(); openLocationButton.refresh(); });
   overlay.querySelector("#pp-sector").addEventListener("change", (e) => { state.sector = e.target.value; markDirty(); });
@@ -268,6 +280,7 @@ export function openProjectPropertiesModal({ project, onSave, getCommercialOptio
     initial: project.properties,
     idInfo: project.exclusive ? null : { label: "ID del proyecto", code: project.code || "", what: "proyecto", pendingText: "Sin ID todavía" },
     confirmLabel: "Guardar",
+    folderName: project.name,
     getCommercialOptions,
     onSubmit: async ({ properties }) => {
       await onSave(properties);

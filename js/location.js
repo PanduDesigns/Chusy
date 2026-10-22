@@ -17,6 +17,8 @@
 // construir el enlace que entiende el ayudante.
 // ============================================================================
 
+import { codedName, hasCodePrefix } from "./project-codes.js";
+
 /** Protocolo que registra el ayudante de Windows (assets/abrir-ubicacion/Instalar-AbrirUbicacion.bat). */
 export const LOCATION_PROTOCOL = "chusy-open";
 
@@ -199,4 +201,35 @@ export function findLocationInDescription(description) {
     }
   }
   return "";
+}
+
+// ---------------------------------------------------------------------------
+// v75 · El ID en la carpeta local. Chusy no construye rutas locales (no conoce la unidad ni el servidor de
+// cada ordenador: la Ubicación es el texto que escribe la persona, o el que pone la macro de Outlook), pero sí
+// puede decir CÓMO se llamaría la carpeta —con el mismo formato `XXXYY - Nombre` que la carpeta de Drive, y
+// con el mismo helper (codedName en project-codes.js)— y avisar si la que se ha escrito no lleva el ID.
+// ---------------------------------------------------------------------------
+
+/** El nombre de la carpeta local de un ID: `XXXYY - Nombre`, sin los caracteres que Windows no admite en un nombre de carpeta ni puntos/espacios finales. */
+export function localFolderName(code, name) {
+  return codedName(code, name).replace(/[\\/:*?"<>|]/g, "_").replace(/[. ]+$/, "").trim();
+}
+
+/** El último tramo de una ruta de carpeta (`\\srv\Ofertas\00126 - Cabina` → `00126 - Cabina`); "" si no hay carpeta (vacío o dirección web). */
+export function locationFolderName(raw) {
+  const location = normalizeLocation(raw);
+  if (location.kind !== "folder") return "";
+  const parts = location.value.split(/[\\/]+/).filter((part) => part.trim());
+  return parts.length ? parts[parts.length - 1].trim() : "";
+}
+
+/**
+ * ¿La carpeta escrita en la Ubicación lleva el ID por delante? Verdadero también cuando no hay nada que
+ * comprobar (sin ID todavía, campo vacío, o una dirección web: SharePoint y OneDrive no tienen por qué
+ * llamar a la carpeta así). Falso solo si hay una carpeta local y su último tramo no empieza por el ID.
+ */
+export function locationHasCode(raw, code) {
+  const folder = locationFolderName(raw);
+  if (!folder || !String(code ?? "").trim()) return true;
+  return hasCodePrefix(folder, code);
 }

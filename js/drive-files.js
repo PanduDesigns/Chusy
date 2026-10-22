@@ -18,6 +18,8 @@
 // vídeos — Drive no la sirve a quien no tiene cuenta de Google).
 // ============================================================================
 
+import { codedName } from "./project-codes.js"; // v75: el formato «XXXYY - Nombre» es UNO solo (ver codedName)
+
 export const DRIVE_API = "https://www.googleapis.com/drive/v3";
 export const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 
@@ -161,26 +163,54 @@ export function monthFolderName(date = new Date()) {
 }
 
 /**
+ * v75: las dos carpetas «raíz» que cuelgan de «Chusy - archivos»: las ofertas viven en `Ofertas` y los
+ * proyectos en `Proyectos`. Al convertir una oferta en proyecto, su carpeta pasa de la una a la otra.
+ * Se buscan por `appProperties.folder` (la clave), como el resto de carpetas: el nombre es solo una etiqueta.
+ */
+export const DRIVE_ROOTS = {
+  ofertas: { key: "root:ofertas", name: "Ofertas" },
+  proyectos: { key: "root:proyectos", name: "Proyectos" },
+};
+
+/** El nombre de la carpeta de un ID: `XXXYY - Nombre` (sin duplicar el ID si el nombre ya lo trae), seguro para Drive. */
+export function codedFolderName(code, name) {
+  const c = String(code ?? "").trim();
+  return sanitizeFolderName(codedName(c, name), c || "Sin nombre");
+}
+
+/**
  * Dónde va un archivo dentro de la carpeta de Chusy, como una lista de tramos
  * `{ key, name }` (de fuera adentro):
  *
- *   <ID> - <Nombre> / <AAAA-MM>        una oferta o un proyecto CON ID (v70)
- *   <Proyecto> / <AAAA-MM>             un proyecto sin ID todavía (los de antes de la v70)
- *   Tareas personales / <AAAA-MM>      una tarea sin proyecto
+ *   Ofertas / <ID> - <Nombre> / <AAAA-MM>     una OFERTA con ID (v75)
+ *   Proyectos / <ID> - <Nombre> / <AAAA-MM>   un PROYECTO con ID (v75)
+ *   <Proyecto> / <AAAA-MM>                    un proyecto sin ID todavía (los de antes de la v70)
+ *   Tareas personales / <AAAA-MM>             una tarea sin proyecto
  *
- * `owner` es `{ code, name }` (con ID), `{ id, name }` (sin él) o null. El ID de una
- * oferta pasa íntegro al proyecto en que se convierte, así que los archivos de
- * la oferta y los del proyecto caen en LA MISMA carpeta. Por eso la carpeta se
- * identifica por el ID (`key` = `c:<ID>`) y su nombre es solo una etiqueta:
- * `<ID> - <Nombre>`, que además se puede buscar en Drive por el ID. No se
- * renombra después, ni cuando cambia el nombre de la oferta o del proyecto.
+ * `owner` es `{ code, name, kind, folderId? }` (con ID; `kind`: "offer" | "project", y `folderId` la
+ * carpeta que ya tiene anotada, `driveFolderId`), `{ id, name }` (sin ID) o null. El ID de una oferta pasa
+ * íntegro al proyecto en que se convierte, así que la carpeta de la oferta y la del proyecto son LA MISMA:
+ * al convertir, esa carpeta se mueve de `Ofertas` a `Proyectos` y se renombra (drive-storage.js,
+ * moveCodeFolderToProjects). Por eso la carpeta se identifica por el ID (`key` = `c:<ID>`), no por su
+ * nombre ni por dónde esté, y el tramo lleva `code` (para que el motor sepa que es una carpeta de ID),
+ * `root` (en cuál de las dos raíces va si hay que crearla) y `hint` (el `driveFolderId`, para encontrarla
+ * sin buscar). La carpeta se renombra al cambiar el nombre de la oferta o del proyecto (drive-service.js).
  */
 export function driveFolderPath({ owner = null, date = new Date() } = {}) {
   const month = monthFolderName(date);
   const monthSeg = { key: `m:${month}`, name: month };
   if (owner && owner.code) {
-    const label = owner.name ? `${owner.code} - ${owner.name}` : owner.code;
-    return [{ key: `c:${owner.code}`, name: sanitizeFolderName(label, owner.code) }, monthSeg];
+    const code = String(owner.code);
+    return [
+      {
+        key: `c:${code}`,
+        name: codedFolderName(code, owner.name),
+        code,
+        root: owner.kind === "offer" ? "ofertas" : "proyectos",
+        hint: owner.folderId ? String(owner.folderId) : null,
+      },
+      monthSeg,
+    ];
   }
   if (owner && owner.id) return [{ key: `p:${owner.id}`, name: sanitizeFolderName(owner.name, "Proyecto") }, monthSeg];
   return [{ key: "personal", name: PERSONAL_FOLDER_NAME }, monthSeg];

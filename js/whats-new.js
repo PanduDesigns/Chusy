@@ -25,6 +25,17 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 75,
+    date: "2026-10-22",
+    title: "Carpetas de Drive con el ID y proyectos archivados",
+    items: [
+      "Al convertir una oferta en proyecto, su carpeta de Google Drive pasa de «Ofertas» a «Proyectos» y se renombra con el nombre del proyecto, con todos sus archivos dentro.",
+      "Las carpetas de Drive se llaman siempre «ID - Nombre» (por ejemplo, 00126 - Cabina Norte) y se renombran solas cuando cambias el nombre de la oferta o del proyecto.",
+      "Si ya has escrito la Ubicación local, «Abrir Ubicación» te avisa cuando la carpeta no lleva el ID por delante, y el campo sugiere el nombre con ID.",
+      "Si tienes abierto un proyecto archivado, ya no te saca a «Mis tareas» cuando alguien cambia otro proyecto.",
+    ],
+  },
+  {
     id: 70,
     date: "2026-10-17",
     title: "ID único para ofertas y proyectos",

@@ -79,6 +79,56 @@ export function counterDocId(year) {
   return y === FIRST_ID_YEAR ? "projectCounter" : `projectCounter-${String(y % 100).padStart(2, "0")}`;
 }
 
+// ---------------------------------------------------------------------------
+// Nombre «con ID» (v75): el formato ÚNICO con el que una oferta o un proyecto lleva su ID por delante
+// en un nombre de carpeta —de Drive hoy, y de la carpeta local que se sugiere en la Ubicación—:
+// `XXXYY - Nombre`. Un solo helper para que Drive, el renombrado y la Ubicación no se desvíen.
+// ---------------------------------------------------------------------------
+
+/** El separador entre el ID y el nombre en `XXXYY - Nombre`. */
+export const CODE_NAME_SEPARATOR = " - ";
+
+const escapeRegExp = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * El nombre SIN el ID que lleve por delante, tal como lo habría puesto cualquiera a mano:
+ * `00126 - Cabina`, `00126-Cabina`, `00126 Cabina`, `[00126] Cabina`, `(00126): Cabina`.
+ * Solo quita el ID que se pide (no otro número) y solo si va al principio y NO pegado a más cifras
+ * (`001260 Cabina` no lleva el ID `00126`: es otro número). Quita también cualquier número de
+ * repeticiones seguidas (`00126 - 00126 - Cabina`), que es lo que sale de aplicar mal un prefijo dos veces.
+ */
+export function stripCodePrefix(name, code) {
+  let text = String(name ?? "").trim();
+  const c = String(code ?? "").trim();
+  if (!c) return text;
+  const re = new RegExp(`^[\\[(]?\\s*${escapeRegExp(c)}(?!\\d)\\s*[\\])]?\\s*(?:[-–—:_]\\s*)?`);
+  for (let guard = 0; guard < 5; guard++) {
+    const next = text.replace(re, "").trim();
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
+
+/** ¿El nombre ya lleva ese ID por delante (en cualquiera de las formas de stripCodePrefix)? */
+export function hasCodePrefix(name, code) {
+  const c = String(code ?? "").trim();
+  return !!c && stripCodePrefix(name, c) !== String(name ?? "").trim();
+}
+
+/**
+ * `XXXYY - Nombre`: el nombre con el ID por delante, sin duplicarlo si el nombre ya lo traía
+ * (`00126 - Cabina` sigue siendo `00126 - Cabina`; `[00126] Cabina`, también). Sin nombre (o solo
+ * el ID), queda el ID solo; sin ID, el nombre tal cual. No limpia caracteres ni recorta la longitud:
+ * eso depende de dónde se use (drive-files.js lo hace para Drive).
+ */
+export function codedName(code, name) {
+  const c = String(code ?? "").trim();
+  const rest = stripCodePrefix(name, c);
+  if (!c) return rest;
+  return rest ? `${c}${CODE_NAME_SEPARATOR}${rest}` : c;
+}
+
 const msOf = (value) => {
   const d = value == null ? null : toDate(value);
   const ms = d ? d.getTime() : NaN;

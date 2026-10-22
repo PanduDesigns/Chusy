@@ -78,11 +78,17 @@ Dónde están los archivos
 ------------------------
 En el Drive de esa cuenta, carpeta "Chusy - archivos" (puedes moverla a otro
 sitio; no cambia nada). Cada archivo lleva su nombre original. Dentro, Chusy
-los ordena solo en carpetas con el ID de la oferta o del proyecto y el mes (por
-ejemplo "00126 - Cabina Togg" > "2026-10"; la oferta y el proyecto en que se
-convierte comparten el ID y, por tanto, la carpeta); las tareas sin proyecto van
-a "Tareas personales", y "Probar conexión" crea la carpeta "Pruebas de conexión".
-Las carpetas las crea Chusy: no hace falta tocar este script. Los archivos
+los ordena solo en dos carpetas, "Ofertas" y "Proyectos", y dentro en carpetas con
+el ID de la oferta o del proyecto y el mes (por ejemplo "Ofertas" > "00126 - Cabina
+Togg" > "2026-10"). La oferta y el proyecto en que se convierte comparten el ID y,
+por tanto, la carpeta: al convertir la oferta, Chusy la mueve de "Ofertas" a
+"Proyectos" y le pone el nombre del proyecto; también la renombra si cambias el
+nombre de la oferta o del proyecto (si la mueves o renombras tú a mano, Chusy la
+sigue encontrando por el ID). Las tareas sin proyecto van a "Tareas personales", y
+"Probar conexión" crea la carpeta "Pruebas de conexión" (y comprueba que se pueden
+mover y renombrar carpetas).
+Las carpetas las crea y mueve Chusy desde el navegador (v75): no hace falta tocar
+este script ni volver a implementarlo. Los archivos
 subidos antes de que existieran las carpetas siguen sueltos en "Chusy - archivos"
 y funcionan igual. Si quitas un
 adjunto de una tarea y guardas, el archivo va a la papelera de Drive (30 días

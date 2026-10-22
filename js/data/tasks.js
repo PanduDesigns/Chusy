@@ -99,6 +99,9 @@ export async function createTask(projectId, data) {
     // ver task-modal.js); una tarea normal no gana un `revisions` vacío.
     ...(Array.isArray(data.revisions) ? { revisions: data.revisions } : {}),
     ...(offerCode ? { offerCode } : {}),
+    // v75: la carpeta de Drive de la oferta, si ya se creó al subir archivos antes de guardarla. Solo la trae
+    // el formulario; duplicar una oferta NO la copia (la copia tiene su propio ID, y su propia carpeta).
+    ...(offerCode && data.driveFolderId ? { driveFolderId: data.driveFolderId } : {}),
     isComplete: data.isComplete || false,
     isMilestone: data.isMilestone || false,
     completedAt: null,
@@ -201,13 +204,13 @@ function cloneTaskDoc(value) {
 
 /**
  * Una tarea por su id — usada al abrir el modal para editar (y la oferta que se
- * va a convertir en proyecto). v73: primero se busca en el store, que ya tiene
- * al día (por su escucha en tiempo real) todas las tareas de los proyectos que
- * se han abierto: si está, se devuelve al instante, sin gastar una lectura de
- * Firestore. Solo si NO está (una tarea de un proyecto que aún no se ha cargado,
- * un enlace directo, o una personal de «Mis tareas», que todavía no pasa por el
- * store) se hace el `getDoc` de siempre. Devuelve `null` si no existe. Siempre
- * es una copia: quien la reciba puede modificarla sin tocar la del store.
+ * va a convertir en proyecto). Primero se busca en el store, que ya tiene al día
+ * (por su escucha en tiempo real) las tareas de los proyectos que se han abierto
+ * (v73) y las de «Mis tareas» — asignadas a ti o personales tuyas (v74): si está,
+ * se devuelve al instante, sin gastar una lectura de Firestore. Solo si NO está
+ * (una tarea de un proyecto que aún no se ha cargado, un enlace directo, una
+ * archivada) se hace el `getDoc` de siempre. Devuelve `null` si no existe.
+ * Siempre es una copia: quien la reciba puede modificarla sin tocar la del store.
  */
 export async function getTask(taskId) {
   const cached = store.getById("tasks", taskId);
@@ -250,16 +253,38 @@ export function projectTasksListenerKeys(projectId) {
  */
 export function subscribeToProjectTasks(projectId, callback) {
   const keys = projectTasksListenerKeys(projectId);
+  const qPrimary = query(collection(db, "tasks"), where("projectId", "==", projectId));
+  const qExtra = query(
+    collection(db, "tasks"),
+    where("extraProjectIds", "array-contains", projectId),
+    where("projectId", "!=", null)
+  );
+  return subscribeToTaskQueries(
+    [{ key: keys.primary, query: qPrimary }, { key: keys.extra, query: qExtra }],
+    callback
+  );
+}
+
+/**
+ * Lo que comparten las suscripciones de tareas que combinan varias consultas
+ * (las de un proyecto y «Mis tareas»): cada consulta se abre con `store.listen()`
+ * y su clave, `callback(tasks)` recibe las tareas de TODAS ellas sin duplicados
+ * cuando ya han contestado todas (o alguna ha fallado: se enseña lo que trajeron
+ * las otras), y se vuelve a llamar solo cuando cambia algo de estas consultas.
+ * Devuelve la función que cancela: suelta las escuchas y el store las cierra
+ * (y olvida sus tareas) cuando nadie más las usa.
+ */
+function subscribeToTaskQueries(specs, callback) {
+  const keys = specs.map((spec) => spec.key);
   let released = false;
   let sentOnce = false;
-  let primary = null;
-  let extra = null;
+  let handles = null;
 
-  const ready = () => store.isLoaded(keys.primary) && store.isLoaded(keys.extra);
+  const ready = () => keys.every((k) => store.isLoaded(k));
   const emit = () => {
-    if (released || !primary || !extra || !ready()) return;
+    if (released || !handles || !ready()) return;
     const byId = new Map();
-    [...primary.docs(), ...extra.docs()].forEach((t) => byId.set(t.id, t));
+    handles.forEach((h) => h.docs().forEach((t) => byId.set(t.id, t)));
     sentOnce = true;
     callback([...byId.values()]);
   };
@@ -268,20 +293,15 @@ export function subscribeToProjectTasks(projectId, callback) {
   // (una simulada, o una ya cargada) no se pierde el aviso.
   const unsubStore = store.subscribe("tasks", (_data, change) => {
     // «sync» (el servidor confirma lo que ya había) no cambia nada que enseñar.
-    if (change.type === "sync" || (change.key !== keys.primary && change.key !== keys.extra)) return;
+    if (change.type === "sync" || !keys.includes(change.key)) return;
     emit();
   });
 
-  const qPrimary = query(collection(db, "tasks"), where("projectId", "==", projectId));
-  const qExtra = query(
-    collection(db, "tasks"),
-    where("extraProjectIds", "array-contains", projectId),
-    where("projectId", "!=", null)
-  );
   // keepAlive: false → las escuchas se cierran cuando se suelta la última petición
-  // (el cargador de tareas, task-loader.js, es quien decide cuánto se quedan abiertas).
-  primary = store.listen(keys.primary, "tasks", (observer) => onSnapshot(qPrimary, observer), { keepAlive: false });
-  extra = store.listen(keys.extra, "tasks", (observer) => onSnapshot(qExtra, observer), { keepAlive: false });
+  // (quien llama decide cuánto se quedan abiertas: task-loader.js, o app.js para «Mis tareas»).
+  handles = specs.map((spec) =>
+    store.listen(spec.key, "tasks", (observer) => onSnapshot(spec.query, observer), { keepAlive: false })
+  );
 
   // Escuchas que ya estaban abiertas y cargadas: no habrá instantánea nueva, se enseña lo que hay.
   if (!sentOnce) emit();
@@ -290,8 +310,7 @@ export function subscribeToProjectTasks(projectId, callback) {
     if (released) return;
     released = true;
     unsubStore();
-    primary.release();
-    extra.release();
+    handles.forEach((h) => h.release());
   };
 }
 
@@ -332,53 +351,19 @@ export function subscribeToProjectTasks(projectId, callback) {
  * pulsarlo una vez.
  */
 export function subscribeToMyTasks(uid, callback) {
-  let assignedTasks = [];
-  let ownedTasks = [];
-  let assignedLoaded = false;
-  let ownedLoaded = false;
-  const emit = () => {
-    if (!assignedLoaded || !ownedLoaded) return; // esperar a tener las dos partes antes del primer aviso
-    const byId = new Map();
-    [...assignedTasks, ...ownedTasks].forEach((t) => byId.set(t.id, t));
-    callback([...byId.values()]);
-  };
-
   const qAssigned = query(collection(db, "tasks"), where("assigneeIds", "array-contains", uid));
-  const unsubAssigned = onSnapshot(
-    qAssigned,
-    (snap) => {
-      assignedTasks = [];
-      snap.forEach((d) => assignedTasks.push({ id: d.id, ...d.data() }));
-      assignedLoaded = true;
-      emit();
-    },
-    (err) => {
-      console.error("subscribeToMyTasks (responsable):", err);
-      // Igual que en subscribeToProjectTasks: un fallo aquí no debe dejar
-      // Mis tareas en blanco a la espera de una consulta que quizá nunca
-      // resuelva — mejor mostrar lo que sí haya traído la otra consulta.
-      assignedLoaded = true;
-      emit();
-    }
-  );
-
   const qOwned = query(collection(db, "tasks"), where("ownerId", "==", uid));
-  const unsubOwned = onSnapshot(
-    qOwned,
-    (snap) => {
-      ownedTasks = [];
-      snap.forEach((d) => ownedTasks.push({ id: d.id, ...d.data() }));
-      ownedLoaded = true;
-      emit();
-    },
-    (err) => {
-      console.error("subscribeToMyTasks (dueño/a):", err);
-      ownedLoaded = true;
-      emit();
-    }
+  // v74: por el store, como las tareas de un proyecto (claves `tasks:mine:<uid>:assigned` /
+  // `:owned`; la misma colección `tasks` del store, así que una tarea que sea a la vez de un
+  // proyecto abierto y tuya existe una sola vez y `getTask` la encuentra por cualquiera de las dos).
+  // Si una de las dos consultas falla se enseña lo que trajo la otra, como siempre.
+  return subscribeToTaskQueries(
+    [
+      { key: `tasks:mine:${uid}:assigned`, query: qAssigned },
+      { key: `tasks:mine:${uid}:owned`, query: qOwned },
+    ],
+    callback
   );
-
-  return () => { unsubAssigned(); unsubOwned(); };
 }
 
 // ============================================================================

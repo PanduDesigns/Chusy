@@ -107,3 +107,50 @@ export async function copyAttachmentsForDuplicate(attachments, ctx = {}) {
     return { attachments: list.filter((a) => !isDriveAttachment(a)), skipped: driveOnes.length };
   }
 }
+
+// ---------------------------------------------------------------------------
+// v75 · Carpeta de Drive de una oferta o de un proyecto: renombrarla y pasarla de `Ofertas` a `Proyectos`.
+// Los dos envoltorios NUNCA lanzan: ordenar Drive es un extra y jamás debe impedir guardar una oferta, un
+// proyecto o convertir una oferta. Devuelven `{ status, folderId }`:
+//   "renamed" | "moved" | "unchanged"   hecho (o ya estaba);
+//   "none"       no hay carpeta (esa oferta o proyecto nunca tuvo archivos en Drive);
+//   "disabled"   el almacenamiento está apagado;
+//   "failed"     Drive no pudo (red, permisos, tiempo): queda para la próxima subida, que ordena sola.
+// `folderId` es el id de la carpeta si se encontró, para anotarlo como `driveFolderId` si faltaba.
+// ---------------------------------------------------------------------------
+
+function withTimeout(promise, ms) {
+  if (!ms) return promise;
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Drive tardó demasiado")), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function folderOperation(label, run, { timeoutMs = 0 } = {}) {
+  await whenDriveConfigReady(3000);
+  if (!driveService.isEnabled()) return { status: "disabled", folderId: null };
+  try {
+    return await withTimeout(run(), timeoutMs);
+  } catch (e) {
+    console.warn(`${label}:`, e);
+    return { status: "failed", folderId: null };
+  }
+}
+
+/** Pone a la carpeta del ID `code` el nombre `code - name` (si ya la tiene, no toca nada). Sin carpeta: "none". */
+export function renameDriveFolder({ code, name, folderId = null }, opts) {
+  if (!code) return Promise.resolve({ status: "none", folderId: null });
+  return folderOperation("renameDriveFolder", async () => {
+    const r = await driveService.renameCodeFolder({ code, name, folderId });
+    return { status: !r.folderId ? "none" : r.renamed ? "renamed" : "unchanged", folderId: r.folderId };
+  }, opts);
+}
+
+/** Pasa la carpeta del ID `code` de `Ofertas` a `Proyectos` y la renombra a `code - name`. Sin carpeta: "none". */
+export function moveDriveFolderToProjects({ code, name, folderId = null }, opts) {
+  if (!code) return Promise.resolve({ status: "none", folderId: null });
+  return folderOperation("moveDriveFolderToProjects", async () => {
+    const r = await driveService.moveCodeFolderToProjects({ code, name, folderId });
+    return { status: !r.folderId ? "none" : r.moved ? "moved" : r.renamed ? "renamed" : "unchanged", folderId: r.folderId };
+  }, opts);
+}

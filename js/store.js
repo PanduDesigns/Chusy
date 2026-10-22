@@ -13,7 +13,10 @@
 //
 // Este archivo NO importa Firebase ni toca el DOM: recibe la función que
 // suscribe (como task-loader.js), así que se puede probar suelto con
-// instantáneas simuladas. NINGUNA vista lo usa todavía.
+// instantáneas simuladas. v73: lo usan las tareas por proyecto; v74: también «Mis tareas»,
+// proyectos (activos, archivados y el abierto), personas y etiquetas (data/*.js, vía
+// data/store-subscriptions.js). Quedan fuera de él las lecturas puntuales previas a
+// escrituras por lotes, el perfil propio de auth.js y los avisos/papelera.
 //
 // ESTADO
 //   tasks · projects · offers · users · departments · tags → Map<id, documento>

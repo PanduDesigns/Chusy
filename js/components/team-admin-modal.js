@@ -21,7 +21,10 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
   // eliminar/reactivar sin esperar a que este panel se vuelva a abrir — la
   // suscripción de teamMembers vive en app.js y no repinta un modal ya
   // abierto.
-  const members = [...teamMembers];
+  // v74: COPIAS de cada persona, no solo del array: más abajo se les cambia el rol, el
+  // departamento o `deleted` a mano al guardar, y `teamMembers` pasó a tener los
+  // documentos del store, compartidos con toda la app.
+  const members = teamMembers.map((m) => ({ ...m }));
 
   const overlay = el(`
     <div class="modal-overlay">

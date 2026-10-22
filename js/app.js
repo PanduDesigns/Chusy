@@ -6,7 +6,7 @@ import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
 import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
-import { convertOfferToProject } from "./data/offer-conversion.js";
+import { convertOfferToProject, conversionMessage } from "./data/offer-conversion.js";
 import { getTask, subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
 import { createTaskLoader } from "./task-loader.js";
 import { store } from "./store.js";
@@ -125,6 +125,11 @@ function syncCurrentTasks() {
   if (tasks) currentTasks = tasks;
 }
 let rawProjects = []; // v66: la última lista de proyectos SIN filtrar por departamento (ver handleProjectsList)
+// v75: los ids de los proyectos ACTIVOS de la instantánea anterior de la lista (sin filtrar por
+// departamento); `null` hasta que llega la primera. Sirve para distinguir, en handleProjectsList,
+// «el proyecto que veo acaba de dejar de estar activo» (alguien lo archivó o lo eliminó) de «lo
+// abrí YA archivado, desde Archivo» — dos casos en los que el proyecto abierto no está en `projects`.
+let prevActiveProjectIds = null;
 let projectsLoaded = false; // ya llegó la primera lista de proyectos
 let archivedProjectsLoaded = false; // v66: la lista de archivados solo se pide al entrar en Archivo
 let searchLoadPending = false; // el buscador está esperando a que lleguen todas las tareas
@@ -343,7 +348,7 @@ function cleanup() {
   store.stopAll(); // v73: por si acaso, que no quede en memoria nada de la cuenta que sale
   unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = null;
   resetDriveService(); // v68: fuera el permiso de Drive y las miniaturas de la cuenta que sale
-  projects = []; rawProjects = []; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
+  projects = []; rawProjects = []; prevActiveProjectIds = null; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
   sessionUid = null; searchLoadPending = false;
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
   activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
@@ -373,6 +378,9 @@ function bootstrap() {
   // cada clic de columna. Ahora las escuchas se abren una sola vez por cuenta; en
   // las repeticiones solo se aplica el perfil nuevo: se vuelve a filtrar la
   // lista de proyectos con el departamento/rol de ahora y se repinta.
+  // v74: si llega OTRA cuenta sin que la anterior haya cerrado sesión antes, se limpia todo
+  // (escuchas, store, listas) como al cerrar sesión: nada de la cuenta anterior se queda en memoria.
+  if (sessionUid && sessionUid !== currentUser.uid) cleanup();
   if (sessionUid === currentUser.uid) {
     if (projectsLoaded) handleProjectsList(rawProjects); // (ya repinta)
     else renderShell();
@@ -469,6 +477,10 @@ function handleProjectsList(allProjects) {
   // comprobación en cada uno de esos sitios — ver isProjectVisibleToUser
   // en data/projects.js.
   projects = allProjects.filter((p) => isProjectVisibleToUser(p, currentUser));
+  // v75: se apunta qué proyectos estaban activos ANTES de esta instantánea (y se deja ya anotada la
+  // de ahora) para decidir más abajo si hay que sacar a la persona del proyecto que tiene abierto.
+  const prevActiveIds = prevActiveProjectIds;
+  prevActiveProjectIds = new Set(allProjects.map((p) => p.id));
   // v66: solo Ofertas (y lo que ya se pidió); ver task-loader.js. v73: el proyecto que se está
   // viendo no se suelta aunque no esté en la lista (uno archivado abierto desde «Archivo»).
   taskLoader.syncProjects(projects, isOffersProject, currentProjectId ? [currentProjectId] : []);
@@ -480,12 +492,10 @@ function handleProjectsList(allProjects) {
     hasPurgedTrash = true;
     purgeExpiredTrash().catch((e) => console.error("purgeExpiredTrash:", e));
   }
-  if (mode === "project" && currentProjectId && !projects.find((p) => p.id === currentProjectId)) {
-    // La sección recordada (o la que se acaba de seleccionar) ya no
-    // existe, se archivó, o (v55) es una sección exclusiva a la que esta
-    // cuenta ya no tiene acceso — los tres casos caen en lo mismo:
-    // "projects" (ya filtrado arriba) no la tiene. Igual que si no
-    // hubiera nada guardado, el destino por defecto es "Mis tareas".
+  if (shouldLeaveOpenProject(allProjects, prevActiveIds)) {
+    // El proyecto que se tenía abierto ya no está disponible: se archivó o se eliminó mientras se
+    // miraba, o (v55) es una sección exclusiva a la que esta cuenta ya no tiene acceso. Igual que si
+    // no hubiera nada guardado, el destino por defecto es "Mis tareas".
     selectMyTasks();
     return;
   }
@@ -502,6 +512,30 @@ function handleProjectsList(allProjects) {
     ensureExclusiveProjectsSeeded(allProjects, currentUser.uid).catch((e) => console.error("ensureExclusiveProjectsSeeded:", e));
   }
   renderShell();
+}
+
+/**
+ * v75: ¿hay que sacar a la persona del proyecto que tiene abierto (a «Mis tareas»)? Se llama cada vez
+ * que llega la lista de proyectos ACTIVOS (`allProjects`, sin filtrar por departamento; `projects` ya
+ * es la filtrada) y `prevActiveIds` son los ids activos de la instantánea anterior (null si es la
+ * primera). Un proyecto abierto puede no estar en `projects` por tres motivos distintos:
+ *   · es de una sección exclusiva a la que esta cuenta no tiene acceso: está entre los activos pero no
+ *     se puede ver → se sale siempre (también al restaurar «la última sección» al entrar);
+ *   · estaba entre los activos en la instantánea anterior y ya no: alguien lo archivó o lo eliminó
+ *     mientras se miraba (v55/v66, como hasta ahora) → se sale;
+ *   · NUNCA estuvo entre los activos: se abrió ya archivado (desde «Archivo», o era la última sección
+ *     recordada) → se queda. Antes de la v75 el primer cambio de CUALQUIER proyecto activo —de
+ *     cualquier persona— expulsaba a «Mis tareas» a quien estaba consultando uno archivado. Su
+ *     suscripción de tareas y la del propio proyecto siguen abiertas (taskLoader.syncProjects
+ *     recibe el proyecto abierto como `keepIds`; subscribeToProject lo lee del store) hasta que
+ *     navegue a otro sitio, y si el proyecto se elimina del todo, subscribeToProject avisa con `null`
+ *     (ver selectProject).
+ */
+function shouldLeaveOpenProject(allProjects, prevActiveIds) {
+  if (mode !== "project" || !currentProjectId) return false;
+  if (projects.some((p) => p.id === currentProjectId)) return false; // sigue activo y visible
+  if (allProjects.some((p) => p.id === currentProjectId)) return true; // activo, pero esta cuenta ya no lo ve
+  return !!prevActiveIds && prevActiveIds.has(currentProjectId); // acaba de dejar de estar activo
 }
 
 function selectProject(projectId) {
@@ -523,7 +557,6 @@ function selectProject(projectId) {
   sortState = loadSortState(`project:${projectId}`);
   if (unsubCurrentProject) unsubCurrentProject();
 
-  unsubCurrentProject = subscribeToProject(projectId, (project) => { currentProject = project; renderShell(); });
   // v73: UNA sola suscripción a las tareas del proyecto, la del cargador (que la
   // mantiene escuchada hasta cerrar la sesión: al volver a este proyecto no se
   // vuelve a bajar entero). Antes se abría además otra aquí, con su propia copia
@@ -532,6 +565,21 @@ function selectProject(projectId) {
   // llega, es que aún no ha contestado: las tareas entrarán por onChange).
   taskLoader.ensureProject(projectId);
   syncCurrentTasks();
+  // v74: el proyecto sale del store (la lista de proyectos ya lo tiene al día), así que
+  // el aviso suele llegar AQUÍ MISMO, con las tareas ya cambiadas arriba: el primer
+  // pintado ya es el del proyecto nuevo con sus tareas, sin un cuadro intermedio.
+  unsubCurrentProject = subscribeToProject(projectId, (project) => {
+    currentProject = project;
+    // v75: el proyecto que se está viendo ha dejado de existir (p. ej. alguien eliminó uno ARCHIVADO
+    // que se tenía abierto; uno activo lo atrapa antes handleProjectsList). Antes quedaba el cuadro
+    // vacío «Sin proyecto» sin más; ahora se vuelve a «Mis tareas» y se avisa.
+    if (!project && mode === "project" && currentProjectId === projectId) {
+      showToast("Ese proyecto ya no existe.", "error");
+      selectMyTasks();
+      return;
+    }
+    renderShell();
+  });
   renderShell();
 }
 
@@ -1118,11 +1166,10 @@ async function openOfferConversion(taskId) {
     today: toDateInputValue(new Date()),
     getCommercialOptions,
     onConfirm: async ({ name, properties }) => {
-      const { projectId, linked } = await convertOfferToProject({ offer, name, properties, creatorUid: currentUser.uid, offersProject });
-      showToast(
-        linked ? "Proyecto creado a partir de la oferta." : "Proyecto creado, pero no se pudo marcar la oferta como convertida.",
-        linked ? "info" : "error"
-      );
+      const { projectId, linked, folder } = await convertOfferToProject({ offer, name, properties, creatorUid: currentUser.uid, offersProject });
+      // v75: además de si se enlazó la oferta, se cuenta qué pasó con su carpeta de Drive (pasó a «Proyectos» o no).
+      const message = conversionMessage({ linked, folder });
+      showToast(message.text, message.kind);
       selectProject(projectId);
     },
   });

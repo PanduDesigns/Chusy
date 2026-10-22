@@ -15,7 +15,7 @@
 //     sale ningún aviso.
 // ============================================================================
 import { showToast } from "../utils.js";
-import { normalizeLocation, hasLocation, protocolUrl, OPEN_LOCATION_LABEL } from "../location.js";
+import { normalizeLocation, hasLocation, protocolUrl, locationHasCode, OPEN_LOCATION_LABEL } from "../location.js";
 
 /** Cuánto se espera a ver si el navegador pierde el foco (señal de que el ayudante abrió el Explorador). */
 const LAUNCH_WAIT_MS = 1200;
@@ -174,8 +174,11 @@ export async function openLocation(raw, button = null) {
  * haya guardado todavía). El botón está deshabilitado mientras no haya nada
  * escrito: quien lo monta llama a `refresh()` cada vez que cambia la casilla.
  * `compact`: versión más pequeña, para ir en la línea de una etiqueta.
+ * v75: `getCode()` (opcional) devuelve el ID de la oferta o del proyecto (o ""); si la carpeta escrita
+ * no lleva ese ID por delante, el botón lo dice en su ayuda (title) y se marca con `data-code-missing`.
+ * Es solo un aviso: abre igualmente.
  */
-export function createOpenLocationButton({ getValue, compact = false }) {
+export function createOpenLocationButton({ getValue, getCode = null, compact = false }) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `btn btn--ghost btn--sm open-location-btn${compact ? " open-location-btn--compact" : ""}`;
@@ -185,7 +188,12 @@ export function createOpenLocationButton({ getValue, compact = false }) {
     const value = getValue();
     const has = hasLocation(value);
     button.disabled = !has;
-    button.title = has ? `Abrir: ${normalizeLocation(value).value}` : "Rellena primero el campo Ubicación";
+    const code = getCode ? String(getCode() || "").trim() : "";
+    const missing = has && !!code && !locationHasCode(value, code);
+    button.title = has
+      ? `Abrir: ${normalizeLocation(value).value}${missing ? `\n(Ojo: el nombre de la carpeta no lleva el ID ${code} por delante.)` : ""}`
+      : "Rellena primero el campo Ubicación";
+    if (missing) button.dataset.codeMissing = "1"; else delete button.dataset.codeMissing;
   }
 
   button.addEventListener("click", () => { openLocation(getValue(), button); });

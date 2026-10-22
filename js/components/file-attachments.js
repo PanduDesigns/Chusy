@@ -67,7 +67,8 @@ export function createFileAttachments({
   removeAttachment,
   currentUser,
   getTaskId,
-  getOwner, // v70: () => ({ code, name }) | ({ id, name }) | null — de quién es el archivo (puede devolver una promesa)
+  getOwner, // v70: () => ({ code, name, kind, folderId }) | ({ id, name }) | null — de quién es el archivo (puede devolver una promesa)
+  onOwnerFolder, // v75: (folderId, owner) => void — la carpeta del ID donde quedó un archivo (→ `driveFolderId`)
   onDirty,
   makeThumbnail = makeThumbnailBlob,
 }) {
@@ -239,6 +240,9 @@ export function createFileAttachments({
         onProgress: ({ loaded }) => { u.loaded = loaded; updateProgress(u); },
       });
       driveId = out.driveId;
+      if (out.folderId && onOwnerFolder) {
+        try { onOwnerFolder(out.folderId, owner); } catch (e) { console.warn("onOwnerFolder:", e); }
+      }
       u.status = "finishing";
       updateProgress(u);
       try {
