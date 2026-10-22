@@ -1,0 +1,174 @@
+/* ==========================================================================
+   Filter bar
+   ========================================================================== */
+.filterbar { padding: 0 32px; min-height: 0; flex-shrink: 0; }
+.filterbar:empty { display: none; }
+.filterbar__row { display: flex; align-items: center; gap: 8px; padding: 10px 0; flex-wrap: wrap; }
+.filterbar__label { font-size: 12px; color: var(--color-text-faint); margin-right: 2px; }
+.filterbar__btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--color-panel); border: 1px solid var(--color-line);
+  color: var(--color-text-lo); font-size: 12.5px; padding: 6px 12px;
+  border-radius: 20px; transition: var(--transition-fast);
+}
+.filterbar__btn:hover { border-color: var(--color-line-bright); color: var(--color-text-hi); }
+.filterbar__btn.has-active { border-color: var(--color-signal-dim); color: var(--color-signal-text); background: var(--color-signal-soft); }
+.filterbar__count {
+  font-family: var(--font-mono); font-size: 10px; background: var(--color-signal); color: var(--color-ink);
+  border-radius: 20px; padding: 0 6px; font-weight: 700;
+}
+.filterbar__clear { background: none; border: none; color: var(--color-text-faint); font-size: 12px; padding: 6px 4px; }
+.filterbar__clear:hover { color: var(--color-danger); }
+
+.filterbar__search-wrap {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--color-panel); border: 1px solid var(--color-line);
+  border-radius: 20px; padding: 0 12px; width: 220px; max-width: 40vw;
+  transition: border-color var(--transition-fast), width var(--transition-fast);
+}
+.filterbar__search-wrap:focus-within { border-color: var(--color-signal-dim); width: 280px; }
+.filterbar__search-icon { font-size: 12px; opacity: 0.6; flex-shrink: 0; }
+.filterbar__search {
+  background: none; border: none; color: var(--color-text-hi);
+  font-size: 12.5px; padding: 6px 0; width: 100%; min-width: 0;
+}
+.filterbar__search::placeholder { color: var(--color-text-faint); }
+
+.filter-popover {
+  position: fixed; z-index: 300; min-width: 200px; max-height: 280px; overflow-y: auto;
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-raised); padding: 6px;
+}
+.filter-popover__item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm);
+  font-size: 12.5px; color: var(--color-text-hi); cursor: pointer;
+}
+.filter-popover__item:hover { background: var(--color-panel); }
+.filter-popover__dot { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+
+/* ==========================================================================
+   Context menu
+   ========================================================================== */
+.context-menu {
+  position: fixed; z-index: 300; min-width: 200px; max-height: 70vh; overflow-y: auto;
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-raised);
+  padding: 6px; display: flex; flex-direction: column; gap: 1px;
+}
+.context-menu__item {
+  display: flex; align-items: center; gap: 10px;
+  background: none; border: none; text-align: left;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--color-text-hi); width: 100%;
+}
+.context-menu__item:hover { background: var(--color-panel); }
+.context-menu__item.is-danger { color: var(--color-danger); }
+.context-menu__item.is-danger:hover { background: var(--color-danger-soft); }
+.context-menu__icon { width: 16px; text-align: center; flex-shrink: 0; }
+.context-menu__divider { height: 1px; background: var(--color-line); margin: 5px 2px; }
+
+/* ==========================================================================
+   Toasts
+   ========================================================================== */
+.toast-root { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
+.toast {
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-left: 3px solid var(--color-signal);
+  border-radius: var(--radius-sm); padding: 11px 16px; font-size: 13px;
+  box-shadow: var(--shadow-raised);
+  animation: toast-in var(--transition-med);
+  max-width: 320px;
+}
+.toast--error { border-left-color: var(--color-danger); }
+@keyframes toast-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
+
+/* ==========================================================================
+   Recompensa al completar tareas (celebration.js): un chispazo de confeti
+   discreto al marcar una sola tarea, y confeti cayendo por toda la
+   pantalla + un mensaje al completar varias de golpe. Generados y
+   limpiados por JS; prefers-reduced-motion se respeta ahí (no aquí).
+   ========================================================================== */
+.confetti-piece { position: fixed; pointer-events: none; z-index: 300; will-change: transform, opacity; }
+.confetti-piece--burst { animation: confetti-burst 650ms cubic-bezier(.2,.8,.3,1) forwards; }
+.confetti-piece--fall { animation: confetti-fall 1800ms linear forwards; } /* duración/retardo reales: por pieza, vía JS (style inline) */
+@keyframes confetti-burst {
+  0% { transform: translate(-50%, -50%) translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.4); opacity: 0; }
+}
+@keyframes confetti-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(var(--fall-y)) rotate(var(--rot)); opacity: 0; }
+}
+
+.task-row__check.is-celebrating { animation: check-pop 420ms ease; }
+@keyframes check-pop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); }
+  60% { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+
+.celebrate-toast {
+  position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  color: var(--color-text-hi); font-size: 13.5px; font-weight: 600;
+  padding: 10px 18px; border-radius: 999px; box-shadow: var(--shadow-raised);
+  z-index: 300; pointer-events: none;
+  animation: celebrate-toast-in 260ms ease forwards, celebrate-toast-out 300ms ease 2100ms forwards;
+}
+@keyframes celebrate-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-14px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes celebrate-toast-out {
+  from { opacity: 1; transform: translateX(-50%) translateY(0); }
+  to   { opacity: 0; transform: translateX(-50%) translateY(-14px); }
+}
+
+/* ==========================================================================
+   Selección múltiple (vista de Lista): barra flotante de acciones masivas
+   y sus desplegables. La barra vive anclada a .main-col (ver ese
+   position:relative más arriba) para quedar centrada en el ÁREA DE
+   CONTENIDO — no en toda la ventana — sin tener que calcular en JS el
+   ancho del sidebar (colapsado, o superpuesto en móvil).
+   ========================================================================== */
+.bulk-toolbar-anchor {
+  position: absolute; left: 0; right: 0; bottom: 24px;
+  display: flex; justify-content: center;
+  padding: 0 16px; pointer-events: none; z-index: 90;
+}
+.bulk-toolbar {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 2px;
+  max-width: 100%; overflow-x: auto;
+  background: var(--color-void); border: 1px solid var(--color-line-bright);
+  border-radius: 999px; padding: 8px 10px 8px 16px;
+  box-shadow: var(--shadow-raised);
+  animation: bulk-toolbar-in var(--transition-med);
+}
+@keyframes bulk-toolbar-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.bulk-toolbar__count { font-size: 13px; font-weight: 500; color: var(--color-text-hi); white-space: nowrap; padding-right: 6px; }
+.bulk-toolbar__divider { width: 1px; align-self: stretch; background: var(--color-line-bright); margin: 4px 4px; flex-shrink: 0; }
+.bulk-toolbar__btn {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 50%;
+  color: var(--color-text-lo); font-size: 15px; line-height: 1;
+  transition: var(--transition-fast);
+}
+.bulk-toolbar__btn:hover { background: var(--color-panel-raised); color: var(--color-text-hi); }
+.bulk-toolbar__btn--danger:hover { background: var(--color-danger-soft); color: var(--color-danger); }
+
+.bulk-date-popover {
+  position: fixed; z-index: 300; width: 236px;
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-raised); padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.bulk-date-popover__row { display: flex; align-items: center; gap: 8px; }
+.bulk-date-popover__row input[type="checkbox"] { accent-color: var(--color-signal); flex-shrink: 0; }
+.bulk-date-popover__label { font-size: 12.5px; color: var(--color-text-lo); flex: 1; }
+.bulk-date-popover__row input[type="date"] { flex: none; width: 130px; padding: 6px 8px; font-size: 12.5px; }
+.bulk-date-popover__row input[type="date"]:disabled { opacity: 0.4; }
+

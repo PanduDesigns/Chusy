@@ -16,8 +16,11 @@ import { getDriveConfig, createDriveStorageFor } from "../drive-service.js";
 import { normalizeGatewayUrl, DEFAULT_MAX_FILE_MB, MIN_MAX_FILE_MB, MAX_MAX_FILE_MB } from "../drive-files.js";
 import { firebaseConfig } from "../firebase-config.js";
 
-const SCRIPT_URL = new URL("../../assets/drive/ChusyDrive.gs", import.meta.url).href;
-const MANIFEST_URL = new URL("../../assets/drive/appsscript.json", import.meta.url).href;
+// Relativas a la PÁGINA (como el resto de rutas `assets/...` de la app), no al
+// módulo: con `import.meta.url` Vite, al compilar, convertiría estos archivos
+// en copias con hash dentro de dist/bundle/ y la ruta dejaría de ser `assets/`.
+const SCRIPT_URL = new URL("assets/drive/ChusyDrive.gs", document.baseURI).href;
+const MANIFEST_URL = new URL("assets/drive/appsscript.json", document.baseURI).href;
 
 async function fetchText(url) {
   const res = await fetch(url, { cache: "no-cache" });

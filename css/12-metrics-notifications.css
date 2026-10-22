@@ -1,0 +1,177 @@
+/* ==========================================================================
+   Panel de métricas (solo administradores) — apartado 6 del README hecho
+   realidad. Reutiliza los mismos tokens de color de siempre (--color-panel,
+   --color-line, --font-mono para etiquetas...), nada nuevo a nivel de tema.
+   ========================================================================== */
+.metrics { display: flex; flex-direction: column; gap: 28px; padding: 24px; max-width: 920px; margin: 0 auto; overflow-y: auto; }
+
+.metrics__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.metric-card {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--color-panel); border: 1px solid var(--color-line);
+  border-radius: var(--radius-md); padding: 16px 18px;
+}
+.metric-card__value { font-size: 28px; font-weight: 600; line-height: 1.1; }
+.metric-card__label { font-size: 12px; color: var(--color-text-lo); }
+
+.metrics__section {
+  background: var(--color-panel); border: 1px solid var(--color-line);
+  border-radius: var(--radius-md); padding: 18px 20px;
+}
+.metrics__section-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.metrics__section-count {
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-lo);
+  background: var(--color-panel-raised); border-radius: 20px; padding: 1px 8px;
+}
+.metrics__section-hint { font-size: 12.5px; color: var(--color-text-faint); margin: 4px 0 14px; }
+.metrics__empty { font-size: 13px; color: var(--color-text-faint); padding: 4px 0; }
+
+.metrics__bars { display: flex; flex-direction: column; gap: 10px; }
+.metric-bar-row { display: flex; align-items: center; gap: 10px; }
+.metric-bar-row__name { font-size: 13px; width: 140px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metric-bar-row__track { flex: 1; height: 8px; border-radius: 4px; background: var(--color-panel-raised); overflow: hidden; }
+.metric-bar-row__fill { height: 100%; border-radius: 4px; background: var(--color-signal); transition: var(--transition-med); }
+.metric-bar-row__count { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-lo); width: 20px; text-align: right; flex-shrink: 0; }
+
+.metrics__overdue-list { display: flex; flex-direction: column; gap: 6px; }
+.metrics-overdue-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: var(--color-void-raised); border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm); padding: 9px 12px; text-align: left;
+  transition: var(--transition-fast);
+}
+.metrics-overdue-row:hover { border-color: var(--color-line-bright); background: var(--color-panel-raised); }
+.metrics-overdue-row__title { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-overdue-row__days { font-family: var(--font-mono); font-size: 11px; color: var(--color-danger); flex-shrink: 0; }
+
+@media (max-width: 720px) {
+  .metrics { padding: 16px; gap: 20px; }
+  .metric-bar-row__name { width: 90px; }
+  .metrics-overdue-row { flex-wrap: wrap; }
+}
+
+/* ==========================================================================
+   Campana de notificaciones — vive como hermana de #topbar (ver
+   index.html), posicionada encima por CSS, para no desaparecer cada vez
+   que un modo repinta topbarEl.innerHTML. El icono es un SVG con
+   stroke="currentColor" (v37 — antes un emoji 🔔, que no se puede
+   recolorear con temas: salía siempre con su amarillo de serie sin
+   distinguir claro/oscuro/clásico, ni el estado normal del :hover) —
+   toma el color del propio botón, así que cambia con el tema exactamente
+   igual que cualquier otro icono de la interfaz. `.topbar` le reserva el
+   hueco a la derecha con su propio padding (ver ese mismo bloque, más
+   arriba) — antes no había ningún hueco reservado y la campana quedaba
+   encima del botón "+ Nueva tarea", que ocupaba ese mismo borde.
+   ========================================================================== */
+.notif-bell {
+  position: absolute; top: 0; right: 24px; height: var(--topbar-h);
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; background: none; border: none;
+  color: var(--color-text-lo); z-index: 5;
+}
+.notif-bell:hover { color: var(--color-text-hi); }
+.notif-bell__dot {
+  position: absolute; top: 18px; right: 5px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--color-signal);
+  box-shadow: 0 0 0 2px var(--color-panel), 0 0 6px 1px var(--color-signal);
+}
+
+.notif-panel {
+  position: fixed; z-index: 300; width: 360px; max-height: 420px;
+  display: flex; flex-direction: column;
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-raised); overflow: hidden;
+}
+.notif-panel__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--color-line);
+  font-size: 13px; font-weight: 600; flex-shrink: 0;
+}
+/* v52: ya no hay botón de "marcar todas como leídas" — se marcan solas al cerrar el panel; esto solo lo cuenta, mientras haya alguna sin leer a la vista. */
+.notif-panel__hint { font-size: 11px; font-weight: 400; color: var(--color-text-faint); }
+.notif-panel__list { overflow-y: auto; flex: 1; }
+.notif-panel__empty { padding: 28px 16px; text-align: center; color: var(--color-text-faint); font-size: 12.5px; }
+
+.notif-row {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%;
+  padding: 10px 14px; text-align: left; background: none; border: none;
+  border-bottom: 1px solid var(--color-line); transition: var(--transition-fast);
+}
+.notif-row:last-child { border-bottom: none; }
+.notif-row:hover { background: var(--color-panel); }
+/* Sin leer: fondo teñido (misma variable que ya usan los botones activos
+   de la barra de formato, --color-signal-soft) + punto encendido + texto
+   a contraste alto. Leída: sin teñido, punto apagado y texto atenuado —
+   así se distinguen de un vistazo, no solo por el punto. */
+.notif-row--unread { background: var(--color-signal-soft); }
+.notif-row--unread:hover { background: var(--color-signal-soft); }
+.notif-row--read .notif-row__text { color: var(--color-text-faint); }
+.notif-row__unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-signal); margin-top: 5px; flex-shrink: 0; }
+.notif-row__unread-dot--hidden { background: transparent; }
+.notif-row__body { flex: 1; min-width: 0; }
+.notif-row__text { font-size: 12.5px; color: var(--color-text-hi); line-height: 1.4; }
+.notif-row__text b { font-weight: 600; }
+.notif-row__project { color: var(--color-text-faint); font-weight: 400; }
+.notif-row__time { font-size: 11px; color: var(--color-text-faint); margin-top: 2px; }
+
+/* ==========================================================================
+   Aviso grande de "te han asignado una tarea" (v52, notification-bell.js).
+   Sustituye al toast pequeño de la esquina, que se iba solo a los 6
+   segundos y se pasaba por alto: esto tapa la pantalla, se queda hasta que
+   se pulsa un botón, y la campana no para de sonar. Va por encima de todo
+   lo demás (modales 100, toasts 200, menús y panel 300) salvo la pantalla
+   de carga inicial (500). Todo con los tokens del tema, así que se ve bien
+   en oscuro, claro y clásico sin ningún caso especial.
+   ========================================================================== */
+.notif-alert-overlay {
+  position: fixed; inset: 0; z-index: 450;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: rgba(5, 8, 12, 0.74); backdrop-filter: blur(3px);
+  animation: notif-alert-fade 200ms ease;
+}
+.notif-alert {
+  width: 100%; max-width: 440px; max-height: 90vh; overflow-y: auto; text-align: center;
+  background: var(--color-panel); border: 2px solid var(--color-signal);
+  border-radius: var(--radius-lg); padding: 28px 28px 22px;
+  box-shadow: var(--shadow-raised), 0 0 0 6px var(--color-signal-soft);
+  animation: notif-alert-pop 340ms cubic-bezier(.2, .9, .3, 1.2), notif-alert-glow 1.8s ease-in-out 340ms infinite;
+}
+.notif-alert__icon {
+  width: 68px; height: 68px; margin: 0 auto 14px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-signal); color: var(--color-ink);
+  transform-origin: 50% 14%;
+  animation: notif-alert-ring 2.4s ease-in-out 250ms infinite;
+}
+.notif-alert__title { font-family: var(--font-display); font-size: 23px; font-weight: 700; line-height: 1.2; color: var(--color-text-hi); margin: 0 0 14px; }
+.notif-alert__who { font-size: 13.5px; color: var(--color-text-lo); margin: 0 0 8px; }
+.notif-alert__who b { color: var(--color-text-hi); font-weight: 600; }
+.notif-alert__task {
+  font-size: 15px; font-weight: 600; color: var(--color-text-hi); line-height: 1.35;
+  background: var(--color-signal-soft); border-radius: var(--radius-sm); padding: 10px 14px; margin: 0;
+  overflow-wrap: anywhere;
+}
+.notif-alert__project { font-size: 12.5px; color: var(--color-text-faint); margin: 8px 0 0; }
+.notif-alert__list { list-style: none; margin: 0; padding: 0; text-align: left; font-size: 13px; color: var(--color-text-hi); }
+.notif-alert__list li { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--color-signal-soft); overflow-wrap: anywhere; }
+.notif-alert__list li + li { margin-top: 6px; }
+.notif-alert__list b { font-weight: 600; }
+.notif-alert__list .notif-alert__more { background: none; color: var(--color-text-faint); text-align: center; padding: 2px 12px; }
+.notif-alert__actions { display: flex; justify-content: center; gap: 10px; margin-top: 22px; }
+.notif-alert__actions .btn { min-width: 132px; }
+@keyframes notif-alert-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes notif-alert-pop { from { opacity: 0; transform: scale(0.86); } to { opacity: 1; transform: scale(1); } }
+@keyframes notif-alert-glow {
+  0%, 100% { box-shadow: var(--shadow-raised), 0 0 0 6px var(--color-signal-soft); }
+  50% { box-shadow: var(--shadow-raised), 0 0 0 10px var(--color-signal-soft), 0 0 34px 6px var(--color-signal-soft); }
+}
+/* La campana suena en la primera quinta parte de cada ciclo y descansa el resto, en vez de agitarse sin parar. */
+@keyframes notif-alert-ring {
+  0%, 24%, 100% { transform: rotate(0); }
+  3% { transform: rotate(16deg); } 6% { transform: rotate(-14deg); } 9% { transform: rotate(11deg); }
+  12% { transform: rotate(-8deg); } 16% { transform: rotate(4deg); } 20% { transform: rotate(-2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notif-alert, .notif-alert__icon { animation: none; }
+}
+

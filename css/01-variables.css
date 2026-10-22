@@ -1,0 +1,206 @@
+/* ==========================================================================
+   CHUSY — design tokens (Martech Corporation brand)
+   Charcoal/slate surfaces taken from the Martech Corporation logo
+   (#78848C slate, #3C3C3C charcoal), with the golden accent shared across
+   the Martech Industry / Martech Car / Spanesi family marks. Titillium Web
+   for display (bold, geometric, technical), IBM Plex Sans for body, IBM
+   Plex Mono for data/metadata.
+   ========================================================================== */
+:root {
+  --color-void: #17181A;
+  --color-void-raised: #1D1F21;
+  --color-panel: #212325;
+  --color-panel-raised: #2A2C2F;
+  --color-line: #3A3D40;
+  --color-line-bright: #52565A;
+
+  /* Fondo de la barra lateral en concreto — separado de --color-panel
+     porque el modo "clásico" (ver más abajo) quiere una barra lateral
+     oscura con el resto de la interfaz clara, algo que ningún otro token
+     existente representa por sí solo. Al valer var(--color-panel) aquí Y
+     no redefinirse en el bloque de modo claro, seguirá igual que
+     --color-panel en los dos temas de siempre (una referencia CSS se
+     resuelve con el valor de la variable referenciada QUE ESTÉ activo en
+     ese mismo punto del árbol, no con el que tuviera al declararse esta
+     línea) — solo el bloque de modo clásico la fija a un color propio. */
+  --color-sidebar-bg: var(--color-panel);
+
+  /* Para sombrear una celda como "fuera de lo normal" dentro de una
+     cuadrícula — días de otro mes en Calendario, fines de semana en Línea
+     de tiempo — sin depender de --color-void/-raised: esos dos son casi
+     iguales entre sí en el tema claro (a propósito, para que el fondo
+     general de la página quede muy suave — ver más abajo), así que ya no
+     bastan para que esta distinción se note. Independiente del todo de
+     esos dos, para poder oscurecerla sin más efectos secundarios. */
+  --color-dim: #1A1B1D;
+
+  --color-signal: #FCD000;
+  --color-signal-dim: #A8860A;
+  --color-signal-soft: rgba(252, 208, 0, 0.14);
+
+  --color-text-hi: #ECEDED;
+  --color-text-lo: #B4BCC2;
+  --color-text-faint: #909AA0;
+
+  /* Texto que SIEMPRE va sobre --color-signal (dorado) u otro fondo claro
+     y saturado — insignia de admin, botón primario, hoy del calendario…
+     Antes esos sitios usaban --color-void (que también hacía de fondo de
+     página) para el texto oscuro: funcionaba porque --color-void ERA
+     oscuro en el único tema que existía. Con el modo claro, --color-void
+     pasa a ser claro y ese texto dejaría de leerse — de ahí esta variable
+     aparte, fija en los dos temas, que separa "texto oscuro para poner
+     encima de algo brillante" de "fondo de página". */
+  --color-ink: #14161A;
+
+  /* El dorado (--color-signal) también se usa como color de TEXTO en unos
+     pocos sitios muy puntuales (enlaces, contenido de la descripción de
+     tarea, alguna etiqueta persistente) — no como fondo. En modo oscuro
+     el propio --color-signal ya lee bien ahí, así que esta variable vale
+     lo mismo; el modo claro la redefine más abajo, sin tocar
+     --color-signal (que en botones/insignias/acentos decorativos se
+     queda siempre con el dorado de siempre). */
+  --color-signal-text: #FCD000;
+
+  --color-danger: #FF5C6C;
+  --color-danger-soft: rgba(255, 92, 108, 0.14);
+  --color-warning: #E8963C;
+  --color-warning-soft: rgba(232, 150, 60, 0.14);
+  --color-success: #3DDC97;
+  --color-success-soft: rgba(61, 220, 151, 0.14);
+
+  --font-display: 'Titillium Web', sans-serif;
+  --font-body: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --sidebar-w: 260px;
+  --topbar-h: 64px;
+
+  --shadow-raised: 0 8px 30px rgba(0, 0, 0, 0.45);
+  --transition-fast: 120ms ease;
+  --transition-med: 220ms cubic-bezier(.2,.7,.3,1);
+
+  color-scheme: dark;
+}
+
+/* ==========================================================================
+   Modo claro — se activa con [data-theme="light"] en <html> (ver js/theme.js
+   y el script embebido al principio de index.html, que lo aplica antes del
+   primer pintado para no dar un parpadeo del tema equivocado). Oscuro sigue
+   siendo el de por defecto si no hay nada elegido todavía.
+
+   --color-signal se queda IGUAL que en oscuro a propósito (el mismo dorado
+   vivo de siempre en botones, insignias, hitos, acentos decorativos…):
+   sobre esos fondos el texto es --color-ink, siempre oscuro pase lo que
+   pase, así que el contraste no depende de cuánto brille el dorado. Lo
+   único que se redefine aquí es --color-signal-text — el dorado usado
+   como color de TEXTO suelto sobre una superficie clara, en un puñado de
+   sitios muy concretos (enlaces, contenido de la descripción de tarea,
+   alguna etiqueta persistente) — con una versión más oscura: el dorado
+   original da ~1,5:1 de contraste como texto sobre blanco, prácticamente
+   ilegible ahí. --color-signal-dim, --color-signal-soft y los colores de
+   estado (danger/warning/success) se dejan igual en ambos temas: son
+   washes de baja opacidad que ya se adaptan solos al fondo que tengan
+   detrás, o colores que conviene reconocer igual en cualquier tema. */
+:root[data-theme="light"] {
+  --color-void: #FCFCFB;
+  --color-void-raised: #FDFDFC;
+  --color-panel: #FFFFFF;
+  --color-panel-raised: #ECEEF1;
+  --color-line: #DBDFE3;
+  --color-line-bright: #C3C9CE;
+  --color-dim: #E7E8EA;
+
+  --color-signal-text: #96700A;
+
+  --color-text-hi: #1D2023;
+  --color-text-lo: #4E555C;
+  --color-text-faint: #7D848B;
+
+  --shadow-raised: 0 8px 30px rgba(20, 22, 26, 0.14);
+
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   Modo clásico — se activa con [data-theme="classic"] en <html>, igual
+   mecanismo que el modo claro de arriba. Un atributo [data-theme="X"] no
+   hereda nada de otro [data-theme="Y"] en el mismo elemento (son selectores
+   distintos, mutuamente excluyentes, no una cascada entre ellos) así que
+   este bloque repite explícitamente los tokens de superficie/texto del modo
+   claro (cuerpo de página claro, igual que él) y solo cambia lo que de
+   verdad distingue a "clásico": la barra lateral oscura y el acento coral
+   de Asana en vez del dorado — pedidos como tres colores exactos:
+   --color-sidebar-bg (#2a2c2e, la columna izquierda), --color-void
+   (#ffffff en vez del "casi blanco" #FCFCFB del modo claro — aquí sí se
+   pidió blanco puro) y --color-signal (#ff584a, "los botones y detalles
+   que aquí son amarillos"). --color-signal-dim y --color-signal-text usan
+   el mismo tono coral oscurecido al 80% (#CC463B, ~4,7:1 de contraste
+   sobre blanco) — mismo motivo que el dorado del modo claro se oscurece
+   para --color-signal-text (el coral de base da ~3,1:1 sobre blanco, poco
+   para texto suelto), reutilizando aquí ese mismo tono también para
+   -dim (bordes/hover) en vez de calcular un tercer valor sin que se haya
+   pedido. --color-signal-soft es la misma fórmula (14% de opacidad) que ya
+   usan oscuro y claro, con el RGB del coral en vez del dorado. */
+:root[data-theme="classic"] {
+  --color-void: #FFFFFF;
+  --color-void-raised: #FDFDFC;
+  --color-panel: #FFFFFF;
+  --color-panel-raised: #ECEEF1;
+  --color-line: #DBDFE3;
+  --color-line-bright: #C3C9CE;
+  --color-dim: #E7E8EA;
+
+  --color-sidebar-bg: #2A2C2E;
+
+  --color-signal: #FF584A;
+  --color-signal-dim: #CC463B;
+  --color-signal-soft: rgba(255, 88, 74, 0.14);
+  --color-signal-text: #CC463B;
+
+  --color-text-hi: #1D2023;
+  --color-text-lo: #4E555C;
+  --color-text-faint: #7D848B;
+
+  --shadow-raised: 0 8px 30px rgba(20, 22, 26, 0.14);
+
+  color-scheme: light;
+}
+
+/* La barra lateral del modo clásico es oscura (--color-sidebar-bg de
+   arriba) mientras el resto de la interfaz es clara. El primer intento de
+   arreglar esto (v32) volvía a declarar --color-text-hi/-lo/-faint y otras
+   variables con ámbito ".sidebar" en vez de ":root", esperando que la
+   herencia de variables CSS las propagara a los .sidebar__* de dentro —
+   en la práctica no se veía surtir efecto (con "Mis tareas" como única
+   excepción legible, por tener un fondo claro propio de por medio que la
+   hacía legible por otro motivo, nada que ver con este ajuste). En vez de
+   seguir dependiendo de esa herencia, aquí se fija el valor FINAL de cada
+   propiedad de color de forma directa, con un selector propio por cada
+   elemento de la barra lateral que lo necesita — más largo de escribir,
+   pero sin ningún mecanismo indirecto de por medio que pueda no llegar a
+   aplicarse. El texto principal es blanco puro, tal cual se pidió; el
+   resto reutiliza los mismos tonos ya probados del modo oscuro para texto
+   secundario/terciario, y variaciones nuevas de la propia #2A2C2E para
+   fondos "elevado"/"hundido" y bordes internos. */
+:root[data-theme="classic"] .sidebar { border-right-color: #3A3D40; }
+:root[data-theme="classic"] .sidebar__collapse-toggle { background: #595A5C; border-color: #9FA0A1; color: #B4BCC2; }
+:root[data-theme="classic"] .sidebar__search { background: #212224; border-color: #6A6B6D; color: #909AA0; }
+:root[data-theme="classic"] .sidebar__search:hover { border-color: #9FA0A1; color: #B4BCC2; }
+:root[data-theme="classic"] .sidebar__search-kbd { border-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__credit { color: #909AA0; }
+:root[data-theme="classic"] .sidebar__section-label { color: #909AA0; }
+:root[data-theme="classic"] .sidebar__item { color: #B4BCC2; }
+:root[data-theme="classic"] .sidebar__item:hover { background: #595A5C; color: #FFFFFF; }
+:root[data-theme="classic"] .sidebar__item.is-active { background: #595A5C; color: #FFFFFF; }
+:root[data-theme="classic"] .sidebar__item-count { color: #909AA0; background: #212224; border-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__new-project { color: #B4BCC2; border-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__footer { border-top-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__user:hover { background: #595A5C; }
+:root[data-theme="classic"] .sidebar__user-name { color: #FFFFFF; }
+:root[data-theme="classic"] .sidebar__user-role { color: #909AA0; }
+:root[data-theme="classic"] .sidebar__logout { color: #909AA0; }
+

@@ -1,0 +1,27 @@
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+@media (max-width: 860px) {
+  .sidebar { position: fixed; z-index: 50; height: 100vh; height: 100dvh; transform: translateX(-100%); transition: transform var(--transition-med); }
+  .sidebar.is-open { transform: translateX(0); }
+  .sidebar.is-collapsed { width: var(--sidebar-w); padding-left: 14px; padding-right: 14px; }
+  .sidebar.is-collapsed .sidebar__label { opacity: 1; max-width: 220px; }
+  .sidebar.is-collapsed .sidebar__item-count { display: inline-block; } /* aquí sí se ve: el móvil siempre muestra la barra "expandida" */
+  .sidebar.is-collapsed .sidebar__item,
+  .sidebar.is-collapsed .sidebar__search,
+  .sidebar.is-collapsed .sidebar__new-project,
+  .sidebar.is-collapsed .sidebar__user { justify-content: flex-start; gap: 8px; }
+  .sidebar.is-collapsed .sidebar__user { gap: 10px; }
+  .sidebar.is-collapsed .sidebar__footer { justify-content: flex-start; }
+  .sidebar.is-collapsed .sidebar__logout { display: block; }
+  .sidebar.is-collapsed .sidebar__brand-logo--full { opacity: 1; }
+  .sidebar.is-collapsed .sidebar__brand-logo--icon { opacity: 0; }
+  .sidebar__collapse-toggle { display: none; }
+  .main-content { padding: 20px 16px; }
+  .modal { max-width: 92vw; }
+  .modal-row { flex-direction: column; gap: 14px; }
+  .bulk-toolbar-anchor { bottom: 14px; padding: 0 10px; }
+  .bulk-toolbar { padding: 6px 8px 6px 14px; gap: 0; }
+  .bulk-toolbar__btn { width: 30px; height: 30px; font-size: 14px; }
+}
+

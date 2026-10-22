@@ -1,0 +1,231 @@
+/* ==========================================================================
+   Calendar view
+   ========================================================================== */
+.calendar { display: flex; flex-direction: column; gap: 10px; height: 100%; }
+.calendar-header { display: flex; align-items: center; gap: 12px; }
+.calendar-header__label { font-family: var(--font-display); font-size: 15px; font-weight: 600; text-transform: capitalize; min-width: 140px; }
+
+.calendar-weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  border: 1px solid var(--color-line); border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden;
+}
+.calendar-weekday {
+  background: var(--color-panel); padding: 7px 0; text-align: center;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em;
+  color: var(--color-text-faint); text-transform: uppercase;
+}
+
+.calendar-weeks {
+  display: flex; flex-direction: column; flex: 1;
+  border: 1px solid var(--color-line); border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md); overflow: hidden;
+}
+.calendar-week {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  position: relative; border-bottom: 1px solid var(--color-line);
+}
+.calendar-week:last-child { border-bottom: none; }
+
+.cal-daybg { background: var(--color-void-raised); border-right: 1px solid var(--color-line); }
+.cal-daybg.is-other-month { background: var(--color-dim); }
+.cal-daybg.is-today { background: var(--color-signal-soft); }
+
+.cal-daynum {
+  grid-row: 1; display: flex; align-items: center; padding: 4px 6px; gap: 4px; z-index: 1;
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-lo);
+}
+.cal-daynum span:first-child {
+  width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+}
+.cal-daynum.is-today span:first-child { background: var(--color-signal); color: var(--color-ink); font-weight: 700; }
+.calendar-day__add {
+  margin-left: auto; opacity: 0; background: none; border: none;
+  color: var(--color-text-faint); font-size: 13px; padding: 0 4px; border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+}
+.calendar-week:hover .calendar-day__add { opacity: 0.6; }
+.calendar-day__add:hover { opacity: 1 !important; color: var(--color-signal); }
+
+.cal-bar, .cal-milestone {
+  z-index: 1; align-self: center; height: 17px; margin: 0 1px;
+  display: flex; align-items: center; gap: 4px; padding: 0 5px;
+  border-radius: 4px; cursor: pointer; overflow: hidden;
+}
+.cal-bar { opacity: 0.9; }
+.cal-bar:hover { opacity: 1; }
+.cal-bar.is-complete { opacity: 0.35; }
+.cal-bar__label { font-size: 10px; font-weight: 600; color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-milestone { background: var(--color-signal-soft); }
+.cal-milestone .cal-bar__label { color: var(--color-signal-text); }
+.cal-milestone__diamond { width: 8px; height: 8px; background: var(--color-signal); transform: rotate(45deg); border-radius: 1px; flex-shrink: 0; }
+
+.calendar-more {
+  z-index: 1; align-self: center; margin: 0 6px;
+  font-size: 10px; color: var(--color-text-faint); cursor: pointer;
+}
+.calendar-more:hover { color: var(--color-text-lo); }
+
+@media (max-width: 860px) {
+  .calendar-week { grid-template-rows: 24px !important; }
+  .cal-bar, .cal-milestone, .calendar-more { display: none; }
+}
+
+/* ==========================================================================
+   Timeline / Gantt view
+   ========================================================================== */
+.timeline { display: flex; flex-direction: column; height: 100%; gap: 10px; }
+.timeline__toolbar { display: flex; align-items: center; gap: 12px; }
+.timeline__hint { font-size: 12px; color: var(--color-text-faint); }
+.timeline__scroll { flex: 1; overflow: auto; border: 1px solid var(--color-line); border-radius: var(--radius-md); }
+.timeline__grid { display: grid; position: relative; width: max-content; }
+
+.tl-corner {
+  position: sticky; top: 0; left: 0; z-index: 6;
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-line); border-right: 1px solid var(--color-line);
+}
+.tl-daycol {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-line); border-right: 1px solid var(--color-void);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-lo);
+  padding: 2px 0;
+}
+.tl-daycol.is-weekend { background: var(--color-dim); }
+.tl-month { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-signal-text); }
+
+.tl-group-label, .tl-task-label {
+  position: sticky; left: 0; z-index: 4;
+  background: var(--color-void);
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px; font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border-right: 1px solid var(--color-line); border-bottom: 1px solid var(--color-line);
+  box-shadow: 4px 0 6px -4px rgba(0,0,0,0.4);
+}
+.tl-group-label { font-weight: 700; background: var(--color-panel); }
+.tl-group-dot { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+.tl-task-label { cursor: pointer; color: var(--color-text-hi); }
+.tl-task-label:hover { color: var(--color-signal-text); }
+
+.tl-group-band { background: var(--color-panel); border-bottom: 1px solid var(--color-line); }
+.tl-row-band { border-bottom: 1px solid var(--color-line); }
+.tl-row-band:hover { background: var(--color-void-raised); }
+
+.tl-bar {
+  align-self: center; height: 16px; margin: 0 1px;
+  border-radius: 4px; border: 1px solid; opacity: 0.85; cursor: pointer;
+  transition: var(--transition-fast); z-index: 1;
+}
+.tl-bar:hover { opacity: 1; transform: scaleY(1.15); }
+.tl-bar.is-complete { opacity: 0.4; }
+
+.tl-milestone { display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1; }
+.tl-milestone__diamond {
+  width: 12px; height: 12px; background: var(--color-signal);
+  transform: rotate(45deg); border-radius: 2px;
+}
+
+/* Fila-bloque de una sección entera (modo Secciones del Gantt, v44): barra
+   más gruesa y sólida que una tarea normal — se ve de un vistazo que es un
+   resumen, no una tarea — y sin el cursor de "esto se puede abrir", porque
+   no lo es (ver comentario de aggregateBucket en timeline-view.js). */
+.tl-bar--agg { height: 20px; border-width: 2px; border-radius: 3px; opacity: 1; cursor: default; }
+.tl-bar--agg:hover { transform: none; }
+/* Hito real dentro de una sección colapsada: mismo rombo pero pequeño y
+   "recortado" en el color de fondo, para que se lea encima de una barra
+   agregada de cualquier color de prioridad sin fundirse con ella. */
+.tl-milestone--mini { transform: scale(0.65); }
+.tl-milestone--mini .tl-milestone__diamond { background: var(--color-void); box-shadow: inset 0 0 0 1.5px var(--color-text-hi); }
+
+/* Expandir una sección sin salir del modo Secciones (v46): toda la fila
+   agregada es el interruptor — más fácil de acertar con el ratón que un
+   botón pequeño suelto. */
+.tl-group-label--toggle { cursor: pointer; }
+.tl-group-label--toggle:hover { background: var(--color-panel-raised); }
+.tl-agg-chevron { flex-shrink: 0; width: 9px; font-size: 9px; color: var(--color-text-faint); }
+
+/* Arrastrar una barra o un hito para cambiar sus fechas (v46, solo tareas
+   reales — ver wireBarDragging en timeline-view.js). El halo dorado marca
+   que el arrastre está en curso; sin transición, para que siga al cursor
+   al milímetro en vez de ir a rebufo. */
+.tl-bar--dragging { opacity: 1; box-shadow: 0 0 0 2px var(--color-signal), 0 4px 10px rgba(0, 0, 0, 0.35); z-index: 5; transition: none; }
+/* Asas de redimensionar (v47): antes solo se sabía que un borde se podía
+   estirar por el cambio de cursor al pasar por encima — había que
+   encontrarlo a ciegas. Con estas marcas se ve dónde agarrar sin tener
+   que pasar el ratón exactamente por la franja de unos pocos píxeles.
+   Una sola clase para los dos bordes (v50, antes había tres clases según
+   la tarea tuviera una fecha o las dos — ver timeline-view.js). */
+.tl-bar--resizable { position: relative; }
+.tl-bar--resizable::before, .tl-bar--resizable::after {
+  content: ""; position: absolute; top: 15%; bottom: 15%; width: 3px;
+  background: rgba(255, 255, 255, 0.6); border-radius: 2px;
+  opacity: 0; transition: opacity var(--transition-fast);
+}
+.tl-bar--resizable::before { left: 2px; }
+.tl-bar--resizable::after { right: 2px; }
+.tl-bar--resizable:hover::before, .tl-bar--resizable:hover::after { opacity: 1; }
+/* Bloquea la selección de texto de TODA la página mientras se arrastra
+   una barra (v49) — mismo mecanismo que body.is-col-resizing, que ya usa
+   el redimensionado de columnas de la Lista. Sin esto (y sin el
+   preventDefault/stopPropagation de wireBarDragging), el navegador podía
+   competir por la misma pulsación con su propia selección de texto, y
+   estirar un borde acababa moviendo la tarea entera en vez de cambiar
+   solo esa fecha. */
+body.tl-dragging-bar { user-select: none; }
+.tl-drag-tooltip {
+  position: fixed; transform: translate(-50%, -100%);
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright);
+  border-radius: var(--radius-sm); padding: 3px 8px; font-size: 11px;
+  font-family: var(--font-mono); color: var(--color-text-hi); white-space: nowrap;
+  z-index: 200; pointer-events: none; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.tl-today-line {
+  background: var(--color-signal); width: 2px; opacity: 0.6;
+  pointer-events: none; z-index: 1; justify-self: center;
+}
+.tl-holiday-col {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(255, 92, 108, 0.16),
+    rgba(255, 92, 108, 0.16) 8px,
+    rgba(255, 92, 108, 0.08) 8px,
+    rgba(255, 92, 108, 0.08) 16px
+  );
+  pointer-events: none; z-index: 0;
+}
+.btn.is-toggled { background: var(--color-danger-soft); border-color: var(--color-danger); color: var(--color-danger); }
+
+/* Fechas clave del proyecto en su línea de tiempo (v58) — entrega, envío y
+   aprobación (ver la cabecera de timeline-view.js). Un color por fecha, igual
+   en los tres temas y lejos de los de prioridad (rojo/dorado/grises) y del
+   dorado de los hitos, para que no se confundan con una tarea ni con un
+   hito: cada una es una fila propia con un blanco de círculos concéntricos
+   en su fecha, más una línea discontinua que cruza toda la tabla (la línea
+   continua dorada sigue siendo la de "hoy"). */
+:root {
+  --kd-delivery: #8B5CF6;
+  --kd-sent: #3B82F6;
+  --kd-approval: #10B981;
+}
+.tl-keydate-label { font-weight: 600; box-shadow: inset 4px 0 0 var(--kd), 4px 0 6px -4px rgba(0, 0, 0, 0.4); }
+.tl-keydate-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--kd); flex-shrink: 0; }
+.tl-keydate-band { background: color-mix(in srgb, var(--kd) 9%, transparent); }
+.tl-keydate-band:hover { background: color-mix(in srgb, var(--kd) 15%, transparent); }
+.tl-keydate-marker { display: flex; align-items: center; justify-content: center; z-index: 2; }
+/* v59: el círculo se puede arrastrar para mover la fecha (zoom de día o de semana) */
+.tl-keydate-marker--draggable { cursor: grab; }
+.tl-keydate-marker--dragging { cursor: grabbing; z-index: 6; }
+.tl-keydate-marker--dragging .tl-keydate-marker__dot { box-shadow: 0 0 0 3px var(--color-void), 0 0 0 5px var(--kd), 0 4px 10px rgba(0, 0, 0, 0.35); }
+.tl-keydate-marker__dot {
+  width: 12px; height: 12px; border-radius: 50%; background: var(--kd);
+  box-shadow: 0 0 0 3px var(--color-void), 0 0 0 5px var(--kd);
+}
+.tl-keydate-line {
+  width: 2px; justify-self: center; pointer-events: none; z-index: 0; opacity: 0.8;
+  background: repeating-linear-gradient(to bottom, var(--kd) 0 6px, transparent 6px 10px);
+}
+
