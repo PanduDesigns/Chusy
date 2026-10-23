@@ -28,6 +28,20 @@
 // también ve el rol Revisor — mismo permiso que Miembro más esta entrada,
 // ver el apartado 3 del README.
 //
+// Navegación plegable (v77): los botones fijos de arriba (Mis tareas, Línea de
+// tiempo, Archivo, Papelera y las secciones exclusivas como Ofertas) van en un
+// bloque `.sidebar__nav` con un botón sutil en su cabecera. Plegado, el mismo
+// bloque pasa a una tira de una sola línea (~34 px) con solo los iconos —el
+// `title` de cada botón hace de tooltip y el contador de «Mis tareas» queda
+// como una insignia pequeña sobre su icono— y la lista de Proyectos sube hasta
+// arriba. No hay un segundo juego de botones: son los mismos, con las mismas
+// ids y el mismo cableado, y solo cambia la clase `is-folded` (CSS en
+// 05-layout.css). Al pulsar, el DOM se cambia aquí mismo (sin repintar la
+// aplicación ni perder el foco del botón) y `onToggleNav(plegado)` avisa a
+// app.js, que guarda la preferencia en localStorage. Con la barra entera
+// minimizada (68 px) no cabe una tira horizontal: plegado deja solo el botón
+// de desplegar. (Métricas no está en este bloque: vive en el menú del nombre.)
+//
 // Propiedades (v57): el menú de clic derecho de un proyecto normal (no de
 // las secciones exclusivas) incluye «Propiedades», que abre la ventana con
 // sus metadatos (project-properties-modal.js). El menú solo avisa con
@@ -45,7 +59,7 @@ import { openEditProjectModal } from "./edit-project-modal.js";
 import { openLocation } from "./open-location.js";
 import { hasLocation, projectLocation, OPEN_LOCATION_TEXT, OPEN_LOCATION_ICON } from "../location.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const regularProjects = projects.filter((p) => !p.exclusive);
@@ -94,7 +108,15 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       <span class="sidebar__label sidebar__search-kbd">⌘K</span>
     </button>
 
-    <button class="sidebar__item sidebar__item--pinned${isMyTasksActive ? " is-active" : ""}" id="btn-my-tasks" title="Mis tareas">
+    <div class="sidebar__nav${isNavCollapsed ? " is-folded" : ""}" id="sidebar-nav">
+    <div class="sidebar__nav-head">
+      <span class="sidebar__nav-title sidebar__label">Navegación</span>
+      <button class="sidebar__nav-toggle" id="btn-toggle-nav" type="button" aria-controls="sidebar-nav-items" aria-expanded="${isNavCollapsed ? "false" : "true"}" aria-label="${isNavCollapsed ? "Mostrar el menú de navegación" : "Ocultar el menú de navegación"}" title="${isNavCollapsed ? "Mostrar el menú de navegación" : "Ocultar el menú de navegación"}">
+        <svg class="sidebar__nav-chevron" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" focusable="false"><path d="M2 4.5 6 8l4-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="sidebar__nav-items" id="sidebar-nav-items">
+    <button class="sidebar__item sidebar__item--pinned${isMyTasksActive ? " is-active" : ""}" id="btn-my-tasks" title="${myTasksCount ? `Mis tareas · ${myTasksCount} pendientes` : "Mis tareas"}">
       <span class="sidebar__item-icon">🗂️</span>
       <span class="sidebar__item-name sidebar__label">Mis tareas</span>
       ${myTasksCount ? `<span class="sidebar__item-count sidebar__label">${myTasksCount}</span>` : ""}
@@ -112,6 +134,8 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       <span class="sidebar__item-name sidebar__label">Papelera</span>
     </button>
     ${exclusiveItems}
+    </div>
+    </div>
 
     <span class="sidebar__section-label sidebar__label">Proyectos</span>
     <div class="sidebar__list">
@@ -189,6 +213,20 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
   container.querySelector("#btn-toggle-collapse").addEventListener("click", onToggleCollapse);
+
+  // v77: plegar/desplegar el bloque de navegación. Cambia el DOM aquí (la
+  // clase, aria y el texto del botón) y solo avisa de la nueva preferencia.
+  const navEl = container.querySelector("#sidebar-nav");
+  const navToggle = container.querySelector("#btn-toggle-nav");
+  navToggle.addEventListener("click", () => {
+    const folded = !navEl.classList.contains("is-folded");
+    navEl.classList.toggle("is-folded", folded);
+    const text = folded ? "Mostrar el menú de navegación" : "Ocultar el menú de navegación";
+    navToggle.setAttribute("aria-expanded", folded ? "false" : "true");
+    navToggle.setAttribute("aria-label", text);
+    navToggle.title = text;
+    if (onToggleNav) onToggleNav(folded);
+  });
 
   container.querySelector("#btn-user-menu").addEventListener("click", (e) => {
     const rect = e.currentTarget.getBoundingClientRect();

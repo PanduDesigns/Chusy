@@ -13,10 +13,82 @@
 // ni siquiera un admin o Revisor puede reunirlas todas de golpe sin romper
 // ese límite — quien llama a renderMetricsView() (app.js) ya se encarga de
 // pasar solo tareas de proyecto.
+//
+// Alcance por departamento (v77, ver «Alcance de Métricas» en
+// departments.js): un admin ve a toda la empresa y puede acotar con el
+// selector de la cabecera; un Revisor solo ve a las personas de su
+// departamento (o, mejor dicho, de su grupo de acceso) y nada más — ni sus
+// barras de carga, ni sus tareas, ni los avatares de la lista de vencidas.
+// El filtro se calcula AQUÍ a partir de `currentUser` (metricsScopeFor), no se
+// fía de lo que pida quien llama: un Revisor no puede ampliar su alcance.
+// Como en el resto de Métricas (v54), es un límite de interfaz, no de datos.
 // ============================================================================
 import { escapeHtml, toDate, initials, colorFromString, textColorFor, projectIcon, isOverdue, renderTitleHtml } from "../utils.js";
+import { metricsScopeFor, metricsDepartmentOptions, memberMatchesDepartmentFilter, metricsFilterLabel } from "../departments.js";
 
-export function renderMetricsView(container, { tasks, teamMembers, projects, onOpenTask }) {
+/**
+ * Deja solo lo que cae dentro de un filtro de departamento (ver departments.js):
+ * las personas que lo cumplen y las tareas que tienen al menos a una de ellas
+ * como responsable. Una tarea sin responsable no pertenece a nadie, así que
+ * no entra en una vista acotada; una compartida entre dos departamentos cuenta
+ * en los dos. Con el filtro «todos» (`""`) devuelve todo tal cual.
+ */
+export function scopeMetricsData({ tasks, teamMembers }, filter) {
+  if (filter === "") return { tasks, members: teamMembers };
+  const members = teamMembers.filter((m) => memberMatchesDepartmentFilter(m, filter));
+  const ids = new Set(members.map((m) => m.uid));
+  return { tasks: tasks.filter((t) => (t.assigneeIds || []).some((id) => ids.has(id))), members };
+}
+
+export function renderMetricsView(container, options) {
+  const { tasks: allTasks, teamMembers: allMembers, projects, onOpenTask, currentUser, departmentFilter, onChangeDepartmentFilter } = options;
+  const isAdmin = !!currentUser && currentUser.role === "admin";
+  const filter = metricsScopeFor(currentUser, departmentFilter); // null = sin departamento: nadie
+  const scoped = scopeMetricsData({ tasks: allTasks, teamMembers: allMembers }, filter);
+  const tasks = scoped.tasks;
+  const teamMembers = scoped.members; // a partir de aquí, solo personas dentro del alcance
+
+  if (filter === null) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <span class="empty-state__eyebrow">— MÉTRICAS —</span>
+        <h2>Tu cuenta no tiene departamento</h2>
+        <p>Las métricas muestran a las personas de tu departamento. Pídele a un administrador que te asigne uno desde «Administrar equipo».</p>
+      </div>`;
+    return;
+  }
+
+  // Cabecera de departamento: selector para el admin; para el resto, una
+  // etiqueta fija con el departamento que están viendo.
+  const scopeLabel = metricsFilterLabel(filter);
+  const toolbarHtml = isAdmin
+    ? `<div class="metrics__toolbar">
+        <label class="metrics__toolbar-label" for="metrics-department">Departamento</label>
+        <select class="metrics__select" id="metrics-department">
+          ${metricsDepartmentOptions().map((o) => `<option value="${o.value}"${o.value === filter ? " selected" : ""}>${o.indent ? "\u00A0\u00A0" : ""}${escapeHtml(o.label)}</option>`).join("")}
+        </select>
+        ${scopeLabel ? `<span class="metrics__toolbar-hint">Tareas con alguien de ${escapeHtml(scopeLabel)} como responsable. Las que no tienen responsable no cuentan.</span>` : ""}
+      </div>`
+    : `<div class="metrics__toolbar">
+        <span class="metrics__toolbar-label">Departamento</span>
+        <span class="metrics__scope-chip">${escapeHtml(scopeLabel)}</span>
+        <span class="metrics__toolbar-hint">Solo ves a las personas de tu departamento y las tareas que tienen asignadas.</span>
+      </div>`;
+
+  // Un admin que cambia el selector repinta solo esta vista (sin tocar la barra
+  // lateral ni la superior) y avisa a app.js para que recuerde la elección.
+  const wireToolbar = () => {
+    const select = container.querySelector("#metrics-department");
+    if (!select) return;
+    select.addEventListener("change", () => {
+      const value = select.value;
+      if (onChangeDepartmentFilter) onChangeDepartmentFilter(value);
+      renderMetricsView(container, { ...options, departmentFilter: value });
+      const again = container.querySelector("#metrics-department");
+      if (again) again.focus();
+    });
+  };
+
   const total = tasks.length;
   const completed = tasks.filter((t) => t.isComplete);
   const pending = total - completed.length;
@@ -36,17 +108,25 @@ export function renderMetricsView(container, { tasks, teamMembers, projects, onO
   const overdueSorted = [...overdue].sort((a, b) => toDate(a.dueDate) - toDate(b.dueDate)); // más antigua primero
 
   if (!total) {
-    container.innerHTML = `
-      <div class="empty-state">
+    const emptyHtml = scopeLabel
+      ? `<div class="empty-state">
+        <span class="empty-state__eyebrow">— MÉTRICAS —</span>
+        <h2>Sin tareas para ${escapeHtml(scopeLabel)}</h2>
+        <p>Ninguna tarea de proyecto tiene todavía como responsable a alguien de este departamento.</p>
+      </div>`
+      : `<div class="empty-state">
         <span class="empty-state__eyebrow">— MÉTRICAS —</span>
         <h2>Todavía no hay tareas de proyecto</h2>
         <p>En cuanto haya tareas en algún proyecto, aquí aparecerá el resumen de completadas, vencidas y carga por persona.</p>
       </div>`;
+    container.innerHTML = scopeLabel ? `<div class="metrics">${toolbarHtml}${emptyHtml}</div>` : emptyHtml;
+    wireToolbar();
     return;
   }
 
   container.innerHTML = `
     <div class="metrics">
+      ${toolbarHtml}
       <div class="metrics__cards">
         <div class="metric-card">
           <span class="metric-card__value">${total}</span>
@@ -113,4 +193,5 @@ export function renderMetricsView(container, { tasks, teamMembers, projects, onO
       row.addEventListener("click", () => onOpenTask(row.dataset.open));
     });
   }
+  wireToolbar();
 }

@@ -108,3 +108,78 @@ export function defaultSectorOf(departmentValue) {
 export function departmentOptionsFor(currentValue) {
   return currentValue === LEGACY_DEPARTMENT.value ? [{ ...LEGACY_DEPARTMENT, label: `${LEGACY_DEPARTMENT.label} (sin sector)` }, ...DEPARTMENTS] : DEPARTMENTS;
 }
+
+// ============================================================================
+// Alcance de Métricas por departamento (v77)
+//
+// Quién pertenece a qué departamento ya estaba claro desde la v55: cada
+// persona tiene UN solo `users/{uid}.department` (lo asigna un admin desde
+// «Administrar equipo»; no hay lista de departamentos por persona). Métricas
+// lo usa así:
+//  · Admin: ve a todo el mundo y puede acotar con un selector por
+//    departamento (`metricsDepartmentOptions()`).
+//  · Revisor (el único rol no-admin con Métricas): solo ve a las personas de
+//    su propio GRUPO DE ACCESO (`accessGroupOf`), así que un «Diseño -
+//    Industria» ve también a «Diseño - Automoción» — para el acceso son un
+//    solo departamento (v63). Para ceñirlo al departamento exacto bastaría
+//    con cambiar `accessGroupOf(user.department)` por el `value` de
+//    `findDepartment(user.department)` en `metricsScopeFor()`.
+//  · Un Revisor sin departamento asignado (o con un valor que ya no existe)
+//    no ve a nadie: sin departamento no hay a quién enseñar.
+//
+// «Filtro» es un string: "" = todos; "none" = personas sin departamento
+// (solo lo elige un admin); un grupo («diseno») o un departamento
+// («diseno-industria») = solo esas personas; null = nadie.
+// ============================================================================
+/** Valor del filtro «Sin departamento» (solo en el selector del admin). */
+export const METRICS_NO_DEPARTMENT = "none";
+
+/**
+ * Las opciones del selector de Métricas del admin: todos, cada grupo y, bajo
+ * el grupo que los contiene, sus departamentos concretos (hoy, los dos
+ * Diseño), y al final «Sin departamento».
+ */
+export function metricsDepartmentOptions() {
+  const options = [{ value: "", label: "Todos los departamentos" }];
+  for (const group of DEPARTMENT_GROUPS) {
+    options.push({ value: group.value, label: group.label });
+    for (const d of DEPARTMENTS) {
+      if (d.access === group.value && d.value !== group.value) options.push({ value: d.value, label: d.label, indent: true });
+    }
+  }
+  options.push({ value: METRICS_NO_DEPARTMENT, label: "Sin departamento" });
+  return options;
+}
+
+/**
+ * El filtro de Métricas que de verdad se aplica a `user`: el elegido por un
+ * admin (si es una opción válida; si no, «todos»), o el de su propio grupo
+ * para cualquier otro rol — ignora lo que pida, así que un Revisor no puede
+ * ampliar su alcance ni a la fuerza. `null` = nadie (sin departamento
+ * reconocido). Sin usuario, también nadie.
+ */
+export function metricsScopeFor(user, requested) {
+  if (!user) return null;
+  if (user.role === "admin") {
+    const valid = metricsDepartmentOptions().some((o) => o.value === (requested || ""));
+    return valid ? requested || "" : "";
+  }
+  return findDepartment(user.department) ? accessGroupOf(user.department) : null;
+}
+
+/** ¿Entra esta persona en el filtro? (`filter`: ver arriba; `null` no deja entrar a nadie). */
+export function memberMatchesDepartmentFilter(member, filter) {
+  if (filter === null || filter === undefined) return false;
+  if (filter === "") return true;
+  const dept = member ? findDepartment(member.department) : undefined;
+  if (filter === METRICS_NO_DEPARTMENT) return !dept;
+  return !!dept && (dept.value === filter || (dept.access || dept.value) === filter);
+}
+
+/** Texto del filtro para mostrar («Diseño», «Diseño - Industria», «Sin departamento»); "" para «todos». */
+export function metricsFilterLabel(filter) {
+  if (!filter) return "";
+  if (filter === METRICS_NO_DEPARTMENT) return "Sin departamento";
+  const found = DEPARTMENT_GROUPS.find((g) => g.value === filter) || findDepartment(filter);
+  return found ? found.label : "";
+}

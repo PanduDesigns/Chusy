@@ -39,6 +39,7 @@ import { renderMyTasksView } from "./views/my-tasks-view.js";
 import { renderTrashView, visibleTrashItems } from "./views/trash-view.js";
 import { renderArchiveView } from "./views/archive-view.js";
 import { renderMetricsView } from "./views/metrics-view.js";
+import { metricsScopeFor, metricsFilterLabel } from "./departments.js";
 import { openProjectModal } from "./components/project-modal.js";
 import { openTaskModal } from "./components/task-modal.js";
 import { openProjectPropertiesModal, openOfferConversionModal } from "./components/project-properties-modal.js";
@@ -56,7 +57,7 @@ import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal
 import { openQuickCreateModal } from "./components/quick-create-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { removeBulkToolbar } from "./components/bulk-toolbar.js";
-import { showToast, getTaskSectionForProject, debounce, toDateInputValue } from "./utils.js";
+import { showToast, getTaskSectionForProject, debounce, toDateInputValue, escapeHtml } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
 const authScreen = document.getElementById("auth-screen");
@@ -149,6 +150,27 @@ function toggleSidebarCollapse() {
   try { localStorage.setItem("chusy:sidebarCollapsed", sidebarCollapsed ? "1" : "0"); } catch (e) { /* localStorage no disponible */ }
   renderShell();
 }
+
+// v77: el bloque de navegación de arriba de la barra lateral (Mis tareas,
+// Línea de tiempo, Archivo, Papelera, Ofertas…) se puede plegar a una tira de
+// iconos. Igual que la barra entera, es preferencia de este navegador. La
+// clave es la que se pidió tal cual (con guion bajo, a diferencia de las
+// demás `chusy:`). sidebar.js ya cambia el DOM al pulsar (sin repintar la
+// aplicación); aquí solo se recuerda para los repintados siguientes y para
+// la próxima sesión.
+const SIDEBAR_NAV_KEY = "chusy_sidebar_nav_collapsed";
+let sidebarNavCollapsed = false;
+try { sidebarNavCollapsed = localStorage.getItem(SIDEBAR_NAV_KEY) === "1"; } catch (e) { /* localStorage no disponible */ }
+function setSidebarNavCollapsed(collapsed) {
+  sidebarNavCollapsed = !!collapsed;
+  try { localStorage.setItem(SIDEBAR_NAV_KEY, sidebarNavCollapsed ? "1" : "0"); } catch (e) { /* localStorage no disponible */ }
+}
+
+// v77: departamento que un admin tiene elegido en Métricas ("" = todos). Solo
+// de esta sesión (no se guarda): se empieza siempre viendo a todo el mundo, y
+// se olvida al cerrar sesión (cleanup). Un Revisor lo ignora: su alcance lo
+// fija su propio departamento (metricsScopeFor).
+let metricsDepartmentFilter = "";
 
 // Los filtros de "Mis tareas" se recuerdan por persona en este navegador
 // (localStorage, no en la cuenta — mismo criterio que sidebarCollapsed, así
@@ -349,7 +371,7 @@ function cleanup() {
   unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = null;
   resetDriveService(); // v68: fuera el permiso de Drive y las miniaturas de la cuenta que sale
   projects = []; rawProjects = []; prevActiveProjectIds = null; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
-  sessionUid = null; searchLoadPending = false;
+  sessionUid = null; searchLoadPending = false; metricsDepartmentFilter = "";
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
   activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
   quickCreateEnabled = false;
@@ -794,6 +816,8 @@ function renderShell() {
     userProfile: currentUser,
     isCollapsed: sidebarCollapsed,
     onToggleCollapse: toggleSidebarCollapse,
+    isNavCollapsed: sidebarNavCollapsed,
+    onToggleNav: setSidebarNavCollapsed,
     onSelectProject: (id) => { selectProject(id); sidebarEl.classList.remove("is-open"); },
     onSelectMyTasks: () => { selectMyTasks(); sidebarEl.classList.remove("is-open"); },
     onSelectTimeline: () => { selectTimeline(); sidebarEl.classList.remove("is-open"); },
@@ -861,11 +885,18 @@ function renderShell() {
     // cuanto cambie, así que el botón habría desaparecido, pero el modo en
     // sí podría seguir activo un instante más sin este segundo aviso.
     if (currentUser.role !== "admin" && currentUser.role !== "revisor") { selectMyTasks(); return; }
-    topbarEl.innerHTML = `<span class="topbar__title">Métricas</span><span class="topbar__count">todos los proyectos</span>`;
+    // v77: un admin ve toda la empresa (con selector); el resto, solo su departamento.
+    const metricsScope = currentUser.role === "admin" ? "" : metricsScopeFor(currentUser);
+    const metricsCountText = currentUser.role === "admin" ? "todos los proyectos" : metricsScope ? `departamento de ${escapeHtml(metricsFilterLabel(metricsScope))}` : "sin departamento";
+    topbarEl.innerHTML = `<span class="topbar__title">Métricas</span><span class="topbar__count">${metricsCountText}</span>`;
     filterbarEl.innerHTML = ""; // resumen global, no una lista que filtrar
     // v66: hasta que llegan las tareas de TODOS los proyectos, las cifras saldrían a medias.
     if (!taskLoader.isAllLoaded()) { mainContentEl.innerHTML = loadingStateHtml("Cargando las tareas de todos los proyectos…"); return; }
-    renderMetricsView(mainContentEl, { tasks: getAllProjectTasksDeduped(), teamMembers, projects, onOpenTask: openTask });
+    renderMetricsView(mainContentEl, {
+      tasks: getAllProjectTasksDeduped(), teamMembers, projects, onOpenTask: openTask,
+      currentUser, departmentFilter: metricsDepartmentFilter,
+      onChangeDepartmentFilter: (value) => { metricsDepartmentFilter = value; },
+    });
     return;
   }
 

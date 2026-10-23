@@ -25,6 +25,15 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 77,
+    date: "2026-10-23",
+    title: "Barra lateral plegable y Métricas por departamento",
+    items: [
+      "En la barra lateral, el botón pequeño junto a «Navegación» pliega los botones de arriba (Mis tareas, Línea de tiempo, Archivo, Papelera…) en una tira de iconos, para dejar más sitio a los Proyectos en pantallas bajas. Chusy recuerda tu elección en este navegador.",
+      "Las Métricas ahora enseñan a las personas de tu departamento. Los administradores siguen viendo toda la empresa y pueden elegir un departamento en la cabecera.",
+    ],
+  },
+  {
     id: 75,
     date: "2026-10-22",
     title: "Carpetas de Drive con el ID y proyectos archivados",
