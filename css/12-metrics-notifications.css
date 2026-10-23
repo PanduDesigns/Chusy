@@ -5,6 +5,20 @@
    ========================================================================== */
 .metrics { display: flex; flex-direction: column; gap: 28px; padding: 24px; max-width: 920px; margin: 0 auto; overflow-y: auto; }
 
+/* v77 — cabecera de departamento: selector (admin) o etiqueta fija (Revisor) */
+.metrics__toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.metrics__toolbar-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-faint); }
+.metrics__select {
+  background: var(--color-panel); color: var(--color-text-hi); border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px; min-width: 200px;
+}
+.metrics__select:focus-visible { outline: 2px solid var(--color-signal); outline-offset: 1px; }
+.metrics__scope-chip {
+  font-size: 12.5px; font-weight: 600; color: var(--color-ink); background: var(--color-signal);
+  border-radius: 20px; padding: 3px 12px;
+}
+.metrics__toolbar-hint { font-size: 12.5px; color: var(--color-text-faint); flex: 1 1 240px; }
+
 .metrics__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .metric-card {
   display: flex; flex-direction: column; gap: 4px;

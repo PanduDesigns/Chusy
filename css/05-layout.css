@@ -130,7 +130,54 @@
   background: var(--color-void); border: 1px solid var(--color-line);
   border-radius: 20px; padding: 0px 7px;
 }
-.sidebar__item--pinned { margin-bottom: 14px; }
+/* v77 — Bloque de navegación plegable (Mis tareas, Línea de tiempo, Archivo,
+   Papelera, secciones exclusivas). Antes cada botón fijo llevaba
+   margin-bottom: 14px (≈70 px perdidos en cinco filas): ahora el espacio
+   entre filas es un gap de 2px, un poco menos de padding vertical y 8px de
+   aire al final del bloque. Plegado (.is-folded), el mismo bloque pasa a una
+   tira de una línea de 34px solo con iconos; los textos y el contador salen
+   del flujo, y el contador de «Mis tareas» queda como insignia pequeña sobre
+   su icono. */
+.sidebar__nav { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.sidebar__nav-head { display: flex; align-items: center; justify-content: space-between; height: 20px; padding: 0 2px 0 8px; }
+.sidebar__nav-title { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; color: var(--color-text-faint); text-transform: uppercase; }
+.sidebar__nav-toggle {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 24px; height: 20px; padding: 0;
+  background: none; border: none; border-radius: var(--radius-sm);
+  color: var(--color-text-faint); cursor: pointer;
+  transition: var(--transition-fast);
+}
+.sidebar__nav-toggle:hover { color: var(--color-signal); background: var(--color-panel-raised); }
+.sidebar__nav-toggle:focus-visible { outline: 2px solid var(--color-signal); outline-offset: 1px; }
+.sidebar__nav-chevron { transform: rotate(180deg); transition: transform var(--transition-fast); } /* desplegado: flecha hacia arriba (plegar) */
+.sidebar__nav.is-folded .sidebar__nav-chevron { transform: none; } /* plegado: flecha hacia abajo (desplegar) */
+.sidebar__nav-items { display: flex; flex-direction: column; gap: 2px; }
+.sidebar__nav .sidebar__item { padding: 6px 8px; }
+
+.sidebar__nav.is-folded { flex-direction: row; align-items: center; gap: 2px; height: 34px; }
+.sidebar__nav.is-folded .sidebar__nav-head { flex: 0 0 auto; height: auto; padding: 0; }
+.sidebar__nav.is-folded .sidebar__nav-title { display: none; }
+.sidebar__nav.is-folded .sidebar__nav-toggle { height: 30px; }
+.sidebar__nav.is-folded .sidebar__nav-items { flex: 1; min-width: 0; flex-direction: row; gap: 2px; }
+.sidebar__nav.is-folded .sidebar__item { flex: 1 1 0; min-width: 0; width: auto; height: 30px; padding: 0; gap: 0; justify-content: center; position: relative; }
+.sidebar__nav.is-folded .sidebar__item .sidebar__label { display: none; }
+.sidebar__nav.is-folded .sidebar__item-icon { font-size: 15px; }
+.sidebar__nav.is-folded .sidebar__item.is-active { box-shadow: inset 0 -2px 0 var(--color-signal); }
+.sidebar__nav.is-folded .sidebar__item .sidebar__item-count { /* va DESPUÉS de ocultar los .sidebar__label: el contador también lo es */
+  display: block; position: absolute; top: 1px; right: 2px;
+  min-width: 14px; height: 14px; padding: 0 3px; border: none; border-radius: 8px;
+  font-size: 9px; line-height: 14px; text-align: center;
+  background: var(--color-signal); color: var(--color-ink);
+}
+/* Con la barra entera minimizada (68px) no cabe una tira horizontal: abierto
+   quedan los iconos en columna (como siempre) y plegado, solo el botón de
+   desplegar. */
+.sidebar.is-collapsed .sidebar__nav-head { justify-content: center; padding: 0; }
+.sidebar.is-collapsed .sidebar__nav.is-folded { height: 26px; }
+.sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__nav-head { flex: 1; }
+.sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__nav-toggle { height: 22px; }
+.sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__nav-items { display: none; }
 .sidebar__item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar__new-project {
   margin-top: 8px;

@@ -197,6 +197,9 @@
 :root[data-theme="classic"] .sidebar__item:hover { background: #595A5C; color: #FFFFFF; }
 :root[data-theme="classic"] .sidebar__item.is-active { background: #595A5C; color: #FFFFFF; }
 :root[data-theme="classic"] .sidebar__item-count { color: #909AA0; background: #212224; border-color: #6A6B6D; }
+:root[data-theme="classic"] .sidebar__nav-title { color: #909AA0; }
+:root[data-theme="classic"] .sidebar__nav-toggle { color: #909AA0; }
+:root[data-theme="classic"] .sidebar__nav-toggle:hover { color: #FFFFFF; background: #595A5C; }
 :root[data-theme="classic"] .sidebar__new-project { color: #B4BCC2; border-color: #6A6B6D; }
 :root[data-theme="classic"] .sidebar__footer { border-top-color: #6A6B6D; }
 :root[data-theme="classic"] .sidebar__user:hover { background: #595A5C; }

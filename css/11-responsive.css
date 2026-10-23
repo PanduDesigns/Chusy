@@ -17,6 +17,13 @@
   .sidebar.is-collapsed .sidebar__brand-logo--full { opacity: 1; }
   .sidebar.is-collapsed .sidebar__brand-logo--icon { opacity: 0; }
   .sidebar__collapse-toggle { display: none; }
+  /* v77: en móvil la barra siempre se ve «expandida», aunque en escritorio esté minimizada: el bloque de navegación también (tira de iconos si está plegado). */
+  .sidebar.is-collapsed .sidebar__nav-head { justify-content: space-between; padding: 0 2px 0 8px; }
+  .sidebar.is-collapsed .sidebar__nav.is-folded { height: 34px; }
+  .sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__nav-head { flex: 0 0 auto; padding: 0; }
+  .sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__nav-toggle { height: 30px; }
+  .sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__nav-items { display: flex; }
+  .sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__item { justify-content: center; gap: 0; }
   .main-content { padding: 20px 16px; }
   .modal { max-width: 92vw; }
   .modal-row { flex-direction: column; gap: 14px; }
