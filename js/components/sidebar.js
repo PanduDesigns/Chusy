@@ -59,7 +59,7 @@ import { openEditProjectModal } from "./edit-project-modal.js";
 import { openLocation } from "./open-location.js";
 import { hasLocation, projectLocation, OPEN_LOCATION_TEXT, OPEN_LOCATION_ICON } from "../location.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenWorkCalendar, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
   const regularProjects = projects.filter((p) => !p.exclusive);
@@ -233,6 +233,8 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     const items = [
       { label: "Mi cuenta", icon: "👤", onClick: onOpenAccount },
       { label: "Novedades de Chusy", icon: "🆕", onClick: onOpenWhatsNew },
+      // v78: la ven todas las cuentas (festivos y ausencias del equipo); solo un admin edita.
+      { label: "Calendario laboral", icon: "🗓️", onClick: onOpenWorkCalendar },
     ];
     if (userProfile.role === "admin") {
       items.push({ label: "Administrar equipo", icon: "🛠️", onClick: onOpenTeamAdmin });

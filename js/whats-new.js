@@ -25,6 +25,16 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 78,
+    date: "2026-10-24",
+    title: "Calendario laboral: festivos y vacaciones",
+    items: [
+      "Nuevo «Calendario laboral» en el menú de tu nombre: festivos (nacionales, de Castilla-La Mancha y de Albacete) y las vacaciones y ausencias del equipo. Solo los administradores lo editan; todo el mundo lo puede consultar.",
+      "Al poner una fecha límite que cae en fin de semana, festivo o en vacaciones de un responsable, la tarea te avisa y te deja pasarla al siguiente día laborable con un clic.",
+      "El Calendario y la Línea de tiempo sombrean los festivos y marcan con ⚠️ las tareas que caen en festivo o en una ausencia. El Excel del Gantt trae una columna de días laborables.",
+    ],
+  },
+  {
     id: 77,
     date: "2026-10-23",
     title: "Barra lateral plegable y Métricas por departamento",

@@ -49,6 +49,8 @@ import { openSearchModal } from "./components/search-modal.js";
 import { openAccountModal } from "./components/account-modal.js";
 import { openTeamAdminModal } from "./components/team-admin-modal.js";
 import { openDepartmentAccessModal } from "./components/department-access-modal.js";
+import { openWorkCalendarModal } from "./components/work-calendar-modal.js"; // v78: calendario laboral y ausencias
+import { subscribeToWorkCalendar, getWorkCalendar, resetWorkCalendar } from "./data/work-calendar.js";
 import { openOutlookBridgeModal } from "./components/outlook-bridge-modal.js";
 import { openDriveStorageModal } from "./components/drive-storage-modal.js";
 import { startOutlookListener, stopOutlookListener } from "./outlook-listener.js";
@@ -294,6 +296,7 @@ let unsubTags = null;
 let unsubCurrentProject = null;
 let unsubNotifications = null;
 let unsubQuickCreateConfig = null;
+let unsubWorkCalendar = null; // v78: meta/workCalendar (festivos y ausencias) — UNA escucha por el store para toda la sesión; repinta las vistas que marcan festivos/ausencias
 let unsubDriveConfig = null; // v68: meta/driveStorage → drive-service.js (no repinta nada: el modal de tarea lo lee al abrirse)
 let hasRestoredLocation = false; // solo se restaura la sección al arrancar una vez por sesión — ver restoreLastLocation()
 let hasAnnouncedNews = false; // v67: se avisa de las novedades como mucho una vez por sesión — ver announceNews()
@@ -365,11 +368,12 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig, unsubWorkCalendar].forEach((fn) => fn && fn());
   taskLoader.stopAll();
   store.stopAll(); // v73: por si acaso, que no quede en memoria nada de la cuenta que sale
-  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = null;
+  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = unsubWorkCalendar = null;
   resetDriveService(); // v68: fuera el permiso de Drive y las miniaturas de la cuenta que sale
+  resetWorkCalendar(); // v78: y el calendario laboral de la cuenta que sale
   projects = []; rawProjects = []; prevActiveProjectIds = null; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
   sessionUid = null; searchLoadPending = false; metricsDepartmentFilter = "";
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
@@ -465,6 +469,12 @@ function bootstrap() {
   // Solo se vuelca al servicio; no hace falta repintar nada.
   if (unsubDriveConfig) unsubDriveConfig();
   unsubDriveConfig = subscribeToDriveConfig((cfg) => setDriveConfig(cfg));
+
+  // v78: festivos y ausencias (meta/workCalendar). Una sola escucha para toda la
+  // sesión (la ventana de gestión reutiliza esta misma por el store). Repinta
+  // porque el Calendario y la Línea de tiempo marcan festivos y avisos.
+  if (unsubWorkCalendar) unsubWorkCalendar();
+  unsubWorkCalendar = subscribeToWorkCalendar(() => renderShell());
 
   if (unsubMyTasks) unsubMyTasks();
   unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; renderShell(); });
@@ -829,6 +839,7 @@ function renderShell() {
     onOpenWhatsNew: () => openWhatsNewModal({ releases: RELEASES }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
     onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive) }),
+    onOpenWorkCalendar: () => openWorkCalendarModal({ currentUser, teamMembers }), // v78: todas las cuentas (solo un admin edita)
     onOpenOutlookBridge: () => openOutlookBridgeModal({ currentUser }),
     onOpenDriveStorage: () => openDriveStorageModal({ currentUser }),
     onOpenAsanaImport: () => openAsanaImportModal({ teamMembers, currentUser }),
@@ -984,6 +995,7 @@ function renderTimelineContent() {
     showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
     onOpenTask: openTask,
     exportTitle: "Chusy — Línea de tiempo global", groupLabel: "Proyecto", teamMembers, currentUser,
+    workCalendar: getWorkCalendar(), // v78
   });
 }
 
@@ -1044,6 +1056,7 @@ function renderProjectContent() {
       onOpenTask: openTask,
       onAddTaskOnDate: (dateKey) => openNewProjectTask(currentProject.sections[0]?.id, dateKey),
       onMonthChange: (d) => { calendarViewDate = d; renderMain(); },
+      workCalendar: getWorkCalendar(), teamMembers, // v78: festivos sombreados y avisos de festivo/ausencia
     });
   } else if (currentView === "timeline") {
     const sectionsSorted = [...currentProject.sections].sort((a, b) => a.order - b.order);
@@ -1079,6 +1092,7 @@ function renderProjectContent() {
       showHolidays: timelineShowHolidays, onToggleHolidays: toggleTimelineHolidays,
       onOpenTask: openTask,
       exportTitle: `${currentProject.name} — Línea de tiempo`, groupLabel: "Sección", teamMembers, project: currentProject, currentUser,
+      workCalendar: getWorkCalendar(), // v78
     });
   } else {
     const sortedTasks = sortTasks(filteredTasks, sortState, { teamMembers, projects });

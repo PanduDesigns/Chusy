@@ -29,8 +29,18 @@
 // verdad) por cada fila que se ve en pantalla, sea una tarea real o un
 // bloque agregado. `viewMode` solo se usa aquí para que las cabeceras y
 // los avisos digan "sección(es)" en vez de "tarea(s)" cuando corresponda.
+//
+// Calendario laboral (v78): el Excel genérico recibe `workCalendar` (ver
+// js/work-calendar.js) y, con él, añade la columna «Días laborables» junto a
+// «Días» (que sigue siendo de calendario): los días del rango sin fines de
+// semana ni festivos de la empresa, para que la duración sea la real. No
+// cuenta las vacaciones de cada persona (una tarea con varios responsables no
+// tiene una sola respuesta). La plantilla Martech y el PDF no cambian: la
+// primera tiene su propio cálculo en semanas y el segundo es un dibujo a
+// escala de calendario. Sin `workCalendar`, el Excel sale como siempre.
 // ============================================================================
 import { toDate, addDays, daysBetween, isoWeekNumber, initials, showToast, plainTitleText } from "../utils.js";
+import { countWorkingDays } from "../work-calendar.js";
 import { projectKeyDates } from "../project-properties.js";
 
 const XLSX_CDN = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
@@ -151,7 +161,7 @@ function triggerDownload(blob, filename) {
 // depender de colorear celdas (poco fiable en la versión gratuita de
 // SheetJS, la única que se puede cargar desde un CDN sin licencia).
 // ============================================================================
-async function buildGenericExcel({ groups, title, groupLabel, teamMembers, viewMode = "tasks" }) {
+async function buildGenericExcel({ groups, title, groupLabel, teamMembers, viewMode = "tasks", workCalendar }) {
   await ensureXlsx();
   const allTasks = groups.flatMap((g) => g.tasks);
   const { min, max } = computeRange(allTasks);
@@ -174,11 +184,13 @@ async function buildGenericExcel({ groups, title, groupLabel, teamMembers, viewM
     return " ".repeat(sOff) + "█".repeat(Math.max(1, eOff - sOff + 1));
   }
 
-  const header = [groupLabel, rowNounCap, "Responsables", "Prioridad", "Inicio", "Fin", "Días", "Estado", `Cronograma (${fmtDate(min)} – ${fmtDate(max)})`];
+  const withWorkDays = !!workCalendar;
+  const header = [groupLabel, rowNounCap, "Responsables", "Prioridad", "Inicio", "Fin", "Días", ...(withWorkDays ? ["Días laborables"] : []), "Estado", `Cronograma (${fmtDate(min)} – ${fmtDate(max)})`];
   const rows = [];
   groups.forEach((g) => {
     g.tasks.forEach((t) => {
       const days = t.startDate && t.dueDate ? daysBetween(toDate(t.startDate), toDate(t.dueDate)) + 1 : "";
+      const workDays = withWorkDays && t.startDate && t.dueDate ? countWorkingDays(t.startDate, t.dueDate, workCalendar) : "";
       rows.push([
         g.label,
         (t.isMilestone ? "🚩 " : "") + plainTitleText(t.title),
@@ -187,6 +199,7 @@ async function buildGenericExcel({ groups, title, groupLabel, teamMembers, viewM
         fmtDate(t.startDate),
         fmtDate(t.dueDate),
         days,
+        ...(withWorkDays ? [workDays] : []),
         taskStatus(t),
         barText(t),
       ]);
@@ -202,7 +215,7 @@ async function buildGenericExcel({ groups, title, groupLabel, teamMembers, viewM
     ...rows,
   ];
   const ws = window.XLSX.utils.aoa_to_sheet(wsData);
-  ws["!cols"] = [{ wch: 22 }, { wch: 40 }, { wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 7 }, { wch: 12 }, { wch: BAR_WIDTH + 4 }];
+  ws["!cols"] = [{ wch: 22 }, { wch: 40 }, { wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 7 }, ...(withWorkDays ? [{ wch: 15 }] : []), { wch: 12 }, { wch: BAR_WIDTH + 4 }];
   ws["!merges"] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } },
     { s: { r: 1, c: 0 }, e: { r: 1, c: header.length - 1 } },
@@ -547,7 +560,7 @@ async function buildMartechExcel({ project, groups, fit, viewMode = "tasks" }) {
  * checkMartechTemplateFit), cae sola al genérico avisando por qué, en
  * vez de dejar sin archivo a quien exporta.
  */
-export async function exportTimelineToExcel({ groups, title, groupLabel, teamMembers, project, viewMode = "tasks" }) {
+export async function exportTimelineToExcel({ groups, title, groupLabel, teamMembers, project, viewMode = "tasks", workCalendar }) {
   if (project) {
     const fit = checkMartechTemplateFit(groups, viewMode);
     if (fit.fits) {
@@ -562,7 +575,7 @@ export async function exportTimelineToExcel({ groups, title, groupLabel, teamMem
       showToast(`${fit.reason} Se genera un Excel genérico en su lugar.`);
     }
   }
-  await buildGenericExcel({ groups, title, groupLabel, teamMembers, viewMode });
+  await buildGenericExcel({ groups, title, groupLabel, teamMembers, viewMode, workCalendar });
 }
 
 // ============================================================================

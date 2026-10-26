@@ -16,6 +16,13 @@
 // tarea es personal o no: se pueden asignar personas a un recordatorio sin
 // proyecto igual que a una tarea de equipo.
 //
+// Calendario laboral (v78): al elegir o cambiar la fecha límite o los
+// responsables, si esa fecha cae en fin de semana, en festivo o en un día en
+// que algún responsable está de vacaciones/ausente (ver js/work-calendar.js),
+// sale un aviso bajo la fecha con «Mover al siguiente día laborable (DD/MM)»,
+// que cambia la fecha de un clic (solo en el borrador, como todo aquí: hasta
+// «Aceptar» no se guarda nada). Es solo un aviso: no impide guardar la fecha.
+//
 // Comentarios: solo se muestran editando una tarea ya existente (una
 // tarea nueva todavía no tiene id al que colgar comentarios), y esos sí
 // se envían al momento — no forman parte del "draft".
@@ -94,6 +101,8 @@ import {
 } from "../offers.js";
 import { attachTextSuggest } from "./text-suggest.js";
 import { defaultSectorOf } from "../departments.js";
+import { getWorkCalendar } from "../data/work-calendar.js";
+import { describeDay, nextWorkingDay, dateKey, formatDayMonth } from "../work-calendar.js";
 import { createOpenLocationButton } from "./open-location.js";
 import { localFolderName } from "../location.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
@@ -342,9 +351,10 @@ export function openTaskModal({
             </label>
             <label class="field">
               <span class="field__label">Fecha límite</span>
-              <input class="field__input" type="date" id="t-due" value="${toDateInputValue(draft.dueDate)}">
+              <input class="field__input" type="date" id="t-due" value="${toDateInputValue(draft.dueDate)}" aria-describedby="t-due-warn">
             </label>
           </div>
+          <div class="sched-warn" id="t-due-warn" role="status" aria-live="polite" hidden></div>
 
           <button type="button" class="chip${draft.isMilestone ? " is-selected" : ""}" id="t-milestone" style="width:fit-content;">
             🚩 ${draft.isMilestone ? "Marcada como hito" : "Marcar como hito"}
@@ -423,6 +433,7 @@ export function openTaskModal({
     `;
 
     wireStaticListeners();
+    updateScheduleWarning(); // v78: estado inicial (una fecha límite ya puesta puede caer en festivo)
     renderProjectRows();
     renderCustomFields();
     renderRevisions();
@@ -988,6 +999,7 @@ export function openTaskModal({
     const completeBtn = overlay.querySelector("#t-complete");
     completeBtn.classList.remove("is-checked");
     completeBtn.textContent = "";
+    updateScheduleWarning(); // v78: la tarea vuelve a estar abierta
 
     const revisionsSection = findOffersSection(offers, "revisiones");
     if (revisionsSection) {
@@ -1013,6 +1025,46 @@ export function openTaskModal({
   }
 
   // --------------------------------------------------------------------
+  /**
+   * v78: aviso bajo la fecha límite si cae en fin de semana, festivo o en
+   * vacaciones/ausencia de algún responsable, con el botón que la mueve al
+   * siguiente día laborable PARA TODOS ellos. Sin fecha o con la tarea
+   * completada, no hay nada que avisar.
+   */
+  function updateScheduleWarning() {
+    const box = overlay.querySelector("#t-due-warn");
+    if (!box) return;
+    const due = draft.dueDate ? dateKey(draft.dueDate) : null;
+    const cfg = getWorkCalendar();
+    const day = due && !draft.isComplete ? describeDay(due, cfg, draft.assigneeIds) : null;
+    if (!day || day.ok) { box.hidden = true; box.innerHTML = ""; return; }
+
+    const nameOf = (uid) => { const m = (teamMembers || []).find((x) => x.uid === uid); return m ? m.name || "Sin nombre" : "un responsable"; };
+    const listNames = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}` : names[0]);
+    const parts = [];
+    if (day.holiday) parts.push(`en festivo (${day.holiday.name})`);
+    if (day.weekend) parts.push("en fin de semana");
+    const vac = day.absences.filter((a) => a.type === "vacaciones").map((a) => nameOf(a.userId));
+    const aus = day.absences.filter((a) => a.type !== "vacaciones").map((a) => nameOf(a.userId));
+    if (vac.length) parts.push(`durante las vacaciones de ${listNames(vac)}`);
+    if (aus.length) parts.push(`durante la ausencia de ${listNames(aus)}`);
+
+    const next = nextWorkingDay(due, cfg, draft.assigneeIds);
+    box.innerHTML = `
+      <span class="sched-warn__text">⚠️ Cae ${escapeHtml(parts.join(" y "))}.</span>
+      ${next ? `<button type="button" class="btn btn--ghost btn--sm sched-warn__btn" id="t-due-next">Mover al siguiente día laborable (${formatDayMonth(next)})</button>` : ""}`;
+    box.hidden = false;
+    const btn = box.querySelector("#t-due-next");
+    if (btn) btn.addEventListener("click", () => {
+      draft.dueDate = dateKey(next);
+      const input = overlay.querySelector("#t-due");
+      input.value = draft.dueDate;
+      markDirty();
+      updateScheduleWarning();
+      input.focus();
+    });
+  }
+
   function wireStaticListeners() {
     overlay.querySelector("#t-close").addEventListener("click", attemptClose);
     overlay.querySelector("#t-cancel").addEventListener("click", attemptClose);
@@ -1024,6 +1076,7 @@ export function openTaskModal({
       completeBtn.textContent = draft.isComplete ? "✓" : "";
       syncOfferSectionWithCompletion();
       markDirty();
+      updateScheduleWarning();
     });
 
     const titleInput = overlay.querySelector("#t-title");
@@ -1041,7 +1094,7 @@ export function openTaskModal({
     overlay.querySelector("#t-add-project").addEventListener("click", (e) => openAddProjectPopover(e.currentTarget));
 
     overlay.querySelector("#t-start").addEventListener("change", (e) => { draft.startDate = e.target.value || null; markDirty(); });
-    overlay.querySelector("#t-due").addEventListener("change", (e) => { draft.dueDate = e.target.value || null; markDirty(); });
+    overlay.querySelector("#t-due").addEventListener("change", (e) => { draft.dueDate = e.target.value || null; markDirty(); updateScheduleWarning(); });
 
     const milestoneBtn = overlay.querySelector("#t-milestone");
     milestoneBtn.addEventListener("click", () => {
@@ -1069,6 +1122,7 @@ export function openTaskModal({
           draft.assigneeIds = [...set];
           chip.classList.toggle("is-selected", set.has(u));
           markDirty();
+          updateScheduleWarning();
         });
       });
     }

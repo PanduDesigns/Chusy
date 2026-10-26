@@ -11,6 +11,15 @@
 // proyectos. Ver el historial del README si hiciera falta recuperarlos:
 // quedó documentado cómo se hicieron.)
 //
+// Calendario laboral (v78, `workCalendar`: ver js/work-calendar.js): en el zoom
+// de día, la columna de un festivo se sombrea (rayado suave, distinto del
+// gris de los fines de semana) y su cabecera lleva el nombre de tooltip; y una
+// tarea cuyo inicio o fecha límite cae en festivo o en un día en que un
+// responsable está de vacaciones/ausente, o que cruza una ausencia suya,
+// lleva un ⚠️ junto a su nombre con el motivo. Es independiente del botón
+// «Vacaciones inhábiles» (el cierre de agosto y Navidad de la empresa).
+// Sin `workCalendar` (o vacío), la vista sale como antes.
+//
 // Vacaciones inhábiles (apartado más abajo): solo se pueden marcar en día,
 // semana o mes — a partir de un zoom más amplio que eso, prácticamente
 // cualquier columna rozaría agosto o la Navidad, así que resaltarlas
@@ -122,6 +131,7 @@ import { updateTask } from "../data/tasks.js";
 import { saveProjectSections, updateProject } from "../data/projects.js";
 import { projectKeyDates } from "../project-properties.js";
 import { openSectionsModal } from "../components/sections-modal.js";
+import { getHoliday, taskCalendarIssues, describeIssue } from "../work-calendar.js";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -305,7 +315,7 @@ function buildSectionModeGroups(groups, currentProjectId) {
 export function renderTimelineView(container, {
   groups, zoom, onZoomChange, viewMode, onViewModeChange,
   expandedSections, onToggleSectionExpand,
-  showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project, currentUser,
+  showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project, currentUser, workCalendar,
 }) {
   const unit = zoom || "day";
   // Mantener el scroll horizontal entre repintados (v49): antes, CADA
@@ -418,10 +428,14 @@ export function renderTimelineView(container, {
   const gridTemplateColumns = `${LABEL_W}px repeat(${columns.length}, ${colWidth}px)`;
 
   let cells = `<div class="tl-cell tl-corner" style="grid-column:1;grid-row:1;"></div>`;
+  const holidayCols = []; // v78: columnas de festivo (zoom de día) para sombrearlas en el cuerpo
+  const nameOf = (uid) => { const m = (teamMembers || []).find((x) => x.uid === uid); return m ? m.name : ""; };
 
   columns.forEach((c, i) => {
     const isWeekend = unit === "day" && (c.start.getDay() === 0 || c.start.getDay() === 6);
-    cells += `<div class="tl-daycol${isWeekend ? " is-weekend" : ""}" style="grid-column:${i + 2};grid-row:1;">
+    const calHoliday = unit === "day" && workCalendar ? getHoliday(c.start, workCalendar) : null;
+    if (calHoliday) holidayCols.push({ i, name: calHoliday.name });
+    cells += `<div class="tl-daycol${isWeekend ? " is-weekend" : ""}${calHoliday ? " is-cal-holiday" : ""}" style="grid-column:${i + 2};grid-row:1;"${calHoliday ? ` title="Festivo: ${escapeHtml(calHoliday.name)}"` : ""}>
       ${c.topLabel ? `<span class="tl-month">${c.topLabel}</span>` : ""}
       <span class="tl-daynum">${c.label}</span>
     </div>`;
@@ -484,7 +498,11 @@ export function renderTimelineView(container, {
     }
     const t = row.task;
     const indentPad = row.indent ? "padding-left:26px;" : "";
-    cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:1;grid-row:${gridRow};${indentPad}${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${renderTitleHtml(t.title)}</div>`;
+    // v78: aviso de calendario (festivo / responsable ausente) junto al nombre
+    const issues = workCalendar ? taskCalendarIssues(t, workCalendar) : [];
+    const warn = issues.map((iss) => describeIssue(iss, nameOf)).join("\n");
+    const warnBadge = warn ? ` <span class="tl-warn" title="${escapeHtml(warn)}" aria-label="Aviso de calendario: ${escapeHtml(warn.replace(/\n/g, ". "))}">⚠️</span>` : "";
+    cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}${warn ? `\n⚠️ ${escapeHtml(warn)}` : ""}" style="grid-column:1;grid-row:${gridRow};${indentPad}${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${renderTitleHtml(t.title)}${warnBadge}</div>`;
     cells += `<div class="tl-row-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
 
     const span = taskSpan(t, columns);
@@ -504,6 +522,12 @@ export function renderTimelineView(container, {
       const resizable = canDrag && (t.startDate || t.dueDate) ? " tl-bar--resizable" : "";
       cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}${resizable}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}"></div>`;
     }
+  });
+
+  // v78: festivos del calendario laboral (solo zoom de día). Con pointer-events
+  // apagado: el tooltip con el nombre está en la cabecera de la columna.
+  holidayCols.forEach((h) => {
+    cells += `<div class="tl-cal-holiday-col" data-holiday="${escapeHtml(h.name)}" style="grid-column:${h.i + 2};grid-row:2 / ${totalRows + 1};"></div>`;
   });
 
   if (showHolidays && canShowHolidays) {
@@ -557,7 +581,7 @@ export function renderTimelineView(container, {
   // sanitizeFilename en gantt-export.js) se autodocumente en qué modo se
   // generó — útil si se retoma más adelante sin recordar cuál era.
   const modeExportTitle = vm === "sections" ? `${exportTitle} — por secciones` : exportTitle;
-  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups: displayGroups, exportTitle: modeExportTitle, groupLabel, teamMembers, project, viewMode: vm }));
+  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups: displayGroups, exportTitle: modeExportTitle, groupLabel, teamMembers, project, viewMode: vm, workCalendar }));
   // Con el mismo contexto que el repintado anterior (mismo proyecto/global,
   // mismo zoom), se restaura justo donde estaba en vez de recentrar en
   // "Hoy" — así, terminar de arrastrar una barra (que repinta al guardar)
@@ -594,7 +618,7 @@ export function renderTimelineView(container, {
   });
 }
 
-function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMembers, project, viewMode }) {
+function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMembers, project, viewMode, workCalendar }) {
   document.querySelectorAll(".export-popover").forEach((p) => p.remove());
   const rect = anchorBtn.getBoundingClientRect();
   const pop = document.createElement("div");
@@ -613,7 +637,7 @@ function openExportPopover(anchorBtn, { groups, exportTitle, groupLabel, teamMem
     btn.disabled = true;
     btn.textContent = `${label}…`;
     try {
-      await fn({ groups, title: exportTitle, groupLabel, teamMembers, project, viewMode });
+      await fn({ groups, title: exportTitle, groupLabel, teamMembers, project, viewMode, workCalendar });
     } catch (err) {
       console.error(err);
       showToast("No se pudo generar el archivo. Comprueba tu conexión e inténtalo de nuevo.");

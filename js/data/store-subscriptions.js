@@ -63,3 +63,16 @@ export function subscribeToStoreList({ key, slice, attach, sort, callback }) {
     handle.release();
   };
 }
+
+/**
+ * Lo mismo para UN documento suelto (v78: `meta/workCalendar`): `attach` abre
+ * `onSnapshot(doc(...), observer)` y `callback` recibe el documento (con su
+ * `id` dentro, como en cualquier rebanada) o `null` si no existe. Es
+ * `subscribeToStoreList` por debajo —una rebanada con 0 o 1 documentos—, así
+ * que hereda lo mismo: una sola escucha por clave en toda la sesión (quien
+ * se suscribe de nuevo, p. ej. una ventana, recibe al instante lo que ya hay
+ * sin abrir otro `onSnapshot`) y el documento existe una vez en memoria.
+ */
+export function subscribeToStoreDoc({ key, slice, attach, callback }) {
+  return subscribeToStoreList({ key, slice, attach, callback: (list) => callback(list.length ? list[0] : null) });
+}

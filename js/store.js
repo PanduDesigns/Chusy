@@ -19,7 +19,7 @@
 // escrituras por lotes, el perfil propio de auth.js y los avisos/papelera.
 //
 // ESTADO
-//   tasks · projects · offers · users · departments · tags → Map<id, documento>
+//   tasks · projects · offers · users · departments · tags · workCalendar → Map<id, documento>
 //   ui → { activeView, activeProjectId, filters }  (objeto; se puede ampliar)
 //
 //   · El id de cada documento va dentro, con el nombre que ya usa la app:
@@ -29,6 +29,10 @@
 //     proyecto exclusivo «Ofertas». Esta rebanada solo tiene lo que se le meta
 //     con su propia escucha (p. ej. la consulta de las tareas de Ofertas), y esas
 //     mismas tareas pueden estar también en `tasks`.
+//   · `workCalendar` (v78) tampoco es una colección: es el documento suelto
+//     `meta/workCalendar` (festivos y ausencias del equipo), que entra por la misma
+//     vía que cualquier otro documento suelto (`onSnapshot(doc(...))`) y deja UN
+//     solo objeto en esta rebanada.
 //   · `departments` tampoco: son constantes de js/departments.js. Se cargan con
 //     `store.setState("departments", DEPARTMENTS)` al arrancar.
 //   · Los Map son los VIVOS (no hay copia, para no gastar RAM, y siguen siendo el
@@ -69,6 +73,7 @@ export const COLLECTION_SLICES = Object.freeze({
   users: "uid",
   departments: "value",
   tags: "id",
+  workCalendar: "id", // v78: UN solo documento (meta/workCalendar → { id: "workCalendar", holidays, absences }), ver data/work-calendar.js
 });
 
 const UI_SLICE = "ui";

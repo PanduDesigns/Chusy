@@ -4,8 +4,16 @@
 // cruzar de una semana a la siguiente, se corta y continúa en la fila de
 // abajo). Si solo tiene una de las dos fechas, se dibuja como un bloque de
 // un día. Los hitos siempre se marcan como un rombo en su fecha.
+//
+// Calendario laboral (v78, `workCalendar`: ver js/work-calendar.js): el día
+// festivo se sombrea (rayado suave, distinto de lo normal) y lleva su nombre
+// en la esquina (y de tooltip); y una tarea cuya fecha de inicio o límite cae
+// en festivo, o en un día en que un responsable está de vacaciones/ausente,
+// o que pasa por una ausencia suya, lleva un ⚠️ con el motivo. Sin
+// `workCalendar` (o vacío), la vista sale exactamente como antes.
 // ============================================================================
 import { escapeHtml, toDate, toDateInputValue, daysBetween, renderTitleHtml, plainTitleText } from "../utils.js";
+import { getHoliday, taskCalendarIssues, describeIssue } from "../work-calendar.js";
 
 const DIAS_SEMANA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 const MESES_LARGOS = [
@@ -28,7 +36,7 @@ function effectiveRange(task) {
   return e < s ? [e, s] : [s, e];
 }
 
-export function renderCalendarView(container, { tasks, viewDate, onOpenTask, onAddTaskOnDate, onMonthChange }) {
+export function renderCalendarView(container, { tasks, viewDate, onOpenTask, onAddTaskOnDate, onMonthChange, workCalendar, teamMembers }) {
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const todayKey = toDateInputValue(new Date());
@@ -52,9 +60,18 @@ export function renderCalendarView(container, { tasks, viewDate, onOpenTask, onA
   }
 
   const withDates = tasks.filter((t) => effectiveRange(t));
+  // v78: avisos de calendario por tarea (una sola vez, no por cada semana en la que se dibuja).
+  const nameOf = (uid) => { const m = (teamMembers || []).find((x) => x.uid === uid); return m ? m.name : ""; };
+  const warnByTask = new Map();
+  if (workCalendar) {
+    withDates.forEach((t) => {
+      const issues = taskCalendarIssues(t, workCalendar);
+      if (issues.length) warnByTask.set(t.id, issues.map((i) => describeIssue(i, nameOf)).join("\n"));
+    });
+  }
   let weeksHtml = "";
   for (let w = 0; w < dayInfos.length; w += 7) {
-    weeksHtml += buildWeek(dayInfos.slice(w, w + 7), withDates, todayKey);
+    weeksHtml += buildWeek(dayInfos.slice(w, w + 7), withDates, todayKey, workCalendar, warnByTask);
   }
 
   container.innerHTML = `
@@ -84,7 +101,7 @@ export function renderCalendarView(container, { tasks, viewDate, onOpenTask, onA
   });
 }
 
-function buildWeek(weekDays, tasks, todayKey) {
+function buildWeek(weekDays, tasks, todayKey, workCalendar, warnByTask) {
   const weekStart = weekDays[0].date;
   const weekEnd = weekDays[6].date;
 
@@ -119,9 +136,11 @@ function buildWeek(weekDays, tasks, todayKey) {
   weekDays.forEach((d, i) => {
     const key = toDateInputValue(d.date);
     const isToday = key === todayKey;
-    cells += `<div class="cal-daybg${d.otherMonth ? " is-other-month" : ""}${isToday ? " is-today" : ""}" style="grid-column:${i + 1};grid-row:1 / -1;"></div>`;
-    cells += `<div class="cal-daynum${isToday ? " is-today" : ""}" style="grid-column:${i + 1};grid-row:1;">
+    const holiday = workCalendar ? getHoliday(d.date, workCalendar) : null;
+    cells += `<div class="cal-daybg${d.otherMonth ? " is-other-month" : ""}${isToday ? " is-today" : ""}${holiday ? " is-holiday" : ""}" style="grid-column:${i + 1};grid-row:1 / -1;"></div>`;
+    cells += `<div class="cal-daynum${isToday ? " is-today" : ""}${holiday ? " is-holiday" : ""}" style="grid-column:${i + 1};grid-row:1;"${holiday ? ` title="Festivo: ${escapeHtml(holiday.name)}"` : ""}>
       <span>${d.label}</span>
+      ${holiday ? `<span class="cal-holiday-name">${escapeHtml(holiday.name)}</span>` : ""}
       ${!d.otherMonth ? `<button class="calendar-day__add" data-add-date="${key}" title="Nueva tarea este día">+</button>` : ""}
     </div>`;
   });
@@ -129,14 +148,17 @@ function buildWeek(weekDays, tasks, todayKey) {
   items.filter((i) => !i.hidden).forEach((item) => {
     const t = item.task;
     const gridRow = item.lane + 2;
+    const warn = warnByTask && warnByTask.get(t.id);
+    const warnTitle = warn ? `\n⚠️ ${escapeHtml(warn)}` : "";
+    const warnBadge = warn ? `<span class="cal-warn" title="${escapeHtml(warn)}" aria-label="Aviso de calendario: ${escapeHtml(warn.replace(/\n/g, ". "))}">⚠️</span>` : "";
     if (t.isMilestone) {
-      cells += `<div class="cal-milestone" data-open="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:${item.segE + 1};grid-row:${gridRow};">
-        <span class="cal-milestone__diamond"></span><span class="cal-bar__label">${renderTitleHtml(t.title)}</span>
+      cells += `<div class="cal-milestone" data-open="${t.id}" title="${plainTitleText(t.title)}${warnTitle}" style="grid-column:${item.segE + 1};grid-row:${gridRow};">
+        <span class="cal-milestone__diamond"></span>${warnBadge}<span class="cal-bar__label">${renderTitleHtml(t.title)}</span>
       </div>`;
     } else {
       const color = PRIORITY_COLORS[t.priority] || "var(--color-line-bright)";
-      cells += `<div class="cal-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" title="${plainTitleText(t.title)}" style="grid-column:${item.segS + 1} / ${item.segE + 2};grid-row:${gridRow};background:${color};">
-        <span class="cal-bar__label">${renderTitleHtml(t.title)}</span>
+      cells += `<div class="cal-bar${t.isComplete ? " is-complete" : ""}" data-open="${t.id}" title="${plainTitleText(t.title)}${warnTitle}" style="grid-column:${item.segS + 1} / ${item.segE + 2};grid-row:${gridRow};background:${color};">
+        ${warnBadge}<span class="cal-bar__label">${renderTitleHtml(t.title)}</span>
       </div>`;
     }
   });
