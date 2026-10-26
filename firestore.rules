@@ -79,6 +79,18 @@ rules_version = '2';
 //    Firestore al crearla (20 caracteres al azar: no se adivina) y es lo que
 //    usa la macro para saber si Chusy la atendió y para recogerla después;
 //    listar o enumerar, no.
+//  - meta/workCalendar: `{ holidays, absences, updatedBy, updatedAt }` — el
+//    calendario laboral (v78, apartado 3.15 del README): los festivos de la
+//    empresa/locales y las vacaciones y ausencias del equipo, en UN solo
+//    documento (una escucha, una lectura). LECTURA para cualquier cuenta
+//    activa (las vistas y el modal de tarea avisan de festivos y ausencias de
+//    cualquier persona) y ESCRITURA solo para un admin, con la forma exacta
+//    (solo esas cuatro claves, dos listas con tope de tamaño). Que cada
+//    persona solo vea las ausencias de su departamento es una comprobación de
+//    interfaz, como Métricas (v54/v77): el documento entero lo puede leer
+//    cualquier cuenta activa. Y el contenido de cada elemento de las listas
+//    (fechas, nombres) NO se puede validar desde aquí: las reglas no recorren
+//    listas — lo comprueba la aplicación (work-calendar.js) al escribir.
 //
 // Cuentas eliminadas: "Eliminar usuario" (panel de administración) NO
 // borra el documento de Firestore ni la cuenta de Firebase Auth (borrar la
@@ -214,6 +226,24 @@ service cloud.firestore {
     match /meta/driveStorage {
       allow read: if isActiveUser();
       allow write: if isAdmin();
+    }
+
+    // ---- Calendario laboral (v78, apartado 3.15 del README): festivos y
+    // ausencias del equipo en un único documento. Lectura para cualquier cuenta
+    // activa; escritura solo admin y solo con esta forma: las cuatro claves
+    // conocidas (`holidays` y `absences` obligatorias y de tipo lista, con un
+    // tope de elementos que deja el documento muy por debajo del megabyte de
+    // Firestore; `updatedBy` y `updatedAt`, opcionales). Borrarlo (volver a
+    // «sin festivos ni ausencias») también es cosa de admin. ----
+    match /meta/workCalendar {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin() &&
+        request.resource.data.keys().hasAll(['holidays', 'absences']) &&
+        request.resource.data.keys().hasOnly(['holidays', 'absences', 'updatedBy', 'updatedAt']) &&
+        request.resource.data.holidays is list && request.resource.data.holidays.size() <= 400 &&
+        request.resource.data.absences is list && request.resource.data.absences.size() <= 2000 &&
+        (!('updatedBy' in request.resource.data) || request.resource.data.updatedBy == null || request.resource.data.updatedBy == request.auth.uid);
+      allow delete: if isAdmin();
     }
 
     // ---- ID de oferta y de proyecto (v70, apartado 3.14 del README): el contador
