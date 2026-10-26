@@ -229,3 +229,28 @@ body.tl-dragging-bar { user-select: none; }
   background: repeating-linear-gradient(to bottom, var(--kd) 0 6px, transparent 6px 10px);
 }
 
+
+/* ==========================================================================
+   v78 — Calendario laboral en el Calendario y la Línea de tiempo: festivos
+   sombreados (rayado naranja suave, distinto del gris del fin de semana y del
+   rojo de «Vacaciones inhábiles») y ⚠️ de aviso en las tareas.
+   ========================================================================== */
+/* Solo la imagen de fondo: el color de base (hoy, otro mes…) lo siguen poniendo sus reglas. */
+.cal-daybg.is-holiday { background-image: repeating-linear-gradient(45deg, var(--color-warning-soft) 0 6px, transparent 6px 12px); }
+.cal-holiday-name {
+  flex: 1; min-width: 0; font-size: 9.5px; font-weight: 600; color: var(--color-text-lo);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cal-warn { flex-shrink: 0; font-size: 10px; line-height: 1; cursor: help; }
+@media (max-width: 860px) { .cal-holiday-name { display: none; } }
+
+/* Cabecera opaca (es sticky: con un fondo translúcido se transparentarían las filas al hacer scroll) */
+.tl-daycol.is-cal-holiday {
+  background: linear-gradient(var(--color-warning-soft), var(--color-warning-soft)), var(--color-panel);
+  box-shadow: inset 0 -2px 0 var(--color-warning); cursor: help;
+}
+.tl-cal-holiday-col {
+  background-image: repeating-linear-gradient(45deg, var(--color-warning-soft) 0 6px, transparent 6px 12px);
+  pointer-events: none; z-index: 0;
+}
+.tl-warn { flex-shrink: 0; font-size: 11px; line-height: 1; cursor: help; }
