@@ -254,3 +254,51 @@ body.tl-dragging-bar { user-select: none; }
   pointer-events: none; z-index: 0;
 }
 .tl-warn { flex-shrink: 0; font-size: 11px; line-height: 1; cursor: help; }
+
+/* ===== v79 — Carga por persona (línea de tiempo global, «Agrupar por: Persona») =====
+   Solo variables del tema (oscuro, claro y clásico). El azul de las ausencias es un tono fijo
+   mezclado con transparencia: se lee igual sobre fondo oscuro y claro. */
+.tl-groupby { gap: 2px; }
+.tl-groupby__label { align-self: center; font-size: 11px; color: var(--color-text-faint); padding: 0 6px 0 4px; white-space: nowrap; }
+.tl-dept-select { height: 28px; padding: 0 8px; font-size: 12px; min-width: 150px; }
+
+.tl-wl-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; padding: 6px 4px 2px; font-size: 11.5px; color: var(--color-text-faint); }
+.tl-wl-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.tl-wl-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--color-line); }
+.tl-wl-swatch--high { background: var(--color-warning-soft); border-color: var(--color-warning); }
+.tl-wl-swatch--critical { background: var(--color-danger-soft); border-color: var(--color-danger); }
+.tl-wl-swatch--clash { background: var(--color-panel-raised); border-top: 3px solid var(--color-danger); }
+.tl-wl-swatch--absence { background: repeating-linear-gradient(135deg, color-mix(in srgb, #4C9AFF 45%, transparent) 0 3px, transparent 3px 6px); border-color: #4C9AFF; }
+
+/* Cabecera de cada persona */
+.tl-person-label { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.tl-person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-wl-pill { flex: none; font-size: 10.5px; font-weight: 700; line-height: 1; padding: 3px 7px; border-radius: 999px; color: var(--color-text-lo); background: var(--color-panel-raised); border: 1px solid var(--color-line); cursor: help; }
+.tl-wl-pill--warn { color: var(--color-warning); background: var(--color-warning-soft); border-color: var(--color-warning); }
+.tl-wl-pill--alert { color: var(--color-danger); background: var(--color-danger-soft); border-color: var(--color-danger); }
+
+/* Franja de calor: una celda por columna con el pico de tareas activas */
+.tl-wl-cell { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-text-lo); border-left: 1px solid var(--color-line); position: relative; min-width: 0; }
+.tl-wl-cell--ok { background: var(--color-panel-raised); }
+.tl-wl-cell--high { background: var(--color-warning-soft); color: var(--color-warning); }
+.tl-wl-cell--critical { background: var(--color-danger-soft); color: var(--color-danger); }
+.tl-wl-cell.has-clash::after { content: ""; position: absolute; left: 2px; right: 2px; top: 0; height: 3px; border-radius: 0 0 3px 3px; background: var(--color-danger); }
+
+/* Ausencias (todo el bloque de la persona) y festivos en semana/mes: rayado, sin tapar el clic */
+.tl-wl-absence {
+  --frac: 1;
+  background-image: repeating-linear-gradient(135deg, color-mix(in srgb, #4C9AFF calc(18% + 32% * var(--frac)), transparent) 0 5px, transparent 5px 10px);
+  background-color: color-mix(in srgb, #4C9AFF calc(6% + 12% * var(--frac)), transparent);
+  pointer-events: none; z-index: 0;
+}
+.tl-wl-holiday {
+  --frac: 1;
+  background-image: repeating-linear-gradient(45deg, var(--color-warning-soft) 0 6px, transparent 6px 12px);
+  opacity: calc(0.35 + 0.65 * var(--frac));
+  pointer-events: none; z-index: 0;
+}
+
+/* Tareas: código XXXYY en la etiqueta y dentro de la barra; contorno rojo si coincide con un día saturado */
+.tl-code { display: inline-block; margin-right: 6px; padding: 1px 5px; font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .02em; border-radius: 4px; color: var(--color-text-lo); background: var(--color-panel-raised); border: 1px solid var(--color-line); vertical-align: 1px; }
+.tl-bar__code { display: block; padding: 0 5px; overflow: hidden; text-overflow: clip; white-space: nowrap; font-size: 10px; font-weight: 700; line-height: 1.9; color: #fff; text-shadow: 0 0 2px rgba(0, 0, 0, .65); pointer-events: none; }
+.tl-bar--hot { outline: 2px solid var(--color-danger); outline-offset: 1px; }
