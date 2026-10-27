@@ -8,8 +8,10 @@
 // otras según la opción elegida). Cada tarea de la plantilla puede llevar
 // opcionalmente unos "días necesarios" (`durationDays`, número o null) y
 // siempre lleva una `priority` de las cuatro válidas — quick-create-modal.js
-// usa la primera para calcular su fecha límite y traslada la segunda tal
-// cual a la tarea creada. La lista de productos tiene un orden manual
+// usa la primera para calcular su fecha límite —EN DÍAS LABORABLES desde la
+// v79, con el calendario laboral y las ausencias de quien tenga asignada la
+// tarea: ver planTaskDates() en js/quick-create-schedule.js, re-exportada más
+// abajo— y traslada la segunda tal cual a la tarea creada. La lista de productos tiene un orden manual
 // (`order`, ver getQuickCreateProducts()/reorderQuickCreateProducts() más
 // abajo) que se va fijando al arrastrar en el panel de administración. Ver
 // el apartado 3 del README ("Creación Rápida") para el porqué y el
@@ -153,6 +155,11 @@ export function resolveQuickCreateTasks(product, selections) {
   });
   return tasks;
 }
+
+// v79: el cálculo de fechas laborables (lógica pura, sin Firebase) vive en su propio
+// módulo para poder probarse suelto; se re-exporta aquí para que quien busque «las
+// fechas de Creación Rápida» en este archivo lo encuentre.
+export { planTaskDates, describeSkipped, formatPlanDate } from "../quick-create-schedule.js";
 
 const BATCH_CHUNK = 450; // por debajo del límite de 500 escrituras/lote de Firestore — mismo criterio que tasks.js
 

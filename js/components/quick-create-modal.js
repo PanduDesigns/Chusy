@@ -34,17 +34,30 @@
 // fecha de entrega DE ESE PRODUCTO. El resto de sus tareas también
 // empiezan hoy, pero su fecha final sale de sus "días necesarios"
 // (definidos en la plantilla, ver quick-create-admin-modal.js) contados
-// desde hoy — sin pasarse nunca de la fecha de entrega de ese producto, y
-// usando la fecha de entrega directamente si no tienen días marcados (ver
-// computeTaskDueDate() más abajo). Como cada producto puede tener su
+// desde hoy EN DÍAS LABORABLES — sin pasarse nunca de la fecha de entrega
+// de ese producto, y usando la fecha de entrega directamente si no tienen
+// días marcados (ver planTaskDates() en quick-create-schedule.js y el
+// apartado «Fechas en DÍAS LABORABLES» más abajo). Como cada producto puede tener su
 // propia sección de destino, cada tarea se crea llevando ya su propio
 // `sectionId` resuelto — createTasksFromQuickCreateInsertion() (en
 // quick-create.js) ya no recibe una sección compartida para todo el lote.
 //
+// Fechas en DÍAS LABORABLES (v79): todo lo anterior ya NO suma días naturales.
+// Cada fecha sale de planTaskDates() (quick-create-schedule.js, lógica pura
+// sobre js/work-calendar.js): ni fin de semana, ni festivo, ni un día en que
+// alguna persona asignada a ESA tarea esté de vacaciones o ausente. Las
+// vacaciones de cada responsable solo se conocen en el paso 3 (asignación),
+// así que la vista previa del paso 2 usa el calendario de la empresa y el
+// paso 3 enseña un bloque «Fechas resultantes» —el mismo cálculo que luego
+// se guarda (planAllTasks)— que se actualiza al marcar/desmarcar personas, con
+// un indicador cuando se ha saltado un festivo o unas vacaciones.
+//
 // Nada de esto persiste nada hasta pulsar "Crear tareas", en el último paso.
 // ============================================================================
-import { el, escapeHtml, badgeHtml, showToast, uid, toDate, toDateInputValue, addDays, colorFromString, initials, PRIORITY_LABELS } from "../utils.js";
+import { el, escapeHtml, badgeHtml, showToast, uid, colorFromString, initials, PRIORITY_LABELS } from "../utils.js";
 import { getQuickCreateProducts, resolveQuickCreateTasks, createTasksFromQuickCreateInsertion } from "../data/quick-create.js";
+import { planTaskDates, describeSkipped, formatPlanDate } from "../quick-create-schedule.js";
+import { getWorkCalendar } from "../data/work-calendar.js";
 import { setProjectSections } from "../data/projects.js";
 import { notifyBulkAssignment } from "../data/notifications.js";
 import { openQuickCreateAdminModal } from "./quick-create-admin-modal.js";
@@ -56,20 +69,10 @@ function mainTaskIdFor(productId) {
   return `__main__:${productId}`;
 }
 
-/**
- * Fecha límite de una tarea (no la principal) a partir de la fecha de
- * inserción, la de entrega (de SU producto) y sus "días necesarios" (o
- * null si no tiene). Sin duración marcada, directamente la fecha de
- * entrega. Con duración, inserción + esos días — pero nunca más allá de
- * la fecha de entrega.
- */
-function computeTaskDueDate(insertionDate, deliveryDate, durationDays) {
-  if (durationDays === null || durationDays === undefined) return deliveryDate;
-  const candidate = addDays(insertionDate, durationDays);
-  return candidate.getTime() > deliveryDate.getTime() ? deliveryDate : candidate;
-}
-
-export function openQuickCreateModal({ project, currentUser, quickCreateEnabled, teamMembers }) {
+export function openQuickCreateModal({ project, currentUser, quickCreateEnabled, teamMembers, workCalendar }) {
+  // `workCalendar` solo lo pasan las pruebas; en la app se lee el que hay ahora (v78).
+  const calendar = () => workCalendar || getWorkCalendar();
+  const nameOf = (personUid) => ((teamMembers || []).find((m) => m.uid === personUid) || {}).name || "";
   const root = document.getElementById("modal-root");
   const sortedSections = [...(project.sections || [])].sort((a, b) => a.order - b.order);
   const assignableMembers = [...(teamMembers || [])]
@@ -202,6 +205,8 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     const multi = state.selectedProductIds.length > 1;
     const mainTaskLabel = config.instanceName.trim() || "Tarea principal";
     const previewTasks = [{ title: mainTaskLabel, isMain: true }, ...resolved];
+    // v79: fecha laborable de cada tarea (aquí aún sin responsables: solo el calendario de la empresa).
+    const planOf = (t) => (config.deliveryDate ? planTaskDates({ insertionDate: new Date(), deliveryDate: config.deliveryDate, durationDays: t.durationDays, isMain: !!t.isMain, cfg: calendar() }) : null);
 
     const stepLabel = multi
       ? `<p style="font-size:12px;color:var(--color-text-faint);font-weight:600;text-transform:uppercase;letter-spacing:0.03em;margin:0;">Producto ${state.configIndex + 1} de ${state.selectedProductIds.length}</p>`
@@ -226,8 +231,9 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       <div style="border-top:1px solid var(--color-line);padding-top:14px;">
         <span class="field__label" style="font-size:13px;">${multi ? "Este producto creará" : "Se crearán"} ${previewTasks.length} tarea${previewTasks.length === 1 ? "" : "s"}</span>
         <ul style="margin:6px 0 0 18px;padding:0;max-height:150px;overflow-y:auto;font-size:12.5px;color:var(--color-text-lo);">
-          ${previewTasks.map((t) => `<li>${previewTaskLabel(t)}</li>`).join("")}
+          ${previewTasks.map((t) => `<li>${previewTaskLabel(t, planOf(t))}</li>`).join("")}
         </ul>
+        ${config.deliveryDate ? `<p class="field__hint" style="margin-top:6px;">Fechas en días laborables: sin fines de semana, festivos ni ausencias. Las vacaciones de cada responsable se aplican al asignar (paso siguiente).</p>` : ""}
       </div>`;
 
     return `
@@ -248,7 +254,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
         <label class="field">
           <span class="field__label">Fecha de entrega</span>
           <input class="field__input" type="date" id="qc-delivery-date" value="${config.deliveryDate}">
-          <p class="field__hint">La tarea principal irá de hoy a esta fecha. El resto, de hoy a su propia duración si la tiene (sin pasarse nunca de esta fecha) — o directamente esta fecha si no la tiene.</p>
+          <p class="field__hint">La tarea principal irá del primer día laborable desde hoy a esta fecha. El resto, de ese día a su propia duración en días laborables si la tiene (sin pasarse nunca de esta fecha) — o directamente esta fecha si no la tiene. Si esta fecha cae en fin de semana o festivo, las tareas acaban el último día laborable anterior.</p>
         </label>
         <label class="field">
           <span class="field__label">Sección de destino</span>
@@ -257,11 +263,23 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       </div>`;
   }
 
-  function previewTaskLabel(t) {
-    if (t.isMain) return `<strong style="color:var(--color-text-hi);">${escapeHtml(t.title)}</strong> <span style="color:var(--color-text-faint);">— tarea principal</span>`;
-    const dur = t.durationDays === null || t.durationDays === undefined ? "" : ` <span style="color:var(--color-text-faint);">(${t.durationDays}d)</span>`;
+  /** Fecha(s) de una tarea en la vista previa: «lun 08/06 → jue 11/06», con un indicador si el cálculo ha saltado algo (v79). */
+  function planBadgeHtml(plan) {
+    if (!plan || plan.failed || !plan.start) return "";
+    const range = plan.startKey === plan.dueKey ? formatPlanDate(plan.due) : `${formatPlanDate(plan.start)} → ${formatPlanDate(plan.due)}`;
+    const skipped = describeSkipped(plan.skipped, nameOf);
+    const flags = [];
+    if (plan.overrun) flags.push(`<span class="qc-flag qc-flag--bad" title="Entre hoy y la fecha de entrega no hay ningún día laborable: la tarea queda después de la entrega.">⚠ pasa de la entrega</span>`);
+    else if (plan.dueAdjusted) flags.push(`<span class="qc-flag" title="La fecha de entrega no es laborable: la tarea acaba el último día laborable anterior (${escapeHtml(formatPlanDate(plan.due))}).">◂ adelantada</span>`);
+    if (skipped) flags.push(`<span class="qc-flag" title="Se ha saltado: ${escapeHtml(skipped)}">📅 salta ${plan.skipped.some((x) => x.kind === "absence") ? "festivo/ausencia" : "festivo"}</span>`);
+    return ` <span class="qc-date" data-qc-date>${escapeHtml(range)}</span>${flags.length ? ` ${flags.join(" ")}` : ""}`;
+  }
+
+  function previewTaskLabel(t, plan) {
+    if (t.isMain) return `<strong style="color:var(--color-text-hi);">${escapeHtml(t.title)}</strong> <span style="color:var(--color-text-faint);">— tarea principal</span>${planBadgeHtml(plan)}`;
+    const dur = t.durationDays === null || t.durationDays === undefined ? "" : ` <span style="color:var(--color-text-faint);">(${t.durationDays} d. lab.)</span>`;
     const prio = t.priority && t.priority !== "media" ? ` <span style="color:var(--color-text-faint);">· ${PRIORITY_LABELS[t.priority] || t.priority}</span>` : "";
-    return `${escapeHtml(t.title)}${dur}${prio}`;
+    return `${escapeHtml(t.title)}${dur}${prio}${planBadgeHtml(plan)}`;
   }
 
   function groupPickerHtml(g, config) {
@@ -294,12 +312,57 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       const config = state.configs[productId];
       if (!product || !config) return;
       const mainLabel = config.instanceName.trim() || product.name;
-      result.push({ id: mainTaskIdFor(productId), title: mainLabel, isMain: true, productId, productName: product.name });
+      result.push({ id: mainTaskIdFor(productId), title: mainLabel, isMain: true, description: "", priority: "media", durationDays: null, productId, productName: product.name });
       resolveQuickCreateTasks(product, config.selections).forEach((t) => {
-        result.push({ id: t.id, title: t.title, productId, productName: product.name });
+        result.push({ id: t.id, title: t.title, description: t.description || "", priority: t.priority || "media", durationDays: t.durationDays ?? null, productId, productName: product.name });
       });
     });
     return result;
+  }
+
+  /**
+   * v79: todas las tareas con sus responsables y sus fechas laborables YA calculadas. Es EL cálculo:
+   * lo que enseña «Fechas resultantes» y lo que handleConfirmAll guarda salen de aquí, así que nunca
+   * pueden diferir. `today` fijo por llamada: todas las tareas parten del mismo día.
+   */
+  function planAllTasks() {
+    const cfg = calendar();
+    const today = new Date();
+    return buildAllAssignableTasks().map((t) => {
+      const assigneeIds = assignedUidsFor(t.id);
+      const plan = planTaskDates({ insertionDate: today, deliveryDate: state.configs[t.productId].deliveryDate, durationDays: t.durationDays, assigneeIds, isMain: !!t.isMain, cfg });
+      return { ...t, assigneeIds, plan };
+    });
+  }
+
+  /** El bloque «Fechas resultantes» del paso 3: una fila por tarea, agrupadas por producto. */
+  function datesPreviewHtml() {
+    const planned = planAllTasks();
+    const rows = state.selectedProductIds
+      .map((productId) => {
+        const items = planned.filter((p) => p.productId === productId);
+        if (!items.length) return "";
+        const head = `<div class="qc-assign-group__name" style="margin:6px 0 2px;">${escapeHtml(items[0].productName)}</div>`;
+        const lines = items
+          .map((p) => {
+            const who = p.assigneeIds.length ? p.assigneeIds.map((u) => escapeHtml(nameOf(u) || "—")).join(", ") : `<span style="color:var(--color-text-faint);">sin asignar</span>`;
+            return `<li class="qc-dates__row"><span class="qc-dates__title">${escapeHtml(p.title)}${p.isMain ? ` <span style="color:var(--color-text-faint);">(principal)</span>` : ""}</span><span class="qc-dates__who">${who}</span><span class="qc-dates__when">${planBadgeHtml(p.plan)}</span></li>`;
+          })
+          .join("");
+        return `${head}<ul class="qc-dates__list">${lines}</ul>`;
+      })
+      .join("");
+    const issues = planned.filter((p) => p.plan.skipped.length || p.plan.overrun).length;
+    return `
+      <span class="field__label" style="font-size:13px;">📅 Fechas resultantes <span style="font-weight:400;color:var(--color-text-faint);">· días laborables${issues ? ` · ${issues} con aviso` : ""}</span></span>
+      <p class="field__hint">Se calculan con el calendario laboral y las vacaciones o ausencias de quien tenga asignada cada tarea — cambian al marcar o quitar personas.</p>
+      ${rows}`;
+  }
+
+  /** Repinta SOLO el bloque de fechas (no el paso entero: perdería la posición de scroll). */
+  function refreshDatesPreview() {
+    const box = overlay.querySelector("#qc-dates");
+    if (box) box.innerHTML = datesPreviewHtml();
   }
 
   function renderAssignScreen() {
@@ -330,7 +393,8 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
         <p class="field__hint">${assignableTasks.length} tarea${assignableTasks.length === 1 ? "" : "s"} en total${multi ? ` de ${state.selectedProductIds.length} productos` : ""}. Marca a quién quieres asignarle algo — para cada persona puedes marcar un producto entero de una vez ("Marcar todas") y luego quitar o añadir tareas sueltas. Se les asignarán y se les avisará al crear las tareas.</p>
         ${assignableMembers.length ? `<div class="chip-select" style="margin-top:8px;">${peopleChips}</div>` : `<p class="field__hint">No hay nadie más en el equipo todavía.</p>`}
         ${blocks}
-      </div>`;
+      </div>
+      <div id="qc-dates" class="qc-dates">${datesPreviewHtml()}</div>`;
   }
 
   /** Texto del botón de un producto en el bloque de una persona: "Desmarcar todas" si ya lo tiene TODO marcado, "Marcar todas" en cualquier otro caso. */
@@ -540,6 +604,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
         // "Desmarcar todas" al marcar la última, y "Marcar todas" al quitar
         // cualquiera.
         syncAssignToggle(personUid, input.dataset.assignProduct);
+        refreshDatesPreview();
       });
     });
 
@@ -559,6 +624,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
           if (cb.dataset.assignUid === personUid && cb.dataset.assignProduct === productId) cb.checked = markAll;
         });
         syncAssignToggle(personUid, productId);
+        refreshDatesPreview();
       });
     });
 
@@ -583,9 +649,6 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     state.busy = true;
     render();
     try {
-      const insertionDate = new Date();
-      const insertionDateStr = toDateInputValue(insertionDate);
-
       // 1) Qué sección usa cada producto — resolviendo primero las que hay
       // que crear, TODAS de una vez (no un setProjectSections() por
       // producto), para que dos productos que ambos pidan "sección nueva"
@@ -608,43 +671,29 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       }
 
       // 2) Lista completa de tareas de TODOS los productos, cada una ya
-      // con su sección, fechas y responsables resueltos.
-      const allTasks = [];
-      state.selectedProductIds.forEach((productId) => {
-        const product = state.products.find((p) => p.id === productId);
-        const config = state.configs[productId];
-        const deliveryDate = toDate(config.deliveryDate);
-        const targetSectionId = sectionIdByProduct[productId];
-        const mainTaskId = mainTaskIdFor(productId);
-        const instanceName = config.instanceName.trim();
-
-        allTasks.push({
-          title: instanceName,
-          description: "",
-          startDate: insertionDateStr,
-          dueDate: toDateInputValue(deliveryDate),
-          assigneeIds: assignedUidsFor(mainTaskId),
-          priority: "media",
-          sectionId: targetSectionId,
-        });
-
-        resolveQuickCreateTasks(product, config.selections).forEach((t) => {
-          allTasks.push({
-            title: t.title,
-            description: t.description || "",
-            startDate: insertionDateStr,
-            dueDate: toDateInputValue(computeTaskDueDate(insertionDate, deliveryDate, t.durationDays)),
-            assigneeIds: assignedUidsFor(t.id),
-            priority: t.priority || "media",
-            sectionId: targetSectionId,
-          });
-        });
-      });
+      // con su sección, fechas laborables (v79, ver planAllTasks) y
+      // responsables resueltos — el mismo cálculo que enseña «Fechas resultantes».
+      const planned = planAllTasks();
+      const allTasks = planned.map((p) => ({
+        title: p.isMain ? state.configs[p.productId].instanceName.trim() : p.title,
+        description: p.description,
+        startDate: p.plan.startKey || null,
+        dueDate: p.plan.dueKey || null,
+        assigneeIds: p.assigneeIds,
+        priority: p.priority,
+        sectionId: sectionIdByProduct[p.productId],
+      }));
 
       // 3) Crear todo de golpe.
       const createdTasks = await createTasksFromQuickCreateInsertion(allTasks, { projectId: project.id, createdBy: currentUser.uid });
       const productCount = state.selectedProductIds.length;
-      showToast(`${createdTasks.length} tarea${createdTasks.length === 1 ? "" : "s"} creada${createdTasks.length === 1 ? "" : "s"}${productCount > 1 ? ` en ${productCount} productos` : ""}.`);
+      const shifted = planned.filter((p) => p.plan.skipped.length).length;
+      const overrun = planned.filter((p) => p.plan.overrun).length;
+      showToast(
+        `${createdTasks.length} tarea${createdTasks.length === 1 ? "" : "s"} creada${createdTasks.length === 1 ? "" : "s"}${productCount > 1 ? ` en ${productCount} productos` : ""}.` +
+          (shifted ? ` ${shifted} con fechas ajustadas por festivos o ausencias.` : "") +
+          (overrun ? ` ⚠ ${overrun} ${overrun === 1 ? "queda" : "quedan"} después de la fecha de entrega.` : "")
+      );
 
       // 4) Avisar a quien se acaba de asignar — DESPUÉS de crear las tareas
       // con éxito (nunca antes: si la creación falla, no debe salir ningún

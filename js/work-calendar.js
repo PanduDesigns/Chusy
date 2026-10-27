@@ -197,6 +197,22 @@ export function nextWorkingDay(date, cfg, userId) {
 }
 
 /**
+ * El último día laborable desde `date` HACIA ATRÁS, contando el propio `date`:
+ * si ya lo es, devuelve esa misma fecha. Es el espejo de `nextWorkingDay`: sirve
+ * para ajustar una fecha de ENTREGA sin pasarse de ella (v79). `null` si no hay
+ * ninguno en ~10 años o la fecha no vale.
+ */
+export function previousWorkingDay(date, cfg, userId) {
+  let d = toDay(date);
+  if (!d) return null;
+  for (let i = 0; i <= SEARCH_DAYS; i++) {
+    if (isWorkingDay(d, cfg, userId)) return d;
+    d = stepDay(d, -1);
+  }
+  return null;
+}
+
+/**
  * `start` + `days` días laborables (como WORKDAY de Excel): el día de partida
  * no cuenta —1 es el siguiente laborable—, 0 devuelve `start` tal cual
  * (aunque no sea laborable) y un número negativo cuenta hacia atrás.

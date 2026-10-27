@@ -25,6 +25,15 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 79,
+    date: "2026-10-26",
+    title: "Plazos en días laborables y carga del equipo",
+    items: [
+      "«Insertar producto» ya cuenta en días laborables: las fechas de las tareas no caen en fin de semana, festivo ni en vacaciones de quien las tiene asignadas. Verás la fecha de cada tarea al preparar el producto y, al asignar, un resumen «Fechas resultantes» con un aviso si se ha saltado un festivo o unas vacaciones.",
+      "Nueva forma de ver la Línea de tiempo global: «Agrupar por: Persona (carga)». Muestra a cada persona de tu departamento con sus tareas (con el código del proyecto), sus vacaciones y festivos sombreados, y avisa en ámbar o rojo cuando hay 3 o más tareas el mismo día, entregas que coinciden o fechas en ausencias, para repartir el trabajo sin que nadie tenga que apuntar horas.",
+    ],
+  },
+  {
     id: 78,
     date: "2026-10-24",
     title: "Calendario laboral: festivos y vacaciones",

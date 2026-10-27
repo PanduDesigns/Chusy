@@ -307,7 +307,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
 
       <div>
         <span class="field__label" style="font-size:13px;">Tareas base</span>
-        <p class="field__hint">Se crean siempre que se use este producto, sin depender de ninguna opción elegida. "Días" es opcional y sirve para calcular la fecha límite al insertar el producto; "Prioridad" es la que llevará la tarea creada.</p>
+        <p class="field__hint">Se crean siempre que se use este producto, sin depender de ninguna opción elegida. "Días" (laborables: sin fines de semana, festivos ni vacaciones de quien la tenga asignada) es opcional y sirve para calcular la fecha límite al insertar el producto — 0 = el mismo día; "Prioridad" es la que llevará la tarea creada.</p>
         <div id="qc-base-tasks" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
           ${p.baseTasks.map((t) => taskRowHtml(t, { kind: "base" })).join("") || emptyTasksHint()}
         </div>
@@ -345,7 +345,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
         </div>
         <div style="display:flex;gap:8px;">
           <input class="field__input qc-task-desc" value="${escapeHtml(t.description || "")}" placeholder="Descripción (opcional)" style="flex:1;">
-          <input class="field__input qc-task-days" type="number" min="0" step="1" value="${days}" placeholder="Días" title="Días necesarios para completarla, contados desde que se inserta el producto en un proyecto" style="width:56px;flex:none;">
+          <input class="field__input qc-task-days" type="number" min="0" step="1" value="${days}" placeholder="Días" title="Días LABORABLES necesarios para completarla, contados desde que se inserta el producto en un proyecto (sin fines de semana, festivos ni ausencias de quien la tenga asignada). 0 = el mismo día." style="width:56px;flex:none;">
           <select class="field__select qc-task-priority" title="Prioridad con la que se crea esta tarea" style="width:84px;flex:none;">${priorityOptionsHtml(t.priority)}</select>
         </div>
       </div>`;

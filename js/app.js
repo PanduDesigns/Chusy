@@ -87,6 +87,8 @@ let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'trash
 let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
 let timelineShowHolidays = false;
+let timelineGroupBy = "project"; // v79: 'project' | 'person' (carga por persona) — solo la línea de tiempo global; solo de sesión, como el zoom
+let timelineDepartmentFilter = ""; // v79: filtro de departamento de la carga por persona (solo lo usa un admin; "" = todos)
 let timelineViewMode = "tasks"; // 'tasks' | 'sections' — compartido entre la línea de tiempo de un proyecto y la global, igual que el zoom
 // v46: qué secciones están desplegadas dentro del modo Secciones sin salir
 // de él (clave namespaceada con el id de proyecto, ver sectionKey en
@@ -751,6 +753,16 @@ function toggleTimelineHolidays() {
   else renderMain();
 }
 
+function setTimelineGroupBy(groupBy) {
+  timelineGroupBy = groupBy === "person" ? "person" : "project";
+  renderShell();
+}
+
+function setTimelineDepartmentFilter(value) {
+  timelineDepartmentFilter = value || "";
+  renderShell();
+}
+
 function setTimelineViewMode(viewMode) {
   timelineViewMode = viewMode;
   if (mode === "timeline") renderShell();
@@ -986,6 +998,7 @@ function renderTimelineContent() {
     // sus propias secciones, en vez de agregar el proyecto entero de
     // golpe — ver buildSectionModeGroups en ese archivo.
     sections: p.sections,
+    code: p.code || "", // v79: el XXXYY del proyecto, que la carga por persona pinta en cada barra
     tasks: applyTaskFilters((globalTasksByProject[p.id] || []).filter((t) => !t.isComplete), activeFilters, searchText),
   }));
   renderTimelineView(mainContentEl, {
@@ -996,6 +1009,8 @@ function renderTimelineContent() {
     onOpenTask: openTask,
     exportTitle: "Chusy — Línea de tiempo global", groupLabel: "Proyecto", teamMembers, currentUser,
     workCalendar: getWorkCalendar(), // v78
+    groupBy: timelineGroupBy, onGroupByChange: setTimelineGroupBy, // v79
+    departmentFilter: timelineDepartmentFilter, onDepartmentFilterChange: setTimelineDepartmentFilter,
   });
 }
 

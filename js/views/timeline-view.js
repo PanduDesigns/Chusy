@@ -20,6 +20,23 @@
 // «Vacaciones inhábiles» (el cierre de agosto y Navidad de la empresa).
 // Sin `workCalendar` (o vacío), la vista sale como antes.
 //
+// Carga por persona (v79, `groupBy: "person"`; solo en la línea de tiempo GLOBAL, donde
+// están las tareas de todos los proyectos — en la de un proyecto la «carga» de alguien
+// saldría a medias): conmutador «Agrupar por: Proyecto / Persona (carga)». En vez de un
+// grupo por proyecto, un bloque por persona visible (workloadWorkers, js/workload.js: el
+// mismo alcance por departamento que Métricas; un admin puede filtrar por departamento)
+// con sus tareas sin completar CON fecha, cada una con el código XXXYY de su proyecto (en
+// la etiqueta y dentro de la barra). La fila de cabecera de cada persona es una franja de
+// «calor»: por columna, el pico de tareas activas (≥3 = saturado, ámbar; ≥5 = crítico,
+// rojo) y una marca si hay ≥2 entregas el mismo día; sus vacaciones/ausencias se sombrean
+// (rayado azul) sobre todo su bloque, y los festivos también en los zooms de semana/mes
+// (en el de día ya los sombrea la columna de festivo de la v78). El resumen de la
+// cabecera (⚠ n) cuenta días saturados, días con entregas simultáneas y tareas con fecha
+// en ausencia, de hoy en adelante. Las barras siguen siendo las de siempre: se abren con
+// un clic y se arrastran para mover fechas (las que participan en un día saturado llevan
+// un contorno rojo). Toda la cuenta vive en workload.js (lógica pura, con pruebas); aquí
+// solo se pinta. Los modos Secciones/Tareas no aplican en este modo (se ocultan).
+//
 // Vacaciones inhábiles (apartado más abajo): solo se pueden marcar en día,
 // semana o mes — a partir de un zoom más amplio que eso, prácticamente
 // cualquier columna rozaría agosto o la Navidad, así que resaltarlas
@@ -124,14 +141,16 @@
 // `properties.<fecha>` del proyecto, sin tocar el resto de sus Propiedades.
 // La línea de tiempo global no las dibuja.
 // ============================================================================
-import { escapeHtml, toDate, toDateInputValue, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast, renderTitleHtml, plainTitleText, getTaskSectionForProject } from "../utils.js";
+import { escapeHtml, toDate, toDateInputValue, addDays, daysBetween, isoWeekNumber, mondayOf, badgeHtml, showToast, renderTitleHtml, plainTitleText, getTaskSectionForProject, colorFromString, initials } from "../utils.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { exportTimelineToExcel, exportTimelineToPdf } from "../components/gantt-export.js";
 import { updateTask } from "../data/tasks.js";
 import { saveProjectSections, updateProject } from "../data/projects.js";
 import { projectKeyDates } from "../project-properties.js";
 import { openSectionsModal } from "../components/sections-modal.js";
-import { getHoliday, taskCalendarIssues, describeIssue } from "../work-calendar.js";
+import { getHoliday, taskCalendarIssues, describeIssue, canSeeAbsenceNote, formatDayMonth } from "../work-calendar.js";
+import { workloadWorkers, personWorkload, columnSummary, describeAbsence, describeStats } from "../workload.js";
+import { metricsScopeFor, metricsDepartmentOptions, metricsFilterLabel, departmentLabel } from "../departments.js";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -312,10 +331,44 @@ function buildSectionModeGroups(groups, currentProjectId) {
   return out;
 }
 
+/**
+ * Modo «Persona (carga)» (v79): de los `groups` por proyecto de la línea global a un grupo por
+ * persona visible. Cada grupo lleva sus tareas sin completar con fecha (`tasks`) y el cálculo de
+ * su carga (`wl`, ver personWorkload). `projectOfTask`: de qué proyecto es cada tarea (id, nombre
+ * y código XXXYY), para pintar el código en la barra.
+ */
+function buildPersonModel({ groups, teamMembers, currentUser, departmentFilter, workCalendar }) {
+  const unique = new Map();
+  const projectOfTask = new Map();
+  groups.forEach((g) => g.tasks.forEach((t) => {
+    if (!unique.has(t.id)) unique.set(t.id, t);
+    if (!projectOfTask.has(t.id) || g.id === t.projectId) projectOfTask.set(t.id, { id: g.id, label: g.label, code: g.code || "" });
+  }));
+  const all = [...unique.values()];
+  const today = new Date();
+  const people = workloadWorkers({ viewer: currentUser, members: teamMembers, departmentFilter }).map((member) => ({
+    member,
+    wl: personWorkload({ uid: member.uid, tasks: all, cfg: workCalendar, today }),
+  }));
+  const personGroups = people.map((p) => ({ id: p.member.uid, label: p.member.name || "Sin nombre", color: colorFromString(p.member.uid), tasks: p.wl.tasks.map((r) => r.task) }));
+  return { people, groups: personGroups, projectOfTask, undated: people.reduce((n, p) => n + p.wl.undated, 0) };
+}
+
+/** Texto de un día/columna para el tooltip de la franja de carga. */
+function columnTitle(unit, col, cs, canSeeNote) {
+  const when = unit === "day" ? formatDayMonth(col.start) : `${formatDayMonth(col.start)}–${formatDayMonth(col.end)}`;
+  const parts = [cs.peak ? `${cs.peak} ${cs.peak === 1 ? "tarea activa" : "tareas activas"}${unit === "day" ? "" : " (pico)"}` : "sin tareas activas"];
+  if (cs.clash) parts.push("entregas simultáneas");
+  if (cs.absence) parts.push(describeAbsence(cs.absence, canSeeNote(cs.absence)));
+  if (cs.holiday && cs.holidays) parts.push(`festivo: ${cs.holiday.name}`);
+  return `${when}: ${parts.join(" · ")}`;
+}
+
 export function renderTimelineView(container, {
   groups, zoom, onZoomChange, viewMode, onViewModeChange,
   expandedSections, onToggleSectionExpand,
   showHolidays, onToggleHolidays, onOpenTask, exportTitle, groupLabel, teamMembers, project, currentUser, workCalendar,
+  groupBy, onGroupByChange, departmentFilter, onDepartmentFilterChange,
 }) {
   const unit = zoom || "day";
   // Mantener el scroll horizontal entre repintados (v49): antes, CADA
@@ -332,12 +385,18 @@ export function renderTimelineView(container, {
   const prevScrollBox = container.querySelector("#tl-scroll");
   const prevScrollLeft = prevScrollBox && prevScrollBox.dataset.scrollCtx === scrollCtxKey ? prevScrollBox.scrollLeft : null;
 
-  const vm = viewMode || "tasks";
+  // v79: modo «Persona (carga)» — solo en la global (sin `project`).
+  const personMode = !project && groupBy === "person";
+  const wlModel = personMode ? buildPersonModel({ groups, teamMembers, currentUser, departmentFilter, workCalendar }) : null;
+  const srcGroups = personMode ? wlModel.groups : groups;
+  const canSeeNote = (absence) => canSeeAbsenceNote(absence, currentUser);
+
+  const vm = personMode ? "tasks" : viewMode || "tasks";
   const expanded = expandedSections || new Set();
-  const allTasks = groups.flatMap((g) => g.tasks);
+  const allTasks = personMode ? [...new Map(srcGroups.flatMap((g) => g.tasks).map((t) => [t.id, t])).values()] : srcGroups.flatMap((g) => g.tasks);
   const allTasksById = new Map(allTasks.map((t) => [t.id, t]));
   const withDates = allTasks.filter((t) => t.startDate || t.dueDate);
-  const withoutDates = allTasks.length - withDates.length;
+  const withoutDates = personMode ? wlModel.undated : allTasks.length - withDates.length;
 
   // v58: las fechas clave del proyecto (si hay) cuentan para el rango de la
   // escala, aunque ninguna tarea llegue tan lejos.
@@ -362,12 +421,22 @@ export function renderTimelineView(container, {
   // de exportar, para que lo descargado sea siempre justo la vista
   // colapsada (ver cabecera del archivo sobre por qué expandir no entra
   // en la exportación).
-  const displayGroups = vm === "sections" ? buildSectionModeGroups(groups, project && project.id) : groups;
+  const displayGroups = vm === "sections" ? buildSectionModeGroups(srcGroups, project && project.id) : srcGroups;
 
   const rows = [];
   // v58: una fila por cada fecha clave rellena, arriba del todo.
   keyDates.forEach((k) => rows.push({ type: "keydate", keyDate: k }));
-  displayGroups.forEach((g) => {
+  if (personMode) {
+    // v79: un bloque por persona — su cabecera (franja de carga) y sus tareas debajo.
+    wlModel.people.forEach((p) => {
+      rows.push({ type: "person", p, blockLen: 1 + p.wl.tasks.length });
+      p.wl.tasks.forEach((r) => {
+        const proj = wlModel.projectOfTask.get(r.task.id) || {};
+        rows.push({ type: "task", task: r.task, issues: r.issues, hot: r.hot, code: proj.code || "", projectLabel: proj.label || "", personId: p.member.uid });
+      });
+    });
+  }
+  (personMode ? [] : displayGroups).forEach((g) => {
     if (!g.tasks.length) return;
     if (!(vm === "sections" && g.flat)) {
       rows.push({ type: "group", label: g.label, color: g.color, icon: g.icon });
@@ -401,21 +470,49 @@ export function renderTimelineView(container, {
   // derecha.
   const sectionsBtnHtml = project ? `<button type="button" class="btn btn--ghost btn--sm" id="tl-sections-btn" style="margin-left:auto;">🗂 Secciones</button>` : "";
 
+  // v79: conmutador «Agrupar por» (solo en la global), selector de departamento (solo admin) y,
+  // en modo Persona, sin los botones Secciones/Tareas (no aplican).
+  const groupByButtons = !project
+    ? `<div class="topbar__views tl-groupby" style="margin-left:0;"><span class="tl-groupby__label">Agrupar por</span>
+        <button type="button" class="topbar__view-btn${!personMode ? " is-active" : ""}" data-groupby="project">Proyecto</button>
+        <button type="button" class="topbar__view-btn${personMode ? " is-active" : ""}" data-groupby="person">Persona (carga)</button></div>`
+    : "";
+  const modeButtons = personMode ? "" : `<div class="topbar__views" style="margin-left:0;">${viewModeButtons}</div>`;
+  let deptFilterHtml = "";
+  if (personMode) {
+    if (currentUser && currentUser.role === "admin") {
+      const cur = metricsScopeFor(currentUser, departmentFilter);
+      deptFilterHtml = `<select class="field__select tl-dept-select" id="tl-dept-filter" title="Filtrar por departamento">${metricsDepartmentOptions()
+        .map((o) => `<option value="${o.value}"${o.value === cur ? " selected" : ""}>${o.indent ? "— " : ""}${escapeHtml(o.label)}</option>`)
+        .join("")}</select>`;
+    } else {
+      const label = metricsFilterLabel(metricsScopeFor(currentUser));
+      deptFilterHtml = `<span class="timeline__hint">${label ? `Departamento: ${escapeHtml(label)}` : "Sin departamento asignado: solo ves tu propia carga"}</span>`;
+    }
+  }
+  const wireToolbarExtras = () => {
+    container.querySelectorAll("[data-groupby]").forEach((btn) => btn.addEventListener("click", () => onGroupByChange && onGroupByChange(btn.dataset.groupby)));
+    const sel = container.querySelector("#tl-dept-filter");
+    if (sel) sel.addEventListener("change", () => onDepartmentFilterChange && onDepartmentFilterChange(sel.value));
+  };
+
   if (!rows.length) {
     container.innerHTML = `
       <div class="timeline">
         <div class="timeline__toolbar">
-          <div class="topbar__views" style="margin-left:0;">${viewModeButtons}</div>
+          ${groupByButtons}${modeButtons}
           <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
           ${holidayBtnHtml}
+          ${deptFilterHtml}
           ${sectionsBtnHtml}
         </div>
         <div class="empty-state">
-          <span class="empty-state__eyebrow">— LÍNEA DE TIEMPO —</span>
-          <h2>Nada que mostrar todavía</h2>
-          <p>Ponle fecha de inicio y/o fecha límite a alguna tarea para que aparezca aquí.</p>
+          <span class="empty-state__eyebrow">— ${personMode ? "CARGA POR PERSONA" : "LÍNEA DE TIEMPO"} —</span>
+          <h2>${personMode ? "No hay personas que mostrar" : "Nada que mostrar todavía"}</h2>
+          <p>${personMode ? "No hay nadie de este departamento (o a ti todavía no te han asignado uno: pídeselo a un administrador en «Administrar equipo»)." : "Ponle fecha de inicio y/o fecha límite a alguna tarea para que aparezca aquí."}</p>
         </div>
       </div>`;
+    wireToolbarExtras();
     container.querySelectorAll("[data-zoom]").forEach((btn) => btn.addEventListener("click", () => onZoomChange(btn.dataset.zoom)));
     container.querySelectorAll("[data-viewmode]").forEach((btn) => btn.addEventListener("click", () => onViewModeChange(btn.dataset.viewmode)));
     if (canShowHolidays) container.querySelector("#tl-holidays-btn").addEventListener("click", onToggleHolidays);
@@ -444,6 +541,7 @@ export function renderTimelineView(container, {
   // Líneas verticales de las fechas clave (v58): se añaden al final (ver más
   // abajo) para que crucen todas las filas.
   let keyDateLines = "";
+  let personOverlays = ""; // v79: sombreado de ausencias (y festivos en semana/mes) de cada persona
 
   rows.forEach((row, ri) => {
     const gridRow = ri + 2;
@@ -460,6 +558,28 @@ export function renderTimelineView(container, {
       const markerHint = canDrag ? escapeHtml(" — arrástrala para cambiar la fecha") : "";
       cells += `<div class="tl-keydate-marker${canDrag ? " tl-keydate-marker--draggable" : ""}" title="${title}${markerHint}"${dragMarker} style="grid-column:${col};grid-row:${gridRow};--kd:${color};"><span class="tl-keydate-marker__dot"></span></div>`;
       keyDateLines += `<div class="tl-keydate-line" data-keydate-line="${k.key}" style="grid-column:${col};grid-row:1 / ${totalRows + 1};--kd:${color};"></div>`;
+      return;
+    }
+    if (row.type === "person") {
+      const p = row.p;
+      const uidP = p.member.uid;
+      const st = p.wl.stats;
+      const issueCount = st.overloadDays + st.clashDays + st.absenceClashes;
+      const statsText = describeStats(st);
+      const dept = departmentLabel(p.member.department);
+      const pillTitle = `${p.member.name || "Sin nombre"} · ${dept}\n${st.activeTasks} ${st.activeTasks === 1 ? "tarea activa" : "tareas activas"}${p.wl.undated ? ` · ${p.wl.undated} sin fecha (no se pueden situar)` : ""}\n${statsText || "Sin sobrecarga a la vista"}`;
+      const pill = st.status === "ok"
+        ? `<span class="tl-wl-pill" title="${escapeHtml(pillTitle)}">${st.activeTasks} act.</span>`
+        : `<span class="tl-wl-pill tl-wl-pill--${st.status}" title="${escapeHtml(pillTitle)}">⚠ ${issueCount}</span>`;
+      cells += `<div class="tl-group-label tl-person-label" data-person="${uidP}" title="${escapeHtml(pillTitle)}" style="grid-column:1;grid-row:${gridRow};"><span class="avatar avatar--sm" style="background:${colorFromString(uidP)}">${escapeHtml(initials(p.member.name))}</span><span class="tl-person-name">${escapeHtml(p.member.name || "Sin nombre")}</span>${pill}</div>`;
+      cells += `<div class="tl-group-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
+      columns.forEach((c, i) => {
+        const cs = columnSummary(p.wl, uidP, c, workCalendar);
+        cells += `<div class="tl-wl-cell tl-wl-cell--${cs.level}${cs.clash ? " has-clash" : ""}" title="${escapeHtml(columnTitle(unit, c, cs, canSeeNote))}" style="grid-column:${i + 2};grid-row:${gridRow};">${cs.peak || ""}</div>`;
+        const span = `grid-column:${i + 2};grid-row:${gridRow} / ${gridRow + row.blockLen};`;
+        if (cs.absent && cs.weekdays) personOverlays += `<div class="tl-wl-absence" data-absent-uid="${uidP}" style="${span}--frac:${(cs.absent / cs.weekdays).toFixed(2)};"></div>`;
+        if (cs.holidays && cs.weekdays && unit !== "day") personOverlays += `<div class="tl-wl-holiday" style="${span}--frac:${(cs.holidays / cs.weekdays).toFixed(2)};"></div>`;
+      });
       return;
     }
     if (row.type === "group") {
@@ -499,10 +619,10 @@ export function renderTimelineView(container, {
     const t = row.task;
     const indentPad = row.indent ? "padding-left:26px;" : "";
     // v78: aviso de calendario (festivo / responsable ausente) junto al nombre
-    const issues = workCalendar ? taskCalendarIssues(t, workCalendar) : [];
+    const issues = row.issues ? row.issues : workCalendar ? taskCalendarIssues(t, workCalendar) : [];
     const warn = issues.map((iss) => describeIssue(iss, nameOf)).join("\n");
     const warnBadge = warn ? ` <span class="tl-warn" title="${escapeHtml(warn)}" aria-label="Aviso de calendario: ${escapeHtml(warn.replace(/\n/g, ". "))}">⚠️</span>` : "";
-    cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}${warn ? `\n⚠️ ${escapeHtml(warn)}` : ""}" style="grid-column:1;grid-row:${gridRow};${indentPad}${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${renderTitleHtml(t.title)}${warnBadge}</div>`;
+    cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}${row.code ? `\n${escapeHtml(row.code)}${row.projectLabel ? ` · ${escapeHtml(row.projectLabel)}` : ""}` : ""}${warn ? `\n⚠️ ${escapeHtml(warn)}` : ""}" style="grid-column:1;grid-row:${gridRow};${indentPad}${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${row.code ? `<span class="tl-code">${escapeHtml(row.code)}</span>` : ""}${renderTitleHtml(t.title)}${warnBadge}</div>`;
     cells += `<div class="tl-row-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
 
     const span = taskSpan(t, columns);
@@ -520,12 +640,13 @@ export function renderTimelineView(container, {
       // mueve según haya o no ancla al otro lado, pero visualmente los dos
       // se agarran igual desde el principio).
       const resizable = canDrag && (t.startDate || t.dueDate) ? " tl-bar--resizable" : "";
-      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}${resizable}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}"></div>`;
+      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}${resizable}${row.hot ? " tl-bar--hot" : ""}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}${row.code ? ` · ${escapeHtml(row.code)}` : ""}${row.hot ? "\n🔥 Día saturado: otras tareas coinciden con esta" : ""}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}">${row.code ? `<span class="tl-bar__code">${escapeHtml(row.code)}</span>` : ""}</div>`;
     }
   });
 
   // v78: festivos del calendario laboral (solo zoom de día). Con pointer-events
   // apagado: el tooltip con el nombre está en la cabecera de la columna.
+  cells += personOverlays;
   holidayCols.forEach((h) => {
     cells += `<div class="tl-cal-holiday-col" data-holiday="${escapeHtml(h.name)}" style="grid-column:${h.i + 2};grid-row:2 / ${totalRows + 1};"></div>`;
   });
@@ -547,22 +668,25 @@ export function renderTimelineView(container, {
   container.innerHTML = `
     <div class="timeline">
       <div class="timeline__toolbar">
-        <div class="topbar__views" style="margin-left:0;">${viewModeButtons}</div>
+        ${groupByButtons}${modeButtons}
         <div class="topbar__views" style="margin-left:0;">${zoomButtons}</div>
         <button class="btn btn--ghost btn--sm" id="tl-today-btn">Hoy</button>
         ${holidayBtnHtml}
+        ${deptFilterHtml}
         ${withoutDates > 0 ? `<span class="timeline__hint">${withoutDates} ${withoutDates === 1 ? "tarea sin fecha no se muestra" : "tareas sin fecha no se muestran"} aquí</span>` : ""}
         ${sectionsBtnHtml}
         <button class="btn btn--ghost btn--sm" id="tl-export-btn">⬇ Exportar</button>
       </div>
+      ${personMode ? `<div class="tl-wl-legend"><span><i class="tl-wl-swatch tl-wl-swatch--high"></i>≥3 tareas el mismo día (saturado)</span><span><i class="tl-wl-swatch tl-wl-swatch--critical"></i>≥5 (crítico)</span><span><i class="tl-wl-swatch tl-wl-swatch--clash"></i>≥2 entregas el mismo día</span><span><i class="tl-wl-swatch tl-wl-swatch--absence"></i>vacaciones / ausencia</span><span>El número de cada día es el de tareas activas; arrastra o abre una tarea para moverla.</span></div>` : ""}
       <div class="timeline__scroll" id="tl-scroll">
-        <div class="timeline__grid" style="grid-template-columns:${gridTemplateColumns};grid-template-rows:40px repeat(${rows.length}, 34px);">
+        <div class="timeline__grid" style="grid-template-columns:${gridTemplateColumns};grid-template-rows:40px ${rows.map((r) => (r.type === "person" ? "40px" : "34px")).join(" ")};">
           ${cells}
         </div>
       </div>
     </div>
   `;
 
+  wireToolbarExtras();
   container.querySelectorAll("[data-zoom]").forEach((btn) => btn.addEventListener("click", () => onZoomChange(btn.dataset.zoom)));
   container.querySelectorAll("[data-viewmode]").forEach((btn) => btn.addEventListener("click", () => onViewModeChange(btn.dataset.viewmode)));
   container.querySelectorAll("[data-toggle-section]").forEach((el) => el.addEventListener("click", () => onToggleSectionExpand(el.dataset.toggleSection)));
@@ -581,7 +705,7 @@ export function renderTimelineView(container, {
   // sanitizeFilename en gantt-export.js) se autodocumente en qué modo se
   // generó — útil si se retoma más adelante sin recordar cuál era.
   const modeExportTitle = vm === "sections" ? `${exportTitle} — por secciones` : exportTitle;
-  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups: displayGroups, exportTitle: modeExportTitle, groupLabel, teamMembers, project, viewMode: vm, workCalendar }));
+  container.querySelector("#tl-export-btn").addEventListener("click", (e) => openExportPopover(e.currentTarget, { groups: displayGroups, exportTitle: personMode ? "Chusy — Carga por persona" : modeExportTitle, groupLabel: personMode ? "Persona" : groupLabel, teamMembers, project, viewMode: vm, workCalendar }));
   // Con el mismo contexto que el repintado anterior (mismo proyecto/global,
   // mismo zoom), se restaura justo donde estaba en vez de recentrar en
   // "Hoy" — así, terminar de arrastrar una barra (que repinta al guardar)
