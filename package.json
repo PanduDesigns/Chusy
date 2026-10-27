@@ -1,6 +1,6 @@
 {
   "name": "chusy",
-  "version": "78.0.0",
+  "version": "79.0.0",
   "private": true,
   "type": "module",
   "description": "Chusy — gestor de tareas de Martech Corporation (Vanilla JS + Firebase)",
@@ -8,10 +8,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/check-integrity.mjs"
+    "test": "node scripts/check-integrity.mjs",
+    "test:unit": "node tests/run-all.mjs",
+    "test:all": "node scripts/check-integrity.mjs && node tests/run-all.mjs"
   },
   "devDependencies": {
-    "vite": "^6.4.5"
+    "vite": "^6.4.5",
+    "jsdom": "^30.1.3"
   },
   "engines": {
     "node": ">=18"
