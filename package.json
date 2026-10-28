@@ -1,6 +1,6 @@
 {
   "name": "chusy",
-  "version": "79.0.0",
+  "version": "80.0.0",
   "private": true,
   "type": "module",
   "description": "Chusy — gestor de tareas de Martech Corporation (Vanilla JS + Firebase)",

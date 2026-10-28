@@ -285,36 +285,65 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
-    match /offerInbox/{requestId} {
-      // Sin sesión a propósito (la macro de Outlook no inicia sesión): la
-      // clave es lo que impide que cualquiera que conozca el proyecto de
-      // Firebase deje peticiones. `get()` sobre un documento que no existe
-      // (puente apagado) o sin `key` hace fallar la regla = denegado.
-      allow create: if
-        request.resource.data.keys().hasOnly(['key', 'targetEmail', 'name', 'location', 'commercial', 'description', 'status']) &&
-        request.resource.data.keys().hasAll(['key', 'targetEmail', 'name', 'location', 'commercial', 'description', 'status']) &&
+    // v80: las dos comprobaciones del buzón de Outlook, como funciones con nombre.
+    // La COLECCIÓN sigue llamándose `offerInbox` (es la que ya usan las macros
+    // instaladas en los ordenadores: cambiarla las rompería).
+
+    // Una petición nueva de la macro. Exige los siete campos de siempre (los que
+    // manda CrearCarpetaProyecto.bas) y TOLERA otros siete opcionales por si alguna
+    // macro instalada los manda: `createdAt` (da igual la hora del PC de quien la
+    // lanza: se acepta cualquier marca de tiempo o texto, sin compararla con
+    // request.time), `subject`, `localPath`, `entryId`, `senderName`,
+    // `senderEmail` y `receivedAt` (texto, vacío permitido; tope de longitud).
+    function validOutlookCreate() {
+      return request.resource.data.keys().hasAll(['key', 'targetEmail', 'name', 'location', 'commercial', 'description', 'status']) &&
+        request.resource.data.keys().hasOnly(['key', 'targetEmail', 'name', 'location', 'commercial', 'description', 'status',
+          'createdAt', 'subject', 'localPath', 'entryId', 'senderName', 'senderEmail', 'receivedAt']) &&
         request.resource.data.status == 'pending' &&
         request.resource.data.targetEmail is string &&
         request.resource.data.targetEmail.size() > 2 && request.resource.data.targetEmail.size() <= 200 &&
         request.resource.data.targetEmail == request.resource.data.targetEmail.lower() &&
         request.resource.data.name is string &&
-        request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 300 &&
-        request.resource.data.location is string && request.resource.data.location.size() <= 1000 &&
-        request.resource.data.commercial is string && request.resource.data.commercial.size() <= 200 &&
+        request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 1000 &&
+        request.resource.data.location is string && request.resource.data.location.size() <= 2000 &&
+        request.resource.data.commercial is string && request.resource.data.commercial.size() <= 1000 &&
         request.resource.data.description is string && request.resource.data.description.size() <= 100000 &&
         request.resource.data.key is string &&
+        (request.resource.data.get('createdAt', '') is string || request.resource.data.get('createdAt', '') is timestamp) &&
+        (request.resource.data.get('receivedAt', '') is string || request.resource.data.get('receivedAt', '') is timestamp) &&
+        request.resource.data.get('subject', '') is string && request.resource.data.get('subject', '').size() <= 1000 &&
+        request.resource.data.get('localPath', '') is string && request.resource.data.get('localPath', '').size() <= 2000 &&
+        request.resource.data.get('entryId', '') is string && request.resource.data.get('entryId', '').size() <= 1000 &&
+        request.resource.data.get('senderName', '') is string && request.resource.data.get('senderName', '').size() <= 1000 &&
+        request.resource.data.get('senderEmail', '') is string && request.resource.data.get('senderEmail', '').size() <= 1000 &&
         request.resource.data.key == get(/databases/$(database)/documents/meta/outlookBridge).data.key;
+    }
+
+    // El destinatario de una petición (con sesión). Compara sin distinguir
+    // mayúsculas: el correo de la cuenta de Firebase Auth puede llevarlas y la
+    // macro siempre manda el suyo en minúsculas. La primera comparación es la
+    // de siempre (la que hace posible `list` con where('targetEmail','==',…)); la
+    // segunda cubre un documento con mayúsculas guardado por otra vía.
+    function isOutlookRecipient() {
+      return isActiveUser() &&
+        'email' in request.auth.token &&
+        (resource.data.targetEmail == request.auth.token.email.lower() ||
+         resource.data.targetEmail.lower() == request.auth.token.email.lower());
+    }
+
+    match /offerInbox/{requestId} {
+      // Sin sesión a propósito (la macro de Outlook no inicia sesión): la
+      // clave es lo que impide que cualquiera que conozca el proyecto de
+      // Firebase deje peticiones. `get()` sobre un documento que no existe
+      // (puente apagado) o sin `key` hace fallar la regla = denegado.
+      allow create: if validOutlookCreate();
 
       // Una por su id (la macro mira si Chusy ya la atendió) — sin listar.
       allow get: if true;
-      allow list: if isActiveUser() &&
-        'email' in request.auth.token &&
-        resource.data.targetEmail == request.auth.token.email.lower();
+      allow list: if isOutlookRecipient();
 
       // Solo la pestaña de su destinatario anota quién se la queda y cómo terminó.
-      allow update: if isActiveUser() &&
-        'email' in request.auth.token &&
-        resource.data.targetEmail == request.auth.token.email.lower() &&
+      allow update: if isOutlookRecipient() &&
         request.resource.data.status in ['processing', 'created', 'error'] &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claimedBy', 'taskId', 'finalName', 'message']);
 

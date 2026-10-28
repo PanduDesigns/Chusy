@@ -26,11 +26,17 @@ export const doc = (a, ...rest) => (a && a.__col ? { id: "auto" + ++autoId, path
 export const getDocs = async (ref) => { const list = store().collections[ref.path] || []; return { docs: list, size: list.length, forEach: (cb) => list.forEach((d) => cb({ id: d.id, data: () => d.data })) }; };
 export const writeBatch = () => ({ set: (ref, data) => store().sets.push({ ref, data }), update() {}, delete() {}, commit: async () => {} });
 export const serverTimestamp = () => "TS";
-export const onSnapshot = () => () => {};
+// Ganchos opcionales para pruebas que necesitan controlar Firestore (v80: buzón de Outlook): una prueba pone
+// globalThis.__fb.hooks = { onSnapshot, runTransaction, updateDoc, deleteDoc }. Sin gancho, todo se comporta como siempre.
+const hook = (name) => (store().hooks || {})[name];
+export const onSnapshot = (...a) => { const h = hook("onSnapshot"); return h ? h(...a) : () => {}; };
+export const runTransaction = (...a) => { const h = hook("runTransaction"); return h ? h(...a) : f(...a); };
+export const updateDoc = (...a) => { const h = hook("updateDoc"); return h ? h(...a) : f(...a); };
+export const deleteDoc = (...a) => { const h = hook("deleteDoc"); return h ? h(...a) : f(...a); };
 export const addDoc = async () => ({ id: "auto" + ++autoId });
 export const setDoc = async () => {};
 `;
-const OVERRIDDEN = new Set(["collection", "doc", "getDocs", "writeBatch", "serverTimestamp", "onSnapshot", "addDoc", "setDoc"]);
+const OVERRIDDEN = new Set(["collection", "doc", "getDocs", "writeBatch", "serverTimestamp", "onSnapshot", "addDoc", "setDoc", "runTransaction", "updateDoc", "deleteDoc"]);
 const SRC = `const f = (...a) => ({ __stub: true, args: a });\n${OVERRIDES}\n` + [...names].filter((n) => !OVERRIDDEN.has(n)).map((n) => `export const ${n} = f;`).join("\n") + "\n";
 
 export async function resolve(specifier, context, next) {
