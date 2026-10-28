@@ -2,13 +2,26 @@ Attribute VB_Name = "CrearCarpetaProyecto"
 Option Explicit
 
 ' Macro para Outlook: crea la carpeta del proyecto del correo abierto.
-' Esta versiÃ³n es autocontenida: solo hay que importar este archivo.
+' Esta versión es autocontenida: solo hay que importar este archivo.
 '
-' v61: al terminar, si Chusy estÃ¡ abierto con la sesiÃ³n iniciada, tambiÃ©n crea
-' la oferta en Chusy (nombre del proyecto, ubicaciÃ³n = la carpeta creada,
-' comercial = su carpeta, descripciÃ³n = el texto del correo). Ver el bloque
-' CONEXIÃ“N CON CHUSY de mÃ¡s abajo y el apartado Â«Oferta desde OutlookÂ» del
+' v61: al terminar, si Chusy está abierto con la sesión iniciada, también crea
+' la oferta en Chusy (nombre del proyecto, ubicación = la carpeta creada,
+' comercial = su carpeta, descripción = el texto del correo). Ver el bloque
+' CONEXIÓN CON CHUSY de más abajo y el apartado «Oferta desde Outlook» del
 ' README de Chusy. Sin CHUSY_CLAVE rellena, la macro funciona como siempre.
+'
+' Cambio posterior a v61: si el correo no contiene ningún comercial de la tabla
+' (remitente, Para o CC), la macro ya no se detiene: muestra la lista completa y
+' se elige escribiendo el número, igual que cuando hay varios. El archivo se
+' guarda en ANSI (Windows-1252), la codificación que espera el editor de VBA,
+' para que las tildes se vean bien en los cuadros de diálogo.
+'
+' Cambio posterior: a la descripción de la oferta de Chusy ya no se copia el
+' correo entero, sino solo el mensaje: se corta en la despedida y se descartan
+' la firma, el aviso legal, los correos citados y los enlaces. El correo
+' completo sigue guardado como .msg en la carpeta del proyecto. Para ver qué
+' se subiría sin crear nada: Alt+F8 > ProbarLimpiezaDelCorreo. Ver el apartado
+' LIMPIEZA DEL TEXTO DEL CORREO, más abajo.
 
 Private Const PR_SMTP_ADDRESS As String = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
 Private Const PR_ATTACH_CONTENT_ID As String = "http://schemas.microsoft.com/mapi/proptag/0x3712001E"
@@ -16,22 +29,22 @@ Private Const PR_ATTACH_MIME_TAG As String = "http://schemas.microsoft.com/mapi/
 Private Const PR_ATTACH_FLAGS As String = "http://schemas.microsoft.com/mapi/proptag/0x37140003"
 Private Const RUTA_WINRAR As String = "C:\Program Files\WinRAR\WinRAR.exe"
 
-' ===================== CONEXIÃ“N CON CHUSY (v61) =====================
-' Las tres primeras lÃ­neas las muestra Chusy en menÃº de usuario > Â«ConexiÃ³n
-' con OutlookÂ» (solo administradores), listas para copiar y pegar aquÃ­. La
-' clave es la misma para todo el equipo; si estÃ¡ vacÃ­a, la macro no avisa a Chusy.
+' ===================== CONEXIÓN CON CHUSY (v61) =====================
+' Las tres primeras líneas las muestra Chusy en menú de usuario > «Conexión
+' con Outlook» (solo administradores), listas para copiar y pegar aquí. La
+' clave es la misma para todo el equipo; si está vacía, la macro no avisa a Chusy.
 Private Const CHUSY_PROJECT_ID As String = "asano-martech"
 Private Const CHUSY_API_KEY As String = "AIzaSyBSdhAgb2RhZ1z3dFr7nzvtin_HgkAMRDc"
 Private Const CHUSY_CLAVE As String = ""
-' Opcional: el correo con el que inicias sesiÃ³n en Chusy, si no es el de tu
+' Opcional: el correo con el que inicias sesión en Chusy, si no es el de tu
 ' cuenta de Outlook (normalmente se detecta solo).
 Private Const CHUSY_CORREO As String = ""
-' CuÃ¡ntos segundos espera la macro a que Chusy responda antes de darlo por cerrado.
+' Cuántos segundos espera la macro a que Chusy responda antes de darlo por cerrado.
 Private Const CHUSY_ESPERA_SEGUNDOS As Long = 10
-' Tope de caracteres del correo que se copian a la descripciÃ³n de la oferta.
+' Tope de caracteres del mensaje (ya limpio) que se copian a la descripción de la oferta.
 Private Const CHUSY_MAX_DESCRIPCION As Long = 30000
 
-' Se recuerda si Google exigiÃ³ la clave de API (casi nunca): evita repetir cada peticiÃ³n dos veces.
+' Se recuerda si Google exigió la clave de API (casi nunca): evita repetir cada petición dos veces.
 Private mUsarClaveApi As Boolean
 
 #If VBA7 Then
@@ -45,6 +58,7 @@ Public Sub CrearCarpetaDelProyecto()
     Dim proyecto As String
     Dim comerciales As Collection
     Dim coincidencias As Collection
+    Dim lista As Collection
     Dim posicion As Long
     Dim comercial As Variant
     Dim rutaDestino As String
@@ -53,7 +67,7 @@ Public Sub CrearCarpetaDelProyecto()
 
     Set correo = CorreoActivo()
     If correo Is Nothing Then
-        MsgBox "Abre un correo electrÃ³nico (o selecciÃ³nalo en Outlook) antes de ejecutar la macro.", vbExclamation, "Crear carpeta de proyecto"
+        MsgBox "Abre un correo electrónico (o selecciónalo en Outlook) antes de ejecutar la macro.", vbExclamation, "Crear carpeta de proyecto"
         Exit Sub
     End If
 
@@ -61,33 +75,35 @@ Public Sub CrearCarpetaDelProyecto()
     If Len(proyecto) = 0 Then Exit Sub
 
     If Not EsNombreDeCarpetaValido(proyecto) Then
-        MsgBox "El nombre del proyecto no puede contener \ / : * ? "" < > | ni terminar en punto o espacio.", vbExclamation, "Nombre no vÃ¡lido"
+        MsgBox "El nombre del proyecto no puede contener \ / : * ? "" < > | ni terminar en punto o espacio.", vbExclamation, "Nombre no válido"
         Exit Sub
     End If
 
     Set comerciales = TablaComerciales()
     Set coincidencias = ComercialesDelCorreo(correo, comerciales)
 
-    If coincidencias.Count = 0 Then
-        MsgBox "No se ha encontrado ningÃºn comercial de la tabla en el remitente, Para o CC del correo.", vbExclamation, "Comercial no identificado"
-        Exit Sub
-    End If
-
     If coincidencias.Count = 1 Then
+        Set lista = coincidencias
         posicion = 1
+    ElseIf coincidencias.Count > 1 Then
+        Set lista = coincidencias
+        posicion = ElegirComercial(lista, "Se han encontrado varios comerciales en el correo:", True)
+        If posicion = 0 Then Exit Sub
     Else
-        posicion = ElegirComercial(coincidencias)
+        ' Ninguno de la tabla en el remitente, Para o CC: se ofrece la tabla completa.
+        Set lista = comerciales
+        posicion = ElegirComercial(lista, "No se ha encontrado ningún comercial de la tabla en el remitente, Para o CC del correo." & vbCrLf & "Elige uno de la lista:", False)
         If posicion = 0 Then Exit Sub
     End If
 
-    comercial = coincidencias(posicion)
+    comercial = lista(posicion)
     anio = CStr(Year(Date))
     rutaDestino = RutaAntesDePlanos() & "\PLANOS " & anio & "\" & CStr(comercial(2))
     If Len(CStr(comercial(3))) > 0 Then rutaDestino = rutaDestino & "\" & CStr(comercial(3))
     rutaDestino = rutaDestino & "\" & proyecto
 
     If Not ExisteCarpeta(RutaAntesDePlanos() & "\PLANOS " & anio) Then
-        MsgBox "No se encuentra la carpeta base del aÃ±o:" & vbCrLf & RutaAntesDePlanos() & "\PLANOS " & anio, vbCritical, "Ruta no disponible"
+        MsgBox "No se encuentra la carpeta base del año:" & vbCrLf & RutaAntesDePlanos() & "\PLANOS " & anio, vbCritical, "Ruta no disponible"
         Exit Sub
     End If
 
@@ -102,11 +118,11 @@ Public Sub CrearCarpetaDelProyecto()
     CopiarYExtraerPlantillas rutaDestino
     On Error GoTo ErrorGuardarCorreo
     GuardarCorreoYAdjuntos correo, rutaDestino
-    ' v61: solo si todo lo anterior saliÃ³ bien. AvisarAChusy no lanza errores:
-    ' devuelve el texto (o vacÃ­o, si la conexiÃ³n no estÃ¡ configurada) que se
-    ' aÃ±ade al mensaje final.
+    ' v61: solo si todo lo anterior salió bien. AvisarAChusy no lanza errores:
+    ' devuelve el texto (o vacío, si la conexión no está configurada) que se
+    ' añade al mensaje final.
     avisoChusy = AvisarAChusy(correo, proyecto, rutaDestino, NombreComercialParaChusy(comercial))
-    MsgBox "Carpeta creada, plantillas extraÃ­das y correo archivado correctamente:" & vbCrLf & rutaDestino & avisoChusy, vbInformation, "Proyecto creado"
+    MsgBox "Carpeta creada, plantillas extraídas y correo archivado correctamente:" & vbCrLf & rutaDestino & avisoChusy, vbInformation, "Proyecto creado"
     Exit Sub
 
 ErrorAlCrear:
@@ -122,9 +138,9 @@ ErrorGuardarCorreo:
 End Sub
 
 Private Function RutaAntesDePlanos() As String
-    ' ChrW$(209) siempre genera la Ã‘ mayÃºscula, aunque el archivo se importe
-    ' con una codificaciÃ³n distinta en el editor de VBA.
-    RutaAntesDePlanos = "\\192.168.80.144\Spanesi\OFICINA TECNICA\DISE" & ChrW$(209) & "O TECNICO"
+    ' ChrW$(209) siempre genera la Ñ mayúscula, aunque el archivo se importe
+    ' con una codificación distinta en el editor de VBA.
+    RutaAntesDePlanos = "\\NASMARTECH\Spanesi\OFICINA TECNICA\DISE" & ChrW$(209) & "O TECNICO"
 End Function
 
 Private Function RutaZipPlantillas() As String
@@ -142,10 +158,10 @@ Private Sub CopiarYExtraerPlantillas(ByVal destino As String)
     zipDestino = destino & "\CARPETAS PROYECTO.zip"
 
     If Not ExisteArchivo(zipOrigen) Then
-        Err.Raise vbObjectError + 1000, "Plantillas", "No se encontrÃ³ el ZIP de plantillas: " & zipOrigen
+        Err.Raise vbObjectError + 1000, "Plantillas", "No se encontró el ZIP de plantillas: " & zipOrigen
     End If
     If Not ExisteArchivo(RUTA_WINRAR) Then
-        Err.Raise vbObjectError + 1001, "Plantillas", "No se encontrÃ³ WinRAR en: " & RUTA_WINRAR
+        Err.Raise vbObjectError + 1001, "Plantillas", "No se encontró WinRAR en: " & RUTA_WINRAR
     End If
 
     ' Equivale a Copy-Item -Force del script de PowerShell.
@@ -153,8 +169,8 @@ Private Sub CopiarYExtraerPlantillas(ByVal destino As String)
     FileCopy zipOrigen, zipDestino
 
     ' Equivale a: WinRAR x -ibck -y $zipDestino $destino
-    ' No se aÃ±ade una barra final: evita que la comilla final se interprete
-    ' como parte de la ruta cuando Windows procesa la lÃ­nea de comandos.
+    ' No se añade una barra final: evita que la comilla final se interprete
+    ' como parte de la ruta cuando Windows procesa la línea de comandos.
     comando = EntreComillas(RUTA_WINRAR) & " x -ibck -y " & EntreComillas(zipDestino) & " " & EntreComillas(destino)
     Set shellWindows = CreateObject("WScript.Shell")
     Set proceso = shellWindows.Exec(comando)
@@ -164,7 +180,7 @@ Private Sub CopiarYExtraerPlantillas(ByVal destino As String)
     Loop
 
     If proceso.ExitCode <> 0 Then
-        Err.Raise vbObjectError + 1002, "Plantillas", "WinRAR terminÃ³ con el cÃ³digo " & proceso.ExitCode & ". El ZIP se ha conservado en la carpeta del proyecto para revisarlo."
+        Err.Raise vbObjectError + 1002, "Plantillas", "WinRAR terminó con el código " & proceso.ExitCode & ". El ZIP se ha conservado en la carpeta del proyecto para revisarlo."
     End If
 
     Kill zipDestino
@@ -183,7 +199,7 @@ Private Sub GuardarCorreoYAdjuntos(ByVal correo As Outlook.MailItem, ByVal carpe
 
     carpetaDocumentos = carpetaProyecto & "\00 LAY OUT\VERSION A1\00 DOCUMENTOS PREVIOS"
     If Not ExisteCarpeta(carpetaDocumentos) Then
-        Err.Raise vbObjectError + 1003, "Archivo de correo", "No se encontrÃ³ la carpeta de destino: " & carpetaDocumentos
+        Err.Raise vbObjectError + 1003, "Archivo de correo", "No se encontró la carpeta de destino: " & carpetaDocumentos
     End If
 
     asunto = NombreArchivoSeguro(correo.Subject)
@@ -205,8 +221,8 @@ Private Function EsImagenIncrustada(ByVal adjunto As Outlook.Attachment) As Bool
     Dim tipoMime As String
     Dim indicadoresAdjunto As Long
 
-    ' Las imÃ¡genes en HTML suelen tener Content-ID y tipo MIME image/*.
-    ' El indicador 4 tambiÃ©n identifica los archivos referenciados en el cuerpo.
+    ' Las imágenes en HTML suelen tener Content-ID y tipo MIME image/*.
+    ' El indicador 4 también identifica los archivos referenciados en el cuerpo.
     On Error Resume Next
     identificadorContenido = CStr(adjunto.PropertyAccessor.GetProperty(PR_ATTACH_CONTENT_ID))
     tipoMime = LCase$(CStr(adjunto.PropertyAccessor.GetProperty(PR_ATTACH_MIME_TAG)))
@@ -286,21 +302,21 @@ Private Function TablaComerciales() As Collection
 
     ' Cada registro contiene: nombre, correo, carpeta y subcarpeta.
     tabla.Add Array("Armando Moreno", "armando.moreno@martechcorporation.com", "ARMANDO", "")
-    tabla.Add Array("CÃ©sar Sierra", "cesar.sierra@martechcorporation.com", "CESAR SIERRA", "")
+    tabla.Add Array("César Sierra", "cesar.sierra@martechcorporation.com", "CESAR SIERRA", "")
     tabla.Add Array("Daniel Gallego", "daniel.gallego@martechcorporation.com", "DANI GALLEGO", "")
     tabla.Add Array("Gabriel Villaverde", "gabriel.villaverde@martechcorporation.com", "GABI", "")
     tabla.Add Array("Jacinto Rey", "rey@martechcar.com", "MARTECH CAR NOROESTE", "")
     tabla.Add Array("Jaime Masalleras", "jmasalleras@aco.cl", "INTERNACIONAL", "ACO")
     tabla.Add Array("Javier Moreno", "javiermoreno@spanesimadrid.es", "MARTECH CAR MADRID", "")
-    tabla.Add Array("JoaquÃ­n Lobato", "joaquin.lobato@martechcorporation.com", "JOAQUIN LOBATO", "")
+    tabla.Add Array("Joaquín Lobato", "joaquin.lobato@martechcorporation.com", "JOAQUIN LOBATO", "")
     tabla.Add Array("Jon Franco", "jon.franco@martechcorporation.com", "JON FRANCO", "")
-    tabla.Add Array("JosÃ© Antonio GarcÃ­a Alcaraz", "info@alcarazservicios.com", "ALCARAZ SERVICIOS", "")
-    tabla.Add Array("Jose Luis MartÃ­n", "joseluis.martin@martechcorporation.com", "JOSE LUIS MARTIN", "")
+    tabla.Add Array("José Antonio García Alcaraz", "info@alcarazservicios.com", "ALCARAZ SERVICIOS", "")
+    tabla.Add Array("Jose Luis Martín", "joseluis.martin@martechcorporation.com", "JOSE LUIS MARTIN", "")
     tabla.Add Array("Jose Manuel Ortega", "josemanuel@martechcar.com", "INTERNACIONAL", "MEXICO")
-    tabla.Add Array("Jose MarÃ­a SÃ¡nchez", "josemaria.sb@martechcorporation.com", "JOSE MARIA SANCHEZ", "")
-    tabla.Add Array("Jose Ramon MartÃ­nez", "jose.martinez@martechcorporation.com", "JOSE RAMON", "")
-    tabla.Add Array("Juan MartÃ­nez", "juan.martinez@martechcorporation.com", "JUAN MARTINEZ", "")
-    tabla.Add Array("Luis MeÃ±aca", "luis.menaca@martechcorporation.com", "INTERNACIONAL", "LUIS MENACA")
+    tabla.Add Array("Jose María Sánchez", "josemaria.sb@martechcorporation.com", "JOSE MARIA SANCHEZ", "")
+    tabla.Add Array("Jose Ramon Martínez", "jose.martinez@martechcorporation.com", "JOSE RAMON", "")
+    tabla.Add Array("Juan Martínez", "juan.martinez@martechcorporation.com", "JUAN MARTINEZ", "")
+    tabla.Add Array("Luis Meñaca", "luis.menaca@martechcorporation.com", "INTERNACIONAL", "LUIS MENACA")
     tabla.Add Array("Luis Sepulveda", "luis.sepulveda@martechcorporation.com", "LUIS SEPULVEDA", "")
     tabla.Add Array("Manuel Rus", "manuelrus@spanesi.es", "MANUEL RUS", "")
     tabla.Add Array("Miguel Angel", "miguelangel.fernandez@martechcorporation.com", "MIGUEL ANGEL", "")
@@ -310,7 +326,7 @@ Private Function TablaComerciales() As Collection
     tabla.Add Array("Pedro Torres", "pedro@spanesilevante.es", "SPANESI LEVANTE", "")
     tabla.Add Array("Philippe", "philippe.ferrol@martechcorporation.com", "PHILIPPE", "")
     tabla.Add Array("Rafael Moreno", "rafaelmoreno@spanesimadrid.es", "MARTECH CAR MADRID", "")
-    tabla.Add Array("RubÃ©n Escobar", "ruben.escobar@martechcorporation.com", "RUBEN ESCOBAR", "")
+    tabla.Add Array("Rubén Escobar", "ruben.escobar@martechcorporation.com", "RUBEN ESCOBAR", "")
     tabla.Add Array("Sapraxell", "", "SAPRAXELL", "")
 
     Set TablaComerciales = tabla
@@ -414,33 +430,40 @@ Private Function DireccionSMTPDeAddressEntry(ByVal entrada As Outlook.AddressEnt
     On Error GoTo 0
 End Function
 
-Private Function ElegirComercial(ByVal coincidencias As Collection) As Long
+' Pregunta cuál de los comerciales de `lista` es el correcto. Devuelve su
+' posición (1 a lista.Count) o 0 si se cancela. Con `mostrarCorreo` se escribe
+' también su correo (útil con pocos comerciales); con la tabla completa solo el
+' nombre, porque el texto de un InputBox no puede pasar de unos 1.000 caracteres.
+Private Function ElegirComercial(ByVal lista As Collection, ByVal encabezado As String, ByVal mostrarCorreo As Boolean) As Long
     Dim mensaje As String
     Dim registro As Variant
     Dim respuesta As String
     Dim numero As Long
     Dim i As Long
 
-    mensaje = "Se han encontrado varios comerciales en el correo:" & vbCrLf & vbCrLf
-    For i = 1 To coincidencias.Count
-        registro = coincidencias(i)
-        mensaje = mensaje & i & ". " & CStr(registro(0)) & " (" & CStr(registro(1)) & ")" & vbCrLf
+    mensaje = encabezado & vbCrLf & vbCrLf
+    For i = 1 To lista.Count
+        registro = lista(i)
+        mensaje = mensaje & i & ". " & CStr(registro(0))
+        If mostrarCorreo And Len(CStr(registro(1))) > 0 Then mensaje = mensaje & " (" & CStr(registro(1)) & ")"
+        mensaje = mensaje & vbCrLf
     Next i
-    mensaje = mensaje & vbCrLf & "Escribe el nÃºmero del comercial correcto (o Cancela para salir):"
+    mensaje = mensaje & vbCrLf & "Escribe el número del comercial correcto (o Cancela para salir):"
 
     Do
         respuesta = Trim$(InputBox(mensaje, "Seleccionar comercial"))
         If Len(respuesta) = 0 Then Exit Function
 
-        If IsNumeric(respuesta) Then
+        ' Solo cifras (y pocas): evita que "1,5" o un número enorme den error.
+        If Len(respuesta) <= 4 And Not (respuesta Like "*[!0-9]*") Then
             numero = CLng(respuesta)
-            If numero >= 1 And numero <= coincidencias.Count Then
+            If numero >= 1 And numero <= lista.Count Then
                 ElegirComercial = numero
                 Exit Function
             End If
         End If
 
-        MsgBox "Escribe un nÃºmero vÃ¡lido de la lista.", vbExclamation, "Seleccionar comercial"
+        MsgBox "Escribe un número válido de la lista.", vbExclamation, "Seleccionar comercial"
     Loop
 End Function
 
@@ -465,41 +488,41 @@ Private Function ExisteArchivo(ByVal ruta As String) As Boolean
 End Function
 
 ' ===================================================================
-' CONEXIÃ“N CON CHUSY (v61)
+' CONEXIÓN CON CHUSY (v61)
 '
-' CÃ³mo funciona (el recorrido completo estÃ¡ en el README de Chusy):
-'   1. La macro deja una peticiÃ³n en la colecciÃ³n offerInbox de Firestore por
-'      REST, SIN iniciar sesiÃ³n; las reglas de Firestore solo la aceptan con la
+' Cómo funciona (el recorrido completo está en el README de Chusy):
+'   1. La macro deja una petición en la colección offerInbox de Firestore por
+'      REST, SIN iniciar sesión; las reglas de Firestore solo la aceptan con la
 '      clave compartida (CHUSY_CLAVE).
-'   2. La pestaÃ±a de Chusy abierta de ESA persona (el correo de su cuenta de
+'   2. La pestaña de Chusy abierta de ESA persona (el correo de su cuenta de
 '      Outlook) la ve al instante, crea la oferta y anota el resultado.
-'   3. La macro lee ese resultado durante unos segundos para contÃ¡rselo a quien
-'      la lanzÃ³, y recoge la peticiÃ³n (lleva el texto del correo).
-' Si Chusy no estÃ¡ abierto con la sesiÃ³n iniciada nadie la atiende: la macro lo
-' dice y retira la peticiÃ³n, y la oferta no se crea.
+'   3. La macro lee ese resultado durante unos segundos para contárselo a quien
+'      la lanzó, y recoge la petición (lleva el texto del correo).
+' Si Chusy no está abierto con la sesión iniciada nadie la atiende: la macro lo
+' dice y retira la petición, y la oferta no se crea.
 ' ===================================================================
 
-' Prueba de la conexiÃ³n sin tocar ningÃºn proyecto real: crea en Chusy una
-' oferta de prueba (bÃ³rrala despuÃ©s a mano). EjecÃºtala desde Outlook con
-' Chusy abierto y la sesiÃ³n iniciada: Alt+F8 > ProbarConexionConChusy.
+' Prueba de la conexión sin tocar ningún proyecto real: crea en Chusy una
+' oferta de prueba (bórrala después a mano). Ejecútala desde Outlook con
+' Chusy abierto y la sesión iniciada: Alt+F8 > ProbarConexionConChusy.
 Public Sub ProbarConexionConChusy()
     Dim resultado As String
     Dim descripcion As String
 
     If Len(CHUSY_CLAVE) = 0 Then
-        MsgBox "Falta rellenar CHUSY_CLAVE al principio de la macro (Chusy: menÃº de usuario > ConexiÃ³n con Outlook).", vbExclamation, "ConexiÃ³n con Chusy"
+        MsgBox "Falta rellenar CHUSY_CLAVE al principio de la macro (Chusy: menú de usuario > Conexión con Outlook).", vbExclamation, "Conexión con Chusy"
         Exit Sub
     End If
 
     descripcion = "Oferta de prueba creada desde Outlook." & vbCrLf & vbCrLf & _
         "Caracteres especiales: " & ChrW$(225) & ChrW$(233) & ChrW$(237) & ChrW$(243) & ChrW$(250) & " " & ChrW$(241) & ChrW$(209) & " " & ChrW$(8364) & " ""comillas"" \ / <b>no es negrita</b>" & vbCrLf & _
-        "Segunda lÃ­nea del mismo pÃ¡rrafo."
+        "Segunda línea del mismo párrafo."
     resultado = AvisarAChusy(Nothing, "PRUEBA OUTLOOK " & Format$(Now, "hh:nn:ss"), RutaAntesDePlanos() & "\PLANOS " & CStr(Year(Date)) & "\PRUEBA", "PRUEBA", descripcion)
-    MsgBox "Resultado de la prueba:" & resultado, vbInformation, "ConexiÃ³n con Chusy"
+    MsgBox "Resultado de la prueba:" & resultado, vbInformation, "Conexión con Chusy"
 End Sub
 
 ' El comercial tal como se escribe en Chusy: el nombre de la carpeta en la que
-' se crea el proyecto â€” la subcarpeta si la hay (INTERNACIONAL > ACO, MEXICO,
+' se crea el proyecto — la subcarpeta si la hay (INTERNACIONAL > ACO, MEXICO,
 ' LUIS MENACA) y, si no, la carpeta del comercial (ARMANDO, GABI...).
 Private Function NombreComercialParaChusy(ByVal comercial As Variant) As String
     If Len(CStr(comercial(3))) > 0 Then
@@ -509,10 +532,10 @@ Private Function NombreComercialParaChusy(ByVal comercial As Variant) As String
     End If
 End Function
 
-' Avisa a Chusy de la oferta nueva y devuelve el texto que se aÃ±ade al mensaje
-' final de la macro (vacÃ­o si la conexiÃ³n no estÃ¡ configurada). No lanza
+' Avisa a Chusy de la oferta nueva y devuelve el texto que se añade al mensaje
+' final de la macro (vacío si la conexión no está configurada). No lanza
 ' errores. `descripcionPrueba` solo lo usa ProbarConexionConChusy: en el uso
-' normal la descripciÃ³n es el texto del correo.
+' normal la descripción es el texto del correo.
 Private Function AvisarAChusy(ByVal correo As Outlook.MailItem, ByVal proyecto As String, ByVal rutaDestino As String, ByVal comercial As String, Optional ByVal descripcionPrueba As String = "") As String
     Dim destinatario As String
     Dim descripcion As String
@@ -533,7 +556,7 @@ Private Function AvisarAChusy(ByVal correo As Outlook.MailItem, ByVal proyecto A
 
     destinatario = CorreoDelUsuario()
     If Len(destinatario) = 0 Then
-        AvisarAChusy = MensajeChusy("no se ha podido saber el correo de tu cuenta de Outlook, asÃ­ que no se ha creado la oferta. EscrÃ­belo en CHUSY_CORREO, al principio de la macro.")
+        AvisarAChusy = MensajeChusy("no se ha podido saber el correo de tu cuenta de Outlook, así que no se ha creado la oferta. Escríbelo en CHUSY_CORREO, al principio de la macro.")
         Exit Function
     End If
 
@@ -569,7 +592,7 @@ Private Function AvisarAChusy(ByVal correo As Outlook.MailItem, ByVal proyecto A
     End If
     urlPeticion = urlColeccion & "/" & idPeticion
 
-    ' Espera a que la pestaÃ±a de Chusy la atienda (normalmente, un par de segundos).
+    ' Espera a que la pestaña de Chusy la atienda (normalmente, un par de segundos).
     limite = DateAdd("s", CHUSY_ESPERA_SEGUNDOS, Now)
     Do
         Sleep 600
@@ -591,13 +614,13 @@ Private Function AvisarAChusy(ByVal correo As Outlook.MailItem, ByVal proyecto A
         Case "error"
             nota = CampoFirestore(respuesta, "message")
             BorrarPeticion urlPeticion
-            AvisarAChusy = MensajeChusy("Chusy recibiÃ³ la peticiÃ³n pero no pudo crear la oferta: " & nota)
+            AvisarAChusy = MensajeChusy("Chusy recibió la petición pero no pudo crear la oferta: " & nota)
         Case "processing"
-            ' La estÃ¡ creando ahora mismo: no se retira (la borrarÃ­a Chusy al terminar).
-            AvisarAChusy = MensajeChusy("Chusy estÃ¡ creando la oferta pero tarda mÃ¡s de lo normal. CompruÃ©bala en Chusy dentro de un momento.")
+            ' La está creando ahora mismo: no se retira (la borraría Chusy al terminar).
+            AvisarAChusy = MensajeChusy("Chusy está creando la oferta pero tarda más de lo normal. Compruébala en Chusy dentro de un momento.")
         Case Else
             BorrarPeticion urlPeticion
-            AvisarAChusy = MensajeChusy("no se ha creado la oferta porque Chusy no estÃ¡ abierto con la sesiÃ³n iniciada de " & destinatario & ". Ãbrelo, inicia sesiÃ³n y crÃ©ala a mano (la carpeta es la de arriba).")
+            AvisarAChusy = MensajeChusy("no se ha creado la oferta porque Chusy no está abierto con la sesión iniciada de " & destinatario & ". Ábrelo, inicia sesión y créala a mano (la carpeta es la de arriba).")
     End Select
     Exit Function
 
@@ -614,13 +637,13 @@ Private Function ExplicarErrorHttp(ByVal estado As Long, ByVal respuesta As Stri
 
     detalle = MensajeDeErrorJson(respuesta)
     If estado = 403 Then
-        ExplicarErrorHttp = "Chusy rechazÃ³ la peticiÃ³n (permisos). Comprueba que las reglas de Firestore estÃ©n publicadas y que CHUSY_CLAVE sea la que muestra Chusy en ConexiÃ³n con Outlook. La oferta no se ha creado."
+        ExplicarErrorHttp = "Chusy rechazó la petición (permisos). Comprueba que las reglas de Firestore estén publicadas y que CHUSY_CLAVE sea la que muestra Chusy en Conexión con Outlook. La oferta no se ha creado."
     Else
         ExplicarErrorHttp = "error " & CStr(estado) & " al hablar con Chusy" & IIf(Len(detalle) > 0, " (" & detalle & ")", "") & ". La oferta no se ha creado."
     End If
 End Function
 
-' El correo de quien lanza la macro, en minÃºsculas: el que usa para entrar en Chusy.
+' El correo de quien lanza la macro, en minúsculas: el que usa para entrar en Chusy.
 Private Function CorreoDelUsuario() As String
     Dim direccion As String
 
@@ -634,21 +657,378 @@ Private Function CorreoDelUsuario() As String
     CorreoDelUsuario = LCase$(Trim$(direccion))
 End Function
 
-' El texto del correo, recortado a CHUSY_MAX_DESCRIPCION caracteres.
+' ---------------------------------------------------------------------------
+' LIMPIEZA DEL TEXTO DEL CORREO
+' El correo completo (con firma, aviso legal y todo lo citado) ya queda
+' archivado como .msg en la carpeta del proyecto. A Chusy solo se sube el
+' mensaje en sí: se corta en la despedida (o en el primer marcador de firma,
+' aviso legal o correo citado) y se quitan los enlaces y las imágenes sueltas.
+' Los reenvíos (asunto RV: / FW: / FWD:) no se cortan, porque lo importante
+' suele ser justo el correo reenviado; en ellos solo se quitan enlaces.
+' ---------------------------------------------------------------------------
+
+' El texto del correo para la descripción de la oferta, ya limpio y recortado
+' a CHUSY_MAX_DESCRIPCION caracteres.
 Private Function TextoDelCorreo(ByVal correo As Outlook.MailItem) As String
     Dim texto As String
+    Dim asunto As String
 
     On Error Resume Next
     texto = correo.Body
+    asunto = correo.Subject
     On Error GoTo 0
+
+    texto = LimpiarTextoCorreo(texto, EsReenvio(asunto))
     If Len(texto) > CHUSY_MAX_DESCRIPCION Then
         texto = RecortarTexto(texto, CHUSY_MAX_DESCRIPCION) & vbCrLf & vbCrLf & "[Texto recortado]"
     End If
     TextoDelCorreo = texto
 End Function
 
-' Los primeros `maximo` caracteres de un texto, sin dejar a medias un carÃ¡cter
-' de los que ocupan dos (emojis): una mitad suelta no es texto vÃ¡lido para Firestore.
+' Prueba de la limpieza sin crear nada: muestra el texto que se subiría a Chusy
+' desde el correo abierto (o seleccionado). Alt+F8 > ProbarLimpiezaDelCorreo.
+Public Sub ProbarLimpiezaDelCorreo()
+    Dim correo As Outlook.MailItem
+    Dim original As String
+    Dim texto As String
+    Dim vista As String
+
+    Set correo = CorreoActivo()
+    If correo Is Nothing Then
+        MsgBox "Abre un correo electrónico (o selecciónalo en Outlook) antes de ejecutar la prueba.", vbExclamation, "Prueba de limpieza"
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    original = correo.Body
+    On Error GoTo 0
+    texto = TextoDelCorreo(correo)
+
+    vista = texto
+    If Len(vista) > 1500 Then vista = Left$(vista, 1500) & vbCrLf & "[...]"
+    If Len(vista) = 0 Then vista = "(vacío)"
+    MsgBox "Correo original: " & Len(original) & " caracteres." & vbCrLf & "Texto que se subiría a Chusy: " & Len(texto) & " caracteres." & vbCrLf & vbCrLf & vista, vbInformation, "Prueba de limpieza"
+End Sub
+
+Private Function EsReenvio(ByVal asunto As String) As Boolean
+    Dim s As String
+
+    s = LCase$(Trim$(asunto))
+    EsReenvio = (Left$(s, 3) = "rv:" Or Left$(s, 3) = "fw:" Or Left$(s, 4) = "fwd:" Or Left$(s, 10) = "reenviado:")
+End Function
+
+' Devuelve solo la parte importante del texto de un correo.
+Private Function LimpiarTextoCorreo(ByVal texto As String, ByVal reenviado As Boolean) As String
+    Dim lineas() As String
+    Dim ultima As Long
+    Dim i As Long
+    Dim s As String
+    Dim resultado As String
+
+    texto = Replace$(texto, vbCrLf, vbLf)
+    texto = Replace$(texto, vbCr, vbLf)
+    texto = QuitarEnlaces(texto)
+    lineas = Split(texto, vbLf)
+    ultima = UBound(lineas)
+
+    ' 1) Cortar en el primer marcador (despedida, firma, aviso legal, citado).
+    If Not reenviado Then
+        For i = 0 To UBound(lineas)
+            If EsMarcadorDeCorte(lineas, i) Then
+                ultima = i - 1
+                Exit For
+            End If
+        Next i
+        ' Si el correo empezaba directamente por un marcador no queda nada:
+        ' mejor subir el texto entero que una descripción vacía.
+        If ultima < 0 Then ultima = UBound(lineas)
+    End If
+
+    ' 2) Quitar del final las líneas sueltas de contacto (teléfonos, web, correo).
+    Do While ultima >= 0
+        s = Normalizar(lineas(ultima))
+        If Len(s) = 0 Or EsLineaDeContacto(s) Then
+            ultima = ultima - 1
+        Else
+            Exit Do
+        End If
+    Loop
+
+    For i = 0 To ultima
+        resultado = resultado & RTrim$(lineas(i)) & vbLf
+    Next i
+
+    ' 3) Como mucho una línea en blanco seguida.
+    resultado = ReemplazarRegex(resultado, "\n{3,}", vbLf & vbLf)
+    resultado = Trim$(resultado)
+    LimpiarTextoCorreo = Replace$(resultado, vbLf, vbCrLf)
+End Function
+
+' ¿Desde esta línea hay que descartar todo lo que sigue?
+Private Function EsMarcadorDeCorte(ByRef lineas() As String, ByVal i As Long) As Boolean
+    Dim t As String
+    Dim s As String
+    Dim n As String
+    Dim k As Long
+
+    t = Trim$(lineas(i))
+    If Len(t) = 0 Then Exit Function
+
+    ' Separadores: "--" (firma clásica) o una raya larga de guiones bajos (Outlook).
+    If t = "--" Then
+        EsMarcadorDeCorte = True
+        Exit Function
+    End If
+    If Len(t) >= 10 And Replace$(t, "_", "") = "" Then
+        EsMarcadorDeCorte = True
+        Exit Function
+    End If
+
+    s = Normalizar(t)
+    If Len(s) = 0 Then Exit Function
+
+    ' Pie legal / mensaje automático.
+    If EsAvisoLegal(s) Then
+        EsMarcadorDeCorte = True
+        Exit Function
+    End If
+
+    ' Despedida: a partir de aquí viene la firma.
+    If EsDespedida(s) Then
+        EsMarcadorDeCorte = True
+        Exit Function
+    End If
+
+    ' Firmas automáticas de móviles y de Outlook.
+    If EmpiezaPorAlguno(s, Array("enviado desde mi", "enviado desde outlook", "sent from my", "sent from outlook", "obtener outlook para", "get outlook for")) Then
+        EsMarcadorDeCorte = True
+        Exit Function
+    End If
+
+    ' Correo citado: "-----Mensaje original-----".
+    If Left$(s, 2) = "--" And (InStr(s, "mensaje original") > 0 Or InStr(s, "original message") > 0) Then
+        EsMarcadorDeCorte = True
+        Exit Function
+    End If
+
+    ' Correo citado: "De: ... / Enviado el: ..." (se exige una segunda cabecera
+    ' cerca, para no cortar un texto normal que empiece por "De:").
+    If Left$(s, 3) = "de:" Or Left$(s, 5) = "from:" Then
+        For k = i + 1 To i + 5
+            If k > UBound(lineas) Then Exit For
+            n = Normalizar(lineas(k))
+            If EmpiezaPorAlguno(n, Array("enviado", "sent:", "fecha:", "date:", "para:", "to:", "asunto:", "subject:", "cc:")) Then
+                EsMarcadorDeCorte = True
+                Exit Function
+            End If
+        Next k
+    End If
+
+    ' Correo citado: "El lun, 5 oct 2026, Fulano <...> escribió:" (a veces en dos líneas).
+    If Left$(s, 3) = "el " Or Left$(s, 3) = "on " Then
+        If Right$(s, 9) = "escribio:" Or Right$(s, 6) = "wrote:" Then
+            EsMarcadorDeCorte = True
+            Exit Function
+        End If
+        If i + 1 <= UBound(lineas) Then
+            n = Normalizar(lineas(i + 1))
+            If Right$(n, 9) = "escribio:" Or Right$(n, 6) = "wrote:" Then
+                EsMarcadorDeCorte = True
+                Exit Function
+            End If
+        End If
+    End If
+End Function
+
+' Despedidas habituales (texto ya normalizado). Solo líneas cortas: una frase
+' larga que empiece por "gracias" suele ser contenido, no despedida.
+Private Function EsDespedida(ByVal s As String) As Boolean
+    Dim p As String
+
+    If Len(s) > 120 Then Exit Function
+    p = QuitarPuntuacionFinal(s)
+
+    ' La línea entera es una despedida o un agradecimiento.
+    If EsUnoDe(p, Array("atentamente", "atte", "cordialmente", "afectuosamente", "saludos", "un saludo", _
+                        "saludos cordiales", "cordiales saludos", "un cordial saludo", "cordial saludo", _
+                        "un abrazo", "abrazos", "un fuerte abrazo", "saludos y gracias", "un saludo y gracias", _
+                        "gracias", "muchas gracias", "mil gracias", "gracias de antemano", "muchas gracias de antemano", _
+                        "gracias por todo", "muchas gracias por todo", "gracias de nuevo", _
+                        "best regards", "kind regards", "regards", "best", "sincerely", "cheers", _
+                        "thanks", "thank you", "thanks in advance")) Then
+        EsDespedida = True
+        Exit Function
+    End If
+
+    ' Empieza como una despedida ("Un cordial saludo, ...", "Recibe un abrazo").
+    If EmpiezaPorAlguno(s, Array("saludos ", "saludos,", "un saludo", "un cordial saludo", "cordial saludo", "cordiales saludos", _
+                                 "un abrazo", "un fuerte abrazo", "recibe un saludo", "recibe un cordial", "reciba un saludo", _
+                                 "reciba un cordial", "recibid un saludo", "recibid un cordial", "reciban un cordial", _
+                                 "con un cordial", "con un saludo", "atentamente", "cordialmente", "afectuosamente", _
+                                 "best regards", "kind regards", "regards,")) Then
+        EsDespedida = True
+        Exit Function
+    End If
+
+    ' "Muchas gracias y recibe un cordial saludo."
+    If EmpiezaPorAlguno(s, Array("gracias", "muchas gracias", "mil gracias", "thanks", "thank you")) Then
+        If InStr(s, "saludo") > 0 Or InStr(s, "abrazo") > 0 Or InStr(s, "atentamente") > 0 Or InStr(s, "regards") > 0 Then
+            EsDespedida = True
+        End If
+    End If
+End Function
+
+' Avisos de confidencialidad, protección de datos y "no imprima" (texto normalizado).
+Private Function EsAvisoLegal(ByVal s As String) As Boolean
+    EsAvisoLegal = ContieneAlguno(s, Array( _
+        "proteger el medio ambiente", "no imprima este", "piensa antes de imprimir", _
+        "think before you print", "consider the environment", _
+        "la informacion incluida en este", "este mensaje es confidencial", _
+        "este correo es confidencial", "este correo electronico es confidencial", _
+        "este e-mail es confidencial", "este mensaje y sus", _
+        "si ha recibido este mensaje por error", "si usted lee este mensaje", _
+        "this message is confidential", "this email is confidential", _
+        "this e-mail is confidential", "received this e-mail in error", _
+        "received this email in error", "responsable le informa", _
+        "reglamento (ue) 2016/679", "rgpd", "lopdgdd", "aviso legal", _
+        "aviso de confidencialidad"))
+End Function
+
+' Línea que solo contiene un dato de contacto de una firma (texto normalizado).
+Private Function EsLineaDeContacto(ByVal s As String) As Boolean
+    Dim i As Long
+    Dim digitos As Long
+    Dim soloTelefono As Boolean
+
+    If EmpiezaPorAlguno(s, Array("tel.", "tel:", "tel ", "tlf", "telf", "movil", "mobile", "fax", "web:", "www.", "http", _
+                                 "e-mail:", "email:", "e-mail ", "email ")) Then
+        EsLineaDeContacto = True
+        Exit Function
+    End If
+
+    ' Un correo suelto.
+    If InStr(s, "@") > 0 And InStr(s, " ") = 0 Then
+        EsLineaDeContacto = True
+        Exit Function
+    End If
+
+    ' Solo un número de teléfono.
+    soloTelefono = True
+    For i = 1 To Len(s)
+        Select Case Mid$(s, i, 1)
+            Case "0" To "9"
+                digitos = digitos + 1
+            Case "+", " ", ".", "-", "(", ")", "/"
+                ' Permitidos en un teléfono.
+            Case Else
+                soloTelefono = False
+                Exit For
+        End Select
+    Next i
+    EsLineaDeContacto = (soloTelefono And digitos >= 7)
+End Function
+
+' Quita lo que Outlook añade al texto plano: enlaces <https://...>, <mailto:...>,
+' [cid:imagen...], enlaces con formato [texto](url) y líneas que son solo una URL.
+Private Function QuitarEnlaces(ByVal texto As String) As String
+    texto = ReemplazarRegex(texto, "\[([^\]\r\n]*)\]\((?:https?|mailto):[^)\r\n]*\)", "$1")
+    texto = ReemplazarRegex(texto, "[ \t]*<(?:https?://|mailto:|ftp://)[^>\r\n]*>", "")
+    texto = ReemplazarRegex(texto, "\[cid:[^\]\r\n]*\]", "")
+    texto = ReemplazarRegex(texto, "^[ \t]*(?:https?://|www\.)\S+[ \t]*$", "")
+    QuitarEnlaces = texto
+End Function
+
+' Reemplazo con expresión regular (VBScript.RegExp, ya incluida en Windows).
+' Si algo falla devuelve el texto sin tocar.
+Private Function ReemplazarRegex(ByVal texto As String, ByVal patron As String, ByVal reemplazo As String) As String
+    Dim re As Object
+
+    On Error GoTo Fallo
+    Set re = CreateObject("VBScript.RegExp")
+    re.Global = True
+    re.IgnoreCase = True
+    re.Multiline = True
+    re.Pattern = patron
+    ReemplazarRegex = re.Replace(texto, reemplazo)
+    Exit Function
+
+Fallo:
+    ReemplazarRegex = texto
+End Function
+
+' Minúsculas, sin tildes y sin adornos al principio, para comparar frases.
+' (Los códigos ChrW son las vocales con tilde y la diéresis, en minúscula y
+' mayúscula: así no depende de la codificación del archivo.)
+Private Function Normalizar(ByVal texto As String) As String
+    Dim origen As Variant
+    Dim destino As Variant
+    Dim i As Long
+
+    origen = Array(225, 233, 237, 243, 250, 252, 193, 201, 205, 211, 218, 220)
+    destino = Array("a", "e", "i", "o", "u", "u", "a", "e", "i", "o", "u", "u")
+
+    texto = Replace$(texto, ChrW$(160), " ")
+    For i = 0 To UBound(origen)
+        texto = Replace$(texto, ChrW$(origen(i)), destino(i))
+    Next i
+    texto = LCase$(Trim$(texto))
+
+    Do While Len(texto) > 0
+        If InStr(ChrW$(161) & "*_ " & vbTab, Left$(texto, 1)) > 0 Then
+            texto = Mid$(texto, 2)
+        Else
+            Exit Do
+        End If
+    Loop
+    Normalizar = texto
+End Function
+
+Private Function QuitarPuntuacionFinal(ByVal s As String) As String
+    Do While Len(s) > 0
+        If InStr(".,;:! )", Right$(s, 1)) > 0 Then
+            s = Left$(s, Len(s) - 1)
+        Else
+            Exit Do
+        End If
+    Loop
+    QuitarPuntuacionFinal = s
+End Function
+
+Private Function EsUnoDe(ByVal texto As String, ByVal opciones As Variant) As Boolean
+    Dim opcion As Variant
+
+    For Each opcion In opciones
+        If texto = CStr(opcion) Then
+            EsUnoDe = True
+            Exit Function
+        End If
+    Next opcion
+End Function
+
+Private Function EmpiezaPorAlguno(ByVal texto As String, ByVal prefijos As Variant) As Boolean
+    Dim prefijo As Variant
+
+    For Each prefijo In prefijos
+        If Left$(texto, Len(CStr(prefijo))) = CStr(prefijo) Then
+            EmpiezaPorAlguno = True
+            Exit Function
+        End If
+    Next prefijo
+End Function
+
+Private Function ContieneAlguno(ByVal texto As String, ByVal fragmentos As Variant) As Boolean
+    Dim fragmento As Variant
+
+    For Each fragmento In fragmentos
+        If InStr(1, texto, CStr(fragmento), vbBinaryCompare) > 0 Then
+            ContieneAlguno = True
+            Exit Function
+        End If
+    Next fragmento
+End Function
+
+' Los primeros `maximo` caracteres de un texto, sin dejar a medias un carácter
+' de los que ocupan dos (emojis): una mitad suelta no es texto válido para Firestore.
 Private Function RecortarTexto(ByVal texto As String, ByVal maximo As Long) As String
     Dim codigo As Long
 
@@ -670,13 +1050,13 @@ Private Sub BorrarPeticion(ByVal urlPeticion As String)
     PeticionFirestore "DELETE", urlPeticion, "", estado, respuesta
 End Sub
 
-' Una peticiÃ³n HTTP a Firestore. Si Google exige la clave de API (cosa rara:
-' Firestore no la pide cuando las reglas dejan pasar la peticiÃ³n) la repite con
-' ella. Devuelve False si no hubo conexiÃ³n; entonces `respuesta` trae el motivo.
+' Una petición HTTP a Firestore. Si Google exige la clave de API (cosa rara:
+' Firestore no la pide cuando las reglas dejan pasar la petición) la repite con
+' ella. Devuelve False si no hubo conexión; entonces `respuesta` trae el motivo.
 Private Function PeticionFirestore(ByVal metodo As String, ByVal url As String, ByVal cuerpo As String, ByRef estado As Long, ByRef respuesta As String) As Boolean
     Dim conexion As Boolean
 
-    ' (En VBA, leer el nombre de la funciÃ³n dentro de ella es una llamada
+    ' (En VBA, leer el nombre de la función dentro de ella es una llamada
     ' recursiva, no el valor devuelto: por eso se guarda el resultado en `conexion`.)
     If mUsarClaveApi Then
         conexion = PeticionHttp(metodo, ConClaveApi(url), cuerpo, estado, respuesta)
@@ -700,7 +1080,7 @@ Private Function ConClaveApi(ByVal url As String) As String
     End If
 End Function
 
-' PeticiÃ³n HTTP con tiempo mÃ¡ximo (15 s). Usa MSXML2.XMLHTTP (la pila de Windows
+' Petición HTTP con tiempo máximo (15 s). Usa MSXML2.XMLHTTP (la pila de Windows
 ' que sigue los ajustes de proxy del equipo, la misma del navegador).
 Private Function PeticionHttp(ByVal metodo As String, ByVal url As String, ByVal cuerpo As String, ByRef estado As Long, ByRef respuesta As String) As Boolean
     Dim http As Object
@@ -711,7 +1091,7 @@ Private Function PeticionHttp(ByVal metodo As String, ByVal url As String, ByVal
     respuesta = ""
     Set http = CreateObject("MSXML2.XMLHTTP.6.0")
     http.Open metodo, url, True
-    ' Sin cachÃ©: se consulta varias veces la misma direcciÃ³n y debe verse siempre lo Ãºltimo.
+    ' Sin caché: se consulta varias veces la misma dirección y debe verse siempre lo último.
     http.setRequestHeader "Cache-Control", "no-cache"
     http.setRequestHeader "Pragma", "no-cache"
     http.setRequestHeader "If-Modified-Since", "Sat, 01 Jan 2000 00:00:00 GMT"
@@ -741,7 +1121,7 @@ Fallo:
     PeticionHttp = False
 End Function
 
-' ---- JSON mÃ­nimo (sin librerÃ­as externas) ----
+' ---- JSON mínimo (sin librerías externas) ----
 
 ' Un campo de texto en el formato de la API REST de Firestore.
 Private Function CampoTexto(ByVal nombre As String, ByVal valor As String) As String
@@ -749,8 +1129,8 @@ Private Function CampoTexto(ByVal nombre As String, ByVal valor As String) As St
 End Function
 
 ' Escapa un texto para meterlo entre comillas en JSON. Todo lo que no sea ASCII
-' imprimible sale como \uXXXX: el cuerpo de la peticiÃ³n queda en ASCII puro y la
-' codificaciÃ³n (tildes, Ã‘, euro, emojis) no puede estropearse por el camino.
+' imprimible sale como \uXXXX: el cuerpo de la petición queda en ASCII puro y la
+' codificación (tildes, Ñ, euro, emojis) no puede estropearse por el camino.
 Private Function JsonEscapar(ByVal texto As String) As String
     Dim n As Long
     Dim i As Long
@@ -785,7 +1165,7 @@ Private Function JsonEscapar(ByVal texto As String) As String
     JsonEscapar = Left$(buffer, posicion - 1)
 End Function
 
-' El id que Firestore le da al documento reciÃ©n creado (va al final de "name").
+' El id que Firestore le da al documento recién creado (va al final de "name").
 Private Function IdDePeticion(ByVal respuesta As String) As String
     Dim p As Long
     Dim q As Long
@@ -821,7 +1201,7 @@ Private Function MensajeDeErrorJson(ByVal json As String) As String
     MensajeDeErrorJson = LeerCadenaJson(json, p + 1)
 End Function
 
-' Lee una cadena JSON desde `inicio` (justo despuÃ©s de la comilla que abre) hasta la comilla que cierra, deshaciendo los escapes.
+' Lee una cadena JSON desde `inicio` (justo después de la comilla que abre) hasta la comilla que cierra, deshaciendo los escapes.
 Private Function LeerCadenaJson(ByVal json As String, ByVal inicio As Long) As String
     Dim i As Long
     Dim c As String
@@ -851,7 +1231,7 @@ Private Function LeerCadenaJson(ByVal json As String, ByVal inicio As Long) As S
     LeerCadenaJson = resultado
 End Function
 
-' El nÃºmero que escriben cuatro cifras hexadecimales (\uXXXX), listo para ChrW$ (que espera de -32768 a 32767).
+' El número que escriben cuatro cifras hexadecimales (\uXXXX), listo para ChrW$ (que espera de -32768 a 32767).
 Private Function CodigoHexadecimal(ByVal cifras As String) As Long
     Dim i As Long
     Dim digito As Long
