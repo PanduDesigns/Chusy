@@ -35,9 +35,28 @@ import {
   OFFER_FIRST_VERSION,
 } from "./offers.js";
 
+/**
+ * El correo tal como se compara con `targetEmail` (v80): sin espacios y en
+ * minúsculas. La macro manda el suyo con LCase$ y las reglas de Firestore
+ * comparan con el de la sesión en minúsculas, así que la consulta del listener
+ * y cualquier comparación en JS tienen que pasar SIEMPRE por aquí: una letra
+ * mayúscula en el correo de la cuenta dejaba la petición sin ver.
+ */
+export function normalizeEmail(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+/**
+ * El correo con el que escuchar el buzón: el de la sesión de Firebase Auth si
+ * lo hay (es el que miran las reglas de Firestore) y, si no, el del perfil.
+ */
+export function outlookEmailFor(user, authEmail) {
+  return normalizeEmail(authEmail) || normalizeEmail(user && user.email);
+}
+
 /** Tope de caracteres del texto del correo (las reglas de Firestore exigen lo mismo — ver `offerInbox` en firestore.rules). */
 export const OUTLOOK_DESCRIPTION_MAX = 100000;
-/** Tope del nombre de la oferta (mismo límite en las reglas). */
+/** Tope del nombre de la oferta que se crea (las reglas de Firestore admiten hasta 1000 en la petición; aquí se recorta a 300, como la macro). */
 export const OUTLOOK_NAME_MAX = 300;
 
 /**

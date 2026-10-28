@@ -107,6 +107,7 @@ import { createOpenLocationButton } from "./open-location.js";
 import { localFolderName } from "../location.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
+import { wireTitleField } from "./title-field.js";
 import { driveService, renameDriveFolder } from "../drive-service.js";
 import { rememberProjectDriveFolder } from "../data/projects.js";
 import { isDriveAttachment } from "../drive-files.js";
@@ -189,6 +190,7 @@ export function openTaskModal({
   let comments = [];
   let unsubComments = null;
   let descriptionEditor = null;
+  let titleField = null; // v80: textarea de título que crece (title-field.js)
   // Histórico de revisiones (v56, solo tareas de Ofertas). Igual que el
   // resto del formulario, vive aquí hasta pulsar "Aceptar"; no forma parte
   // de `draft` porque solo se guarda cuando la tarea ES una oferta (ver
@@ -296,6 +298,7 @@ export function openTaskModal({
   }
 
   function close(skipCallback) {
+    if (titleField) { titleField.destroy(); titleField = null; }
     if (unsubComments) unsubComments();
     if (descriptionEditor) descriptionEditor.destroy();
     if (fileUi) {
@@ -323,14 +326,16 @@ export function openTaskModal({
   function buildForm() {
     overlay.innerHTML = `
       <div class="modal">
-        <div class="modal__header">
+        <div class="modal__head">
+        <div class="modal__header modal__header--multiline">
           <button class="task-row__check${draft.isComplete ? " is-checked" : ""}" id="t-complete" title="Marcar como completada" style="width:22px;height:22px;">${draft.isComplete ? "✓" : ""}</button>
-          <input class="modal__title-input" id="t-title" value="${escapeHtml(draft.title)}" placeholder="Título de la ${offersProject() ? "oferta" : "tarea"}">
+          <textarea class="modal__title-input" id="t-title" rows="1" spellcheck="true" aria-label="Título" placeholder="Título de la ${offersProject() ? "oferta" : "tarea"}">${escapeHtml(draft.title)}</textarea>
           <button type="button" class="modal__title-bold-btn" id="t-title-bold" title="Negrita: selecciona texto del título y pulsa (o Ctrl/Cmd+B)">B</button>
           <span id="t-code-slot"></span>
           <button class="modal__close" id="t-close">✕</button>
         </div>
         <div class="modal__title-preview" id="t-title-preview"></div>
+        </div>
         <div class="modal__body">
 
           <div class="field">
@@ -453,9 +458,8 @@ export function openTaskModal({
 
   /**
    * Vista previa de la negrita del título, justo debajo de la cabecera —
-   * el campo en sí es un `<input>` normal (no un editor de texto
-   * enriquecido: no hace falta para solo negrita, y así se comporta como
-   * cualquier campo de texto — Enter, pegar, móvil...) y no puede mostrar
+   * el campo en sí es un `<textarea>` de título (title-field.js; no un
+   * editor de texto enriquecido: no hace falta para solo negrita) y no puede mostrar
    * parte de su propio valor en negrita, así que esta línea es la única
    * forma de ver el resultado mientras se escribe. Solo aparece si el
    * título tiene alguna marca `**` — en el caso normal, sin negrita, no
@@ -500,6 +504,7 @@ export function openTaskModal({
     draft.title = input.value;
     markDirty();
     renderTitlePreview();
+    if (titleField) titleField.resize();
   }
 
   function priorityChipsHtml() {
@@ -1080,10 +1085,15 @@ export function openTaskModal({
     });
 
     const titleInput = overlay.querySelector("#t-title");
-    titleInput.addEventListener("input", (e) => { draft.title = e.target.value; markDirty(); renderTitlePreview(); });
-    titleInput.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") { e.preventDefault(); toggleTitleBold(); }
+    // v80: textarea que crece con el título; Enter sale del campo; pegar quita los saltos de línea.
+    if (titleField) titleField.destroy();
+    titleField = wireTitleField(titleInput, {
+      onInput: (value) => { draft.title = value; markDirty(); renderTitlePreview(); },
+      onBold: () => toggleTitleBold(),
     });
+    // Ya en pantalla (el ancho real solo se conoce ahora) y cuando acaban de cargar las fuentes.
+    requestAnimationFrame(() => titleField && titleField.resize());
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => titleField && titleField.resize()).catch(() => {});
     const titleBoldBtn = overlay.querySelector("#t-title-bold");
     // mousedown (no click) + preventDefault: así el foco nunca sale del
     // campo de título al pulsar este botón, y la selección de texto que

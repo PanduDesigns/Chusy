@@ -10,6 +10,7 @@
 //                       administrador la ve (reglas de Firestore)
 // ============================================================================
 import { db } from "../firebase-init.js";
+import { normalizeEmail } from "../outlook-offer.js";
 import {
   collection,
   doc,
@@ -37,7 +38,7 @@ const BRIDGE_DOC = ["meta", "outlookBridge"];
  * Devuelve la función para dejar de escuchar.
  */
 export function subscribeToOutlookRequests(email, callback, onError) {
-  const q = query(collection(db, INBOX), where("targetEmail", "==", String(email || "").trim().toLowerCase()));
+  const q = query(collection(db, INBOX), where("targetEmail", "==", normalizeEmail(email)));
   let isFirst = true;
   return onSnapshot(
     q,

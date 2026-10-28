@@ -25,6 +25,17 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 80,
+    date: "2026-10-27",
+    title: "Títulos largos más cómodos y arreglos de Outlook y del calendario",
+    items: [
+      "El título de una tarea u oferta ahora se ve entero, en varias líneas si es largo, y puedes pinchar directamente en cualquier palabra para corregirla. Enter sale del campo (no parte la línea) y al pegar texto los saltos de línea pasan a espacios.",
+      "La «Vista previa» del título en negrita ya no queda tachada por la línea de la cabecera.",
+      "Calendario laboral: las listas de festivos y de vacaciones y ausencias tienen barra de desplazamiento, con el año y el formulario de añadir siempre a la vista. Los festivos oficiales de los años sin decreto cargado se calculan por año (Jueves y Viernes Santo, Corpus Christi, Día de Castilla-La Mancha, San Juan Bautista y Virgen de Los Llanos).",
+      "La oferta que se crea desde la macro de Outlook llega mejor a Chusy: se reconoce tu correo aunque lleve mayúsculas y un fallo con una petición ya no detiene la escucha de las siguientes.",
+    ],
+  },
+  {
     id: 79,
     date: "2026-10-26",
     title: "Plazos en días laborables y carga del equipo",

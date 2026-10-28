@@ -460,7 +460,8 @@ export function describeIssue(issue, nameOf) {
 
 /**
  * Domingo de Pascua (algoritmo de Meeus/Jones/Butcher, calendario gregoriano):
- * de él salen Jueves Santo (−3), Viernes Santo (−2) y Lunes de Pascua (+1).
+ * de él salen Jueves Santo (−3), Viernes Santo (−2), Lunes de Pascua (+1) y
+ * Corpus Christi (+60, siempre jueves).
  */
 export function easterSunday(year) {
   const a = year % 19, b = Math.floor(year / 100), c = year % 100;
@@ -473,28 +474,40 @@ export function easterSunday(year) {
   return new Date(year, month - 1, day);
 }
 
+/** Corpus Christi: el jueves 60 días después del Domingo de Resurrección (4 de junio en 2026). */
+export function corpusChristi(year) {
+  return stepDay(easterSunday(year), 60);
+}
+
 /**
  * Festivos OFICIALES tal como los publican los decretos —no se calculan—:
  * calendario laboral de Castilla-La Mancha de 2026 (Decreto 44/2025, DOCM de
  * 26/06/2025) y de 2027 (Decreto 34/2026, DOCM de 13/07/2026), con los
  * festivos locales de Albacete capital (24 de junio, San Juan, y 8 de
- * septiembre, Virgen de los Llanos). Los locales de 2027 todavía no estaban
+ * septiembre, Virgen de Los Llanos). Los locales de 2027 todavía no estaban
  * publicados en boletín cuando se escribió esto: son las fechas de siempre y
  * llevan «(por confirmar)». «scope»: n = nacional, a = autonómico, l = local.
+ *
+ * v80 — el Lunes de Pascua de 2026 (06/04) SE QUEDA: el Decreto 44/2025 lo
+ * declara festivo en Castilla-La Mancha (sustituye al 19 de marzo, San José),
+ * igual que el Corpus Christi del 4 de junio (sustituye al 6 de diciembre, que
+ * cae en domingo) y el 2 de noviembre (sustituye al 1). Por la misma razón en
+ * 2026 NO hay 31/05 (Día de Castilla-La Mancha, domingo) ni 07/12. Quien lo
+ * necesite distinto (convenio propio) lo borra desde el modal.
  */
 const OFFICIAL = {
   2026: [
     ["01-01", "Año Nuevo", "n"], ["01-06", "Epifanía del Señor", "n"], ["04-02", "Jueves Santo", "a"],
     ["04-03", "Viernes Santo", "n"], ["04-06", "Lunes de Pascua", "a"], ["05-01", "Fiesta del Trabajo", "n"],
-    ["06-04", "Corpus Christi", "a"], ["06-24", "San Juan", "l"], ["08-15", "Asunción de la Virgen", "n"],
-    ["09-08", "Virgen de los Llanos (Feria)", "l"], ["10-12", "Fiesta Nacional de España", "n"],
+    ["06-04", "Corpus Christi", "a"], ["06-24", "San Juan Bautista", "l"], ["08-15", "Asunción de la Virgen", "n"],
+    ["09-08", "Virgen de Los Llanos", "l"], ["10-12", "Fiesta Nacional de España", "n"],
     ["11-02", "Todos los Santos (trasladado)", "a"], ["12-08", "Inmaculada Concepción", "n"], ["12-25", "Navidad", "n"],
   ],
   2027: [
     ["01-01", "Año Nuevo", "n"], ["01-06", "Epifanía del Señor", "n"], ["03-25", "Jueves Santo", "a"],
     ["03-26", "Viernes Santo", "n"], ["05-01", "Fiesta del Trabajo", "n"], ["05-27", "Corpus Christi", "a"],
-    ["05-31", "Día de Castilla-La Mancha", "a"], ["06-24", "San Juan (por confirmar)", "l"],
-    ["09-08", "Virgen de los Llanos (Feria) (por confirmar)", "l"], ["10-12", "Fiesta Nacional de España", "n"],
+    ["05-31", "Día de Castilla-La Mancha", "a"], ["06-24", "San Juan Bautista (por confirmar)", "l"],
+    ["09-08", "Virgen de Los Llanos (por confirmar)", "l"], ["10-12", "Fiesta Nacional de España", "n"],
     ["11-01", "Todos los Santos", "n"], ["12-06", "Día de la Constitución", "n"], ["12-08", "Inmaculada Concepción", "n"],
     ["12-25", "Navidad", "n"],
   ],
@@ -513,26 +526,50 @@ export function seedYears(now = new Date()) {
 }
 
 /**
+ * ESTIMACIÓN para un año sin decreto cargado (v80: dinámica por año), marcada
+ * «(estimado)». Nacionales: Año Nuevo, Epifanía, Viernes Santo (Pascua −2),
+ * Fiesta del Trabajo, Asunción, Fiesta Nacional, Todos los Santos (01/11, o
+ * 02/11 si cae en domingo), Constitución (06/12, o 07/12 si cae en domingo),
+ * Inmaculada y Navidad. Castilla-La Mancha: Jueves Santo (Pascua −3), Corpus
+ * Christi (Pascua +60) y Día de Castilla-La Mancha (31/05). Albacete: San Juan
+ * Bautista (24/06) y Virgen de Los Llanos (08/09). NO lleva Lunes de Pascua:
+ * solo es festivo en los años en que el decreto de Castilla-La Mancha lo
+ * elige (como en 2026, que va en la tabla oficial).
+ */
+export function estimatedHolidays(year) {
+  const isSunday = (m, d) => new Date(year, m - 1, d).getDay() === 0;
+  const mk = (mmdd, name, scope) => ({ date: `${year}-${mmdd}`, name: `${name} (estimado)`, scope });
+  const fromEaster = (n, name, scope) => ({ date: dateKey(stepDay(easterSunday(year), n)), name: `${name} (estimado)`, scope });
+  // Algún año (2029) el Corpus Christi cae el propio 31/05: un solo festivo con los dos nombres.
+  const corpusIs31May = dateKey(corpusChristi(year)) === `${year}-05-31`;
+  return [
+    mk("01-01", "Año Nuevo", "nacional"),
+    mk("01-06", "Epifanía del Señor", "nacional"),
+    fromEaster(-3, "Jueves Santo", "autonomico"),
+    fromEaster(-2, "Viernes Santo", "nacional"),
+    mk("05-01", "Fiesta del Trabajo", "nacional"),
+    fromEaster(60, corpusIs31May ? "Corpus Christi y Día de Castilla-La Mancha" : "Corpus Christi", "autonomico"),
+    ...(corpusIs31May ? [] : [mk("05-31", "Día de Castilla-La Mancha", "autonomico")]),
+    mk("06-24", "San Juan Bautista", "local"),
+    mk("08-15", "Asunción de la Virgen", "nacional"),
+    mk("09-08", "Virgen de Los Llanos", "local"),
+    mk("10-12", "Fiesta Nacional de España", "nacional"),
+    isSunday(11, 1) ? mk("11-02", "Todos los Santos (trasladado)", "autonomico") : mk("11-01", "Todos los Santos", "nacional"),
+    isSunday(12, 6) ? mk("12-07", "Día de la Constitución (trasladado)", "autonomico") : mk("12-06", "Día de la Constitución", "nacional"),
+    mk("12-08", "Inmaculada Concepción", "nacional"),
+    mk("12-25", "Navidad", "nacional"),
+  ];
+}
+
+/**
  * Festivos oficiales de un año: los del decreto si lo tenemos (2026 y 2027) y,
- * para cualquier otro, una ESTIMACIÓN con los festivos de todos los años
- * (nacionales sin trasladar, Jueves y Viernes Santo, San Juan y la Virgen de
- * los Llanos) marcada «(estimado)»: cada año Castilla-La Mancha publica su
- * decreto con traslados y festivos propios —ahí hay que revisar a mano—.
+ * para cualquier otro, la estimación de `estimatedHolidays` (cada año
+ * Castilla-La Mancha publica su decreto con traslados y festivos propios —ahí
+ * hay que revisar a mano—).
  */
 export function officialHolidays(year) {
-  const mk = (mmdd, name, scope) => ({ date: `${year}-${mmdd}`, name, scope });
-  if (OFFICIAL[year]) return OFFICIAL[year].map(([mmdd, name, s]) => mk(mmdd, name, SCOPE_OF[s]));
-  const easter = easterSunday(year);
-  const fromEaster = (n, name, scope) => ({ date: dateKey(stepDay(easter, n)), name: `${name} (estimado)`, scope });
-  return [
-    mk("01-01", "Año Nuevo (estimado)", "nacional"), mk("01-06", "Epifanía del Señor (estimado)", "nacional"),
-    fromEaster(-3, "Jueves Santo", "autonomico"), fromEaster(-2, "Viernes Santo", "nacional"),
-    mk("05-01", "Fiesta del Trabajo (estimado)", "nacional"), mk("06-24", "San Juan (estimado)", "local"),
-    mk("08-15", "Asunción de la Virgen (estimado)", "nacional"), mk("09-08", "Virgen de los Llanos (Feria) (estimado)", "local"),
-    mk("10-12", "Fiesta Nacional de España (estimado)", "nacional"), mk("11-01", "Todos los Santos (estimado)", "nacional"),
-    mk("12-06", "Día de la Constitución (estimado)", "nacional"), mk("12-08", "Inmaculada Concepción (estimado)", "nacional"),
-    mk("12-25", "Navidad (estimado)", "nacional"),
-  ];
+  if (OFFICIAL[year]) return OFFICIAL[year].map(([mmdd, name, s]) => ({ date: `${year}-${mmdd}`, name, scope: SCOPE_OF[s] }));
+  return estimatedHolidays(year);
 }
 
 /** Semilla para el año en curso y el siguiente (lista para `mergeHolidays`). */

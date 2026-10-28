@@ -25,7 +25,7 @@ import {
 } from "./data/outlook-inbox.js";
 import { getOffersProject, isProjectVisibleToUser } from "./data/projects.js";
 import { createTask } from "./data/tasks.js";
-import { planOfferFromRequest } from "./outlook-offer.js";
+import { planOfferFromRequest, outlookEmailFor } from "./outlook-offer.js";
 import { defaultSectorOf } from "./departments.js";
 import { showToast, uid } from "./utils.js";
 
@@ -57,8 +57,10 @@ let context = null;
  * una petición que acabara de llegar — pero sí se guarda el perfil más
  * reciente para las siguientes (ver `context`).
  */
-export function startOutlookListener({ user, getCommercialOptions }) {
-  const email = String((user && user.email) || "").trim().toLowerCase();
+export function startOutlookListener({ user, getCommercialOptions, authEmail }) {
+  // v80: el correo de la sesión de Firebase Auth manda (es el que comparan las
+  // reglas), y siempre normalizado: minúsculas y sin espacios.
+  const email = outlookEmailFor(user, authEmail);
   if (!email) return;
   const identity = `${user.uid}|${email}`;
   if (stopListening && listeningFor === identity) {
@@ -75,9 +77,15 @@ export function startOutlookListener({ user, getCommercialOptions }) {
       all.forEach((request) => setTimeout(() => deleteOutlookRequest(request.id), CLEANUP_DELAY_MS));
       return;
     }
+    // v80: una petición que falle (aunque sea de una forma que handleOutlookRequest
+    // no preveía) no puede parar la escucha ni dejar un rechazo sin atender.
     added
       .filter((request) => request.status === "pending")
-      .forEach((request) => handleOutlookRequest(request, context));
+      .forEach((request) => {
+        Promise.resolve()
+          .then(() => handleOutlookRequest(request, context))
+          .catch((err) => console.error("startOutlookListener:", err));
+      });
   });
 }
 
@@ -94,7 +102,11 @@ export async function handleOutlookRequest(request, { user, getCommercialOptions
 
   const fail = async (message) => {
     await finishOutlookRequest(request.id, { status: "error", message });
-    showToast(`Outlook: ${message}`, "error");
+    try {
+      showToast(`Outlook: ${message}`, "error");
+    } catch (err) {
+      console.error("handleOutlookRequest (aviso):", err);
+    }
   };
 
   try {
@@ -114,6 +126,9 @@ export async function handleOutlookRequest(request, { user, getCommercialOptions
     });
     if (!plan.ok) return await fail(plan.message);
 
+    // createTask asigna el ID XXXYY de la oferta (una transacción sobre el
+    // contador del año): si esa asignación falla, lanza, y se cae al catch de
+    // abajo — la petición queda en «error» y la escucha sigue.
     const taskId = await createTask(offers.id, plan.data);
     await finishOutlookRequest(request.id, {
       status: "created",
@@ -121,17 +136,26 @@ export async function handleOutlookRequest(request, { user, getCommercialOptions
       finalName: plan.finalName,
       message: plan.renamed ? "Ya existía una oferta con ese nombre: se le ha añadido la fecha." : "",
     });
-    showToast(
-      plan.renamed
-        ? `Oferta «${plan.finalName}» creada desde Outlook (ya existía una con ese nombre: se ha añadido la fecha).`
-        : `Oferta «${plan.finalName}» creada desde Outlook.`
-    );
+    try {
+      showToast(
+        plan.renamed
+          ? `Oferta «${plan.finalName}» creada desde Outlook (ya existía una con ese nombre: se ha añadido la fecha).`
+          : `Oferta «${plan.finalName}» creada desde Outlook.`
+      );
+    } catch (err) {
+      console.error("handleOutlookRequest (aviso):", err);
+    }
   } catch (err) {
     console.error("handleOutlookRequest:", err);
-    await fail("no se pudo crear la oferta. Créala a mano o inténtalo de nuevo.");
+    try {
+      await fail("no se pudo crear la oferta. Créala a mano o inténtalo de nuevo.");
+    } catch (err2) {
+      console.error("handleOutlookRequest (fail):", err2);
+    }
   } finally {
     // La macro suele borrarla nada más leer el resultado; esto es el seguro
     // por si se cerró Outlook antes (la petición lleva el texto del correo).
+    // Se borra también cuando acabó en error: lleva el texto de un correo.
     setTimeout(() => deleteOutlookRequest(request.id), CLEANUP_DELAY_MS);
   }
 }

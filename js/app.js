@@ -3,6 +3,7 @@
 // proyecto/vista, y conecta los componentes con los datos de Firestore.
 // ============================================================================
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
+import { auth } from "./firebase-init.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
 import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
@@ -395,7 +396,7 @@ function bootstrap() {
   // v61: mientras Chusy esté abierto con la sesión iniciada, atiende las
   // ofertas que deje la macro de Outlook (idempotente: bootstrap() se repite
   // con cada cambio del perfil y la escucha no se reinicia — ver outlook-listener.js).
-  startOutlookListener({ user: currentUser, getCommercialOptions });
+  startOutlookListener({ user: currentUser, getCommercialOptions, authEmail: auth.currentUser && auth.currentUser.email });
   notifBellEl.hidden = false;
 
   // v66: bootstrap() se repite con cada cambio del perfil (cambiar el ancho u
