@@ -36,6 +36,16 @@ export function updateUserDepartment(uid, department) {
   return updateDoc(doc(db, "users", uid), { department: department || null });
 }
 
+/**
+ * Solo administradores (lo exigen las reglas de Firestore, igual que el rol y el
+ * departamento): marca o desmarca a alguien como Responsable de su departamento
+ * (v81, ver `isDepartmentHead` en ../departments.js). Ver la carga de trabajo por
+ * persona de su departamento es lo que le da.
+ */
+export function updateUserDepartmentHead(uid, isHead) {
+  return updateDoc(doc(db, "users", uid), { isDepartmentHead: !!isHead });
+}
+
 /** Configuración del equipo: por ahora, los dominios de correo permitidos al registrarse. */
 export async function getTeamConfig() {
   const snap = await getDoc(doc(db, "meta", "config"));

@@ -62,8 +62,9 @@ rules_version = '2';
 //    cambia; borrarla apaga la conexión.
 //  - meta/projectCounter y meta/projectCounter-27, -28…: `{next}` — los contadores
 //    de los que sale el número de orden del ID de cada oferta y proyecto (v70,
-//    XXXYY, apartado 3.14 del README): uno por año, porque el número se reinicia
-//    cada año (el de 2026 es `projectCounter`; los siguientes se crean solos).
+//    XXXYY hasta la v81, YYXXX desde la v82; apartado 3.14 del README): uno por año,
+//    porque el número se reinicia cada año (el de 2026 es `projectCounter`; los
+//    siguientes se crean solos). El de 2026 puede llevar además `formatVersion`.
 //    Los lee y los sube cualquier cuenta activa (quien crea una oferta o un
 //    proyecto reparte el siguiente número, en una transacción), pero SOLO de uno
 //    en uno: nada puede rebobinarlos —repetiría un ID— y nadie los borra.
@@ -173,10 +174,14 @@ service cloud.firestore {
         ((request.auth.uid == userId &&
           (request.resource.data.role == 'miembro' ||
            (request.resource.data.role == 'admin' &&
-            !exists(/databases/$(database)/documents/meta/bootstrap)))) ||
+            !exists(/databases/$(database)/documents/meta/bootstrap))) &&
+          request.resource.data.get('isDepartmentHead', false) == false) ||
          (isAdmin() &&
           request.resource.data.role == 'miembro' &&
           request.resource.data.isImported == true));
+      // v81: `isDepartmentHead` (Responsable de departamento, ver departments.js)
+      // se protege igual que el departamento: ni al crear la propia cuenta (solo
+      // `false`/ausente) ni al actualizarla (no se puede cambiar) — solo un admin.
       // El rol, el departamento (v55) y `deleted` de un documento AJENO
       // solo los toca un admin (cubre "Administrar equipo", "Eliminar
       // usuario"/"Reactivar" y, desde la v55, el selector de departamento
@@ -192,7 +197,8 @@ service cloud.firestore {
         (isActiveUser() && request.auth.uid == userId &&
          request.resource.data.role == resource.data.role &&
          request.resource.data.get('deleted', false) == resource.data.get('deleted', false) &&
-         request.resource.data.get('department', null) == resource.data.get('department', null));
+         request.resource.data.get('department', null) == resource.data.get('department', null) &&
+         request.resource.data.get('isDepartmentHead', false) == resource.data.get('isDepartmentHead', false));
       allow delete: if isAdmin();
     }
 
@@ -252,14 +258,28 @@ service cloud.firestore {
     // activa puede crearlo (solo con valor 1, la primera vez) y subirlo, pero
     // únicamente de uno en uno — ni saltos ni marcha atrás: un contador que baja
     // repite IDs. ----
+    // v82: el documento puede llevar además `formatVersion: 'YYXXX'`, la marca de que la migración de IDs
+    // XXXYY → YYXXX ya se hizo (js/data/project-codes.js, migrateLegacyCodesToYYXXX). Solo un admin la pone
+    // (sin mover el contador) y nadie más puede quitarla ni cambiarla: el reparto normal de IDs sube `next`
+    // de uno en uno y deja la marca como estaba.
     match /meta/projectCounter {
       allow read: if isActiveUser();
       allow create: if isActiveUser() &&
         request.resource.data.keys().hasOnly(['next']) &&
         request.resource.data.next == 1;
+      // Un admin que entra con la v82 y encuentra que el contador de 2026 aún no existe (no hay IDs que migrar):
+      // lo crea ya marcado, con `next: 0` (el primer ID repartido será el número 000, como siempre).
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasOnly(['next', 'formatVersion']) &&
+        request.resource.data.next == 0 &&
+        request.resource.data.formatVersion == 'YYXXX';
       allow update: if isActiveUser() &&
-        request.resource.data.keys().hasOnly(['next']) &&
-        request.resource.data.next == resource.data.next + 1;
+        request.resource.data.keys().hasOnly(['next', 'formatVersion']) &&
+        ((request.resource.data.next == resource.data.next + 1 &&
+          request.resource.data.get('formatVersion', null) == resource.data.get('formatVersion', null)) ||
+         (isAdmin() &&
+          request.resource.data.next == resource.data.next &&
+          request.resource.data.formatVersion == 'YYXXX'));
       allow delete: if false;
     }
 
@@ -465,14 +485,18 @@ service cloud.firestore {
     //    borrar el original, el batch entero falla y no se crea ninguna copia.
     //  - Borrar (eliminar para siempre, vaciar, restaurar): quien la eliminó o
     //    un admin. La purga de lo caducado la hace un admin (purgeExpiredTrash).
-    //  - No se edita nunca.
+    //  - No se edita nunca (v82: salvo la migración de IDs, solo admin; ver la regla).
     match /trash/{trashId} {
       allow read: if isActiveUser() && (resource.data.deletedBy == request.auth.uid || isAdmin());
       allow create: if isActiveUser() &&
         request.resource.data.deletedBy == request.auth.uid &&
         request.resource.data.kind in ["task", "project"];
       allow delete: if isActiveUser() && (resource.data.deletedBy == request.auth.uid || isAdmin());
-      allow update: if false;
+      // v82: una copia de la Papelera no se edita nunca... salvo que un ADMIN la ponga al día con la migración
+      // de IDs XXXYY → YYXXX (js/data/project-codes.js): solo puede cambiar la copia de la tarea o del
+      // proyecto (`task` / `project`) y el título (`title`), nada de quién la eliminó, cuándo ni qué era.
+      allow update: if isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['task', 'project', 'title']);
     }
   }
 }

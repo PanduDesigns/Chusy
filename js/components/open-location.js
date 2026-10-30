@@ -15,7 +15,7 @@
 //     sale ningún aviso.
 // ============================================================================
 import { showToast } from "../utils.js";
-import { normalizeLocation, hasLocation, protocolUrl, locationHasCode, OPEN_LOCATION_LABEL } from "../location.js";
+import { normalizeLocation, hasLocation, protocolUrl, locationHasCode, OPEN_LOCATION_LABEL, getRememberedRoot, setRememberedRoot, rememberRootFromLocation, suggestedLocation } from "../location.js";
 
 /** Cuánto se espera a ver si el navegador pierde el foco (señal de que el ayudante abrió el Explorador). */
 const LAUNCH_WAIT_MS = 1200;
@@ -146,6 +146,9 @@ export async function openLocation(raw, button = null) {
     return "web";
   }
 
+  // v81: la carpeta PADRE de lo que se abre queda como ruta raíz deducida (ver getRememberedRoot en location.js).
+  rememberRootFromLocation(location.value);
+
   // Carpeta. Todo lo que necesita el gesto del usuario (copiar, lanzar el
   // protocolo) se hace aquí, ANTES del primer `await`.
   setBusy(button, true);
@@ -199,4 +202,62 @@ export function createOpenLocationButton({ getValue, getCode = null, compact = f
   button.addEventListener("click", () => { openLocation(getValue(), button); });
   refresh();
   return { el: button, refresh };
+}
+
+/**
+ * v81 · «Asignar carpeta sugerida: RutaRaíz\\YYXXX - Nombre» (junto al botón Abrir Ubicación). Solo se enseña con la
+ * casilla `input` VACÍA, con ID (`getCode()`) y nombre (`getName()`) y con una ruta raíz recordada en este navegador
+ * (la escrita con «Definir ruta raíz…» o la carpeta padre de la última ubicación usada: ver location.js). Un clic
+ * rellena la casilla (con los eventos `input` y `change`, como si se hubiera escrito: cada formulario la guarda como
+ * siempre). Sin ruta raíz, y con ID, ofrece «📁 Definir ruta raíz…». Quien lo monta llama a `refresh()` cuando cambie
+ * el nombre o el ID (la casilla ya se vigila sola).
+ */
+export function createSuggestLocationControls({ input, getCode, getName }) {
+  const wrap = document.createElement("span");
+  wrap.className = "suggest-location";
+  const assign = document.createElement("button");
+  assign.type = "button";
+  assign.className = "btn btn--ghost btn--sm suggest-location__assign";
+  const rootBtn = document.createElement("button");
+  rootBtn.type = "button";
+  rootBtn.className = "btn btn--ghost btn--sm suggest-location__root";
+  wrap.append(assign, rootBtn);
+
+  let suggestion = "";
+  function refresh() {
+    const code = String(getCode() || "").trim();
+    const empty = !String(input.value || "").trim();
+    const root = getRememberedRoot();
+    suggestion = empty && code ? suggestedLocation(root, code, getName()) : "";
+    assign.hidden = !suggestion;
+    assign.textContent = suggestion ? `Asignar carpeta sugerida: ${suggestion}` : "";
+    assign.title = suggestion ? `Rellenar la ubicación con:\n${suggestion}\n(La carpeta no se crea aquí: si no existe, el ayudante de Windows ofrece crearla al abrirla.)` : "";
+    rootBtn.hidden = !(empty && code);
+    rootBtn.textContent = root ? "⚙" : "📁 Definir ruta raíz…";
+    rootBtn.title = root ? `Ruta raíz de proyectos/ofertas: ${root}\nPulsa para cambiarla.` : "Escribe una vez la carpeta donde guardas proyectos/ofertas para poder asignar la carpeta sugerida con un clic.";
+    wrap.hidden = assign.hidden && rootBtn.hidden;
+  }
+
+  assign.addEventListener("click", () => {
+    if (!suggestion) return;
+    input.value = suggestion;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    refresh();
+  });
+  rootBtn.addEventListener("click", () => {
+    const answer = window.prompt(
+      "Ruta raíz de proyectos/ofertas en este ordenador (por ejemplo Z:\\Proyectos o \\\\Servidor\\Compartido\\Ofertas).\nDéjala vacía para borrar la que hay:",
+      getRememberedRoot()
+    );
+    if (answer === null) return;
+    const saved = setRememberedRoot(answer);
+    if (String(answer).trim() && !saved) showToast("Eso no parece una ruta de carpeta (Z:\\… o \\\\servidor\\…).", "error");
+    else showToast(saved ? "Ruta raíz guardada en este navegador." : "Ruta raíz borrada.");
+    refresh();
+  });
+  input.addEventListener("input", refresh);
+  input.addEventListener("change", () => { rememberRootFromLocation(input.value); refresh(); });
+  refresh();
+  return { el: wrap, refresh };
 }

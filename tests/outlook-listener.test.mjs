@@ -1,5 +1,5 @@
 // Buzón de Outlook (v80) — el listener real (js/outlook-listener.js) con un Firestore controlado desde la prueba
-// (ganchos de tests/support/hooks.mjs): el correo con el que escucha, y que NINGÚN fallo (asignar el ID XXXYY,
+// (ganchos de tests/support/hooks.mjs): el correo con el que escucha, y que NINGÚN fallo (asignar el ID YYXXX,
 // escribir el resultado…) detenga la escucha ni deje una petición sin borrar.
 import { check, eq, done } from "./support/assert.mjs";
 import { setupDom, tick } from "./support/dom.mjs";
@@ -90,11 +90,11 @@ const arrive = async (id) => { currentId = id; send(observers.inbox, snapOf([req
 send(observers.inbox, snapOf([])); // primera instantánea: lo que ya hubiera (nada)
 await tick(5);
 
-// 1) Falla la asignación del ID XXXYY: la petición se marca «error» y la escucha sigue.
+// 1) Falla la asignación del ID YYXXX: la petición se marca «error» y la escucha sigue.
 state.failCounterFor.add("r1");
 await arrive("r1");
 const r1 = log.updates.find((u) => u.id === "r1");
-check("r1: el fallo del contador XXXYY deja la petición en «error» con un mensaje", r1 && r1.fields.status === "error" && /no se pudo crear/.test(r1.fields.message), r1);
+check("r1: el fallo del contador YYXXX deja la petición en «error» con un mensaje", r1 && r1.fields.status === "error" && /no se pudo crear/.test(r1.fields.message), r1);
 check("r1: no se creó ninguna oferta (no hay «created»)", !log.updates.some((u) => u.id === "r1" && u.fields.status === "created"));
 
 // 2) La siguiente petición se atiende con normalidad: el listener no se paró.

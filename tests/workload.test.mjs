@@ -1,8 +1,9 @@
 // Carga por persona (v79) — lógica pura de js/workload.js: quién se ve (departamentos), cómo se cuenta
 // la carga por día, saturación, entregas simultáneas, entregas en ausencia y resumen por columna.
 import { check, eq, done } from "./support/assert.mjs";
-import { workloadWorkers, personWorkload, columnSummary, loadLevel, taskDayRange, describeStats, describeAbsence, OVERLOAD_THRESHOLD } from "../js/workload.js";
+import { workloadWorkers, resolveTimelineGroupBy, personWorkload, columnSummary, loadLevel, taskDayRange, describeStats, describeAbsence, OVERLOAD_THRESHOLD } from "../js/workload.js";
 import { normalizeWorkCalendar } from "../js/work-calendar.js";
+import { canViewWorkload, isDepartmentHead } from "../js/departments.js";
 
 const D = (k) => new Date(k + "T12:00:00");
 // Noviembre de 2026: lun 2, mar 3, mié 4, jue 5, vie 6, sáb 7, dom 8, lun 9, mar 10, mié 11, jue 12, vie 13.
@@ -25,8 +26,8 @@ eq("sin fechas → null", taskDayRange(t("x", null, null)), null);
 // ---------------------------------------------------------------- quién se ve
 const members = [
   { uid: "admin", name: "Admin", role: "admin" },
-  { uid: "ana", name: "Ana", role: "member", department: "tecnicos" },
-  { uid: "bea", name: "Bea", role: "member", department: "diseno-industria" },
+  { uid: "ana", name: "Ana", role: "member", department: "tecnicos", isDepartmentHead: true }, // v81: Responsable de Técnicos
+  { uid: "bea", name: "Bea", role: "member", department: "diseno-industria", isDepartmentHead: true }, // Responsable de Diseño
   { uid: "carlos", name: "Carlos", role: "member", department: "diseno-automocion" },
   { uid: "luis", name: "Luis", role: "member", department: "produccion" },
   { uid: "zoe", name: "Zoe", role: "member" },
@@ -40,11 +41,30 @@ eq("admin filtra por Técnicos", names(byUid("admin"), "tecnicos"), ["Ana"]);
 eq("admin filtra por el grupo Diseño → los dos Diseño", names(byUid("admin"), "diseno"), ["Bea", "Carlos"]);
 eq("admin filtra por un Diseño concreto", names(byUid("admin"), "diseno-automocion"), ["Carlos"]);
 eq("admin filtra por «sin departamento»", names(byUid("admin"), "none"), ["Admin", "Zoe"]);
-eq("un técnico solo ve a Técnicos", names(byUid("ana")), ["Ana"]);
-eq("un técnico no puede ampliar su alcance con el filtro", names(byUid("ana"), ""), ["Ana"]);
-eq("Diseño - Industria ve también a Diseño - Automoción (mismo grupo)", names(byUid("bea")), ["Bea", "Carlos"]);
-eq("sin departamento: solo uno mismo", names(byUid("zoe")), ["Zoe"]);
+eq("v81: la Responsable de Técnicos solo ve a Técnicos", names(byUid("ana")), ["Ana"]);
+eq("… y no puede ampliar su alcance con el filtro", names(byUid("ana"), ""), ["Ana"]);
+eq("… ni pidiendo otro departamento", names(byUid("ana"), "produccion"), ["Ana"]);
+eq("la Responsable de Diseño - Industria ve también a Diseño - Automoción (mismo grupo)", names(byUid("bea")), ["Bea", "Carlos"]);
+eq("v81: un trabajador normal (Luis, Producción) no ve a nadie, ni a sí mismo", names(byUid("luis")), []);
+eq("… aunque pida el filtro de su departamento o «todos»", [names(byUid("luis"), "produccion"), names(byUid("luis"), "")], [[], []]);
+eq("sin departamento y sin marca: nadie", names(byUid("zoe")), []);
 eq("sin sesión: nadie", names(null), []);
+
+// v81: quién puede ver la carga
+const headNoDept = { uid: "h", role: "member", isDepartmentHead: true };
+const headBadDept = { uid: "h2", role: "member", isDepartmentHead: true, department: "inexistente" };
+const notHead = { uid: "n", role: "member", department: "tecnicos", isDepartmentHead: false };
+const reviewer = { uid: "r", role: "revisor", department: "tecnicos" };
+check("admin: puede", canViewWorkload(byUid("admin")));
+check("Responsable con departamento: puede", canViewWorkload(byUid("ana")) && isDepartmentHead(byUid("ana")));
+check("Responsable sin departamento: no puede (no habría a quién enseñar)", !canViewWorkload(headNoDept) && !canViewWorkload(headBadDept));
+check("trabajador normal, marca a false, cuenta anterior sin marca: no pueden", !canViewWorkload(notHead) && !canViewWorkload({ uid: "x", role: "member", department: "tecnicos" }));
+check("un Revisor tampoco por serlo: la carga es de admin y Responsables", !canViewWorkload(reviewer));
+check("sin sesión: no", !canViewWorkload(null) && !canViewWorkload(undefined));
+check("la marca solo vale como booleano true (un «true» en texto no)", !canViewWorkload({ uid: "s", role: "member", department: "tecnicos", isDepartmentHead: "true" }));
+eq("resolveTimelineGroupBy: admin y Responsable pueden «person»", [resolveTimelineGroupBy(byUid("admin"), "person"), resolveTimelineGroupBy(byUid("ana"), "person"), resolveTimelineGroupBy(byUid("ana"), "workload")], ["person", "person", "person"]);
+eq("resolveTimelineGroupBy: trabajador normal siempre «project» (incluido un «workload» guardado)", [resolveTimelineGroupBy(byUid("luis"), "person"), resolveTimelineGroupBy(byUid("luis"), "workload"), resolveTimelineGroupBy(null, "person")], ["project", "project", "project"]);
+eq("resolveTimelineGroupBy: lo no pedido o raro es «project»", [resolveTimelineGroupBy(byUid("admin"), undefined), resolveTimelineGroupBy(byUid("admin"), "otra")], ["project", "project"]);
 
 // ---------------------------------------------------------------- carga por día
 // Ana: A (mar 3 → jue 5), B (mié 4 → vie 6), C (jue 5 → jue 5), D sin fecha, E completada, F hito, G de otro.

@@ -189,3 +189,15 @@
   .notif-alert, .notif-alert__icon { animation: none; }
 }
 
+
+/* v81 — Embudo de ofertas y Salud del flujo (js/views/metrics-view.js) */
+.metrics__subtitle { font-size: 13px; font-weight: 600; margin: 18px 0 8px; display: flex; align-items: center; gap: 8px; }
+.metrics-flow-table { display: flex; flex-direction: column; border: 1px solid var(--color-line); border-radius: var(--radius-sm); overflow: hidden; }
+.metrics-flow-table__row { display: grid; grid-template-columns: minmax(0, 1fr) 80px 130px 90px; gap: 10px; padding: 8px 12px; font-size: 13px; align-items: center; border-top: 1px solid var(--color-line); }
+.metrics-flow-table__row:first-child { border-top: none; }
+.metrics-flow-table__row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-flow-table__row > span:not(:first-child) { text-align: right; font-family: var(--font-mono); font-size: 12px; }
+.metrics-flow-table__row--head { background: var(--color-panel-raised); color: var(--color-text-faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.metrics-flow-table__row--head > span:not(:first-child) { font-family: inherit; font-size: inherit; }
+.metrics-flow-table__row .is-danger { color: var(--color-danger); font-weight: 600; }
+@media (max-width: 640px) { .metrics-flow-table__row { grid-template-columns: minmax(0, 1fr) 56px 80px 70px; } }

@@ -18,7 +18,7 @@ const rule = (selector) => {
 
 // ------------------------------------------------------------ 2) scroll de las listas del Calendario laboral
 const list = rule(".wc-list");
-check("`.wc-list` hace scroll vertical (overflow-y: auto)", /overflow-y:\s*auto/.test(list), list);
+check("`.wc-list` hace scroll vertical siempre visible (overflow-y: scroll)", /overflow-y:\s*scroll/.test(list) && /overflow-x:\s*hidden/.test(list) && /max-height:\s*260px/.test(list), list);
 check("`.wc-list` ya no recorta con overflow: hidden", !/overflow:\s*hidden/.test(list), list);
 check("`.wc-list` tiene min-height: 0 y un max-height", /min-height:\s*0/.test(list) && /max-height:/.test(list), list);
 const body = rule(".wc-body");
@@ -77,8 +77,8 @@ const head = rule(".modal__head");
 check("la línea divisoria la lleva la envoltura `.modal__head`", /border-bottom:\s*1px solid/.test(head), head);
 check("la cabecera de dentro ya no pinta la suya", /\.modal__head > \.modal__header\s*\{\s*border-bottom:\s*none/.test(css));
 const preview = rule(".modal__title-preview");
-check("la vista previa no lleva borde propio ni sube por debajo de la línea (margen superior negativo pequeño)", !/border-bottom/.test(preview) && /margin:\s*-4px 0 0/.test(preview), preview);
-check("la vista previa deja aire antes de la línea (padding inferior ≥ 14px)", Number((preview.match(/padding:\s*0 24px (\d+)px/) || [])[1]) >= 14, preview);
+check("la vista previa no lleva borde propio ni margen negativo (v82)", !/border-bottom/.test(preview) && !/margin[^;]*-\d/.test(preview) && /margin:\s*0\s*;/.test(preview), preview);
+check("la vista previa deja aire antes de la línea (padding inferior ≥ 10px) y arranca bajo el título", Number((preview.match(/padding:\s*\d+px 24px (\d+)px (\d+)px/) || [])[1]) >= 10 && Number((preview.match(/padding:\s*\d+px 24px \d+px (\d+)px/) || [])[1]) === 53, preview);
 check("task-modal.js pone cabecera y vista previa dentro de `.modal__head`", /<div class="modal__head">[\s\S]*<div class="modal__header[^"]*">[\s\S]*id="t-title-preview"><\/div>\s*<\/div>\s*<div class="modal__body">/.test(taskModal));
 
 // ------------------------------------------------------------ 5) título multilínea

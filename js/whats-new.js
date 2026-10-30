@@ -25,6 +25,27 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 82,
+    date: "2026-10-29",
+    title: "Nuevo formato de ID (año + número), calendario y ventanas más claros",
+    items: [
+      "Los IDs de ofertas y proyectos cambian de formato: ahora llevan primero el año y después el número (por ejemplo 26001 en vez de 00126). Así las carpetas del Explorador y de Google Drive se ordenan por año y, dentro del año, por orden de creación. Chusy convierte solo los que ya existían (en proyectos, ofertas y papelera, y también el nombre y la Ubicación si empezaban por el ID antiguo); las carpetas de tu ordenador tendrás que renombrarlas a mano.",
+      "En la ventana de una tarea u oferta, «Vista previa» ya no queda tachada por la línea de la cabecera, el título se ajusta solo a su texto (sin el tirador de la esquina) y el check y el botón B quedan alineados con su primera línea.",
+      "En el Calendario laboral, la lista de festivos muestra siempre su barra de desplazamiento. Al abrirlo o al cargar los festivos oficiales se limpian los Lunes de Pascua que no tienen decreto (se conserva el del 6 de abril de 2026, que sí es festivo en Castilla-La Mancha).",
+    ],
+  },
+  {
+    id: 81,
+    date: "2026-10-28",
+    title: "Carga por persona solo para responsables, nuevas métricas y carpetas en un clic",
+    items: [
+      "La vista «Persona (carga)» de la Línea de tiempo ahora solo la ven los administradores y los Responsables de Departamento (y estos, solo a la gente de su departamento). Un administrador marca quién es Responsable en «Administrar equipo», con la casilla «Resp.» junto al departamento.",
+      "Los Responsables de Departamento pueden entrar también en Métricas, con los datos de su departamento.",
+      "Métricas estrena el «Embudo de ofertas» (en curso, entregadas y convertidas en proyecto, ratio de conversión, tiempo medio y en qué sección está cada oferta) y la «Salud del flujo» (cuánto llevan las tareas abiertas en su sección y cuáles están estancadas, más de 7 días hábiles en la misma; un clic abre la tarea). Se calculan solos: nadie tiene que apuntar horas.",
+      "Abrir Ubicación: Chusy recuerda en este navegador la carpeta raíz de tus proyectos y ofertas y, si la Ubicación está vacía, te ofrece «Asignar carpeta sugerida» con la ruta XXXYY - Nombre en un clic. Con el ayudante de Windows reinstalado, si la carpeta no existe todavía te pregunta si quieres crearla y abrirla.",
+    ],
+  },
+  {
     id: 80,
     date: "2026-10-27",
     title: "Títulos largos más cómodos y arreglos de Outlook y del calendario",

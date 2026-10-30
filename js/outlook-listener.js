@@ -126,7 +126,7 @@ export async function handleOutlookRequest(request, { user, getCommercialOptions
     });
     if (!plan.ok) return await fail(plan.message);
 
-    // createTask asigna el ID XXXYY de la oferta (una transacción sobre el
+    // createTask asigna el ID YYXXX de la oferta (una transacción sobre el
     // contador del año): si esa asignación falla, lanza, y se cae al catch de
     // abajo — la petición queda en «error» y la escucha sigue.
     const taskId = await createTask(offers.id, plan.data);

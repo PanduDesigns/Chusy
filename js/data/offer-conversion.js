@@ -21,9 +21,9 @@
 // sin numerar) recibe uno ahora, y el proyecto el mismo.
 //
 // v75 — la carpeta de Drive: la carpeta de la oferta (la que se crea al subir su primer archivo, con el
-// ID por clave y nombre `XXXYY - Oferta`) ES la del proyecto. Al convertir: el proyecto CONSERVA el
+// ID por clave y nombre `YYXXX - Oferta`) ES la del proyecto. Al convertir: el proyecto CONSERVA el
 // `driveFolderId` de la oferta, y la carpeta se mueve en Drive de `Ofertas` a `Proyectos` y se renombra a
-// `XXXYY - Nombre del proyecto` en una sola operación (moveDriveFolderToProjects): el id de la carpeta no
+// `YYXXX - Nombre del proyecto` en una sola operación (moveDriveFolderToProjects): el id de la carpeta no
 // cambia y los adjuntos de la oferta —que son ids de archivos de Drive— se van dentro, intactos. Si la oferta
 // aún no tenía anotado su `driveFolderId` pero la carpeta existe (v70), se encuentra por el ID y se anota
 // en el proyecto y en la oferta. Es de MEJOR ESFUERZO, con tope de tiempo: sin Drive, o si Drive falla o
@@ -88,7 +88,7 @@ export async function convertOfferToProject({ offer, name, properties, creatorUi
       isComplete: true,
       ...(offer.isComplete ? {} : { completedAt: serverTimestamp() }),
       ...(closed ? offerSectionFields(offersProject, offer, closed.id) : {}),
-    });
+    }, offer); // v81: `offer` = cómo estaba, para anotar sectionEnteredAt al pasar a «Cerradas»
     return { projectId, linked: true, folder };
   } catch (e) {
     console.error("convertOfferToProject: el proyecto se creó pero no se pudo enlazar la oferta:", e);

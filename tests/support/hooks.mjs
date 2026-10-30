@@ -23,9 +23,11 @@ const store = () => (globalThis.__fb = globalThis.__fb || { collections: {}, set
 let autoId = 0;
 export const collection = (_db, path) => ({ __col: true, path });
 export const doc = (a, ...rest) => (a && a.__col ? { id: "auto" + ++autoId, path: a.path } : { id: rest[rest.length - 1], path: rest.join("/") });
-export const getDocs = async (ref) => { const list = store().collections[ref.path] || []; return { docs: list, size: list.length, forEach: (cb) => list.forEach((d) => cb({ id: d.id, data: () => d.data })) }; };
-export const writeBatch = () => ({ set: (ref, data) => store().sets.push({ ref, data }), update() {}, delete() {}, commit: async () => {} });
+export const getDoc = async (...a) => { const h = hook("getDoc"); return h ? h(...a) : f(...a); };
+export const getDocs = async (ref) => { const h = hook("getDocs"); if (h) return h(ref); const list = store().collections[ref.path] || []; return { docs: list, size: list.length, forEach: (cb) => list.forEach((d) => cb({ id: d.id, data: () => d.data })) }; };
+export const writeBatch = () => ({ set: (ref, data) => store().sets.push({ ref, data }), update: (ref, fields) => (store().updates = store().updates || []).push({ ref, fields }), delete() {}, commit: async () => {} });
 export const serverTimestamp = () => "TS";
+// v82: también getDoc / getDocs / setDoc, y writeBatch().update se anota en globalThis.__fb.updates = [{ ref, fields }].
 // Ganchos opcionales para pruebas que necesitan controlar Firestore (v80: buzón de Outlook): una prueba pone
 // globalThis.__fb.hooks = { onSnapshot, runTransaction, updateDoc, deleteDoc }. Sin gancho, todo se comporta como siempre.
 const hook = (name) => (store().hooks || {})[name];
@@ -34,9 +36,9 @@ export const runTransaction = (...a) => { const h = hook("runTransaction"); retu
 export const updateDoc = (...a) => { const h = hook("updateDoc"); return h ? h(...a) : f(...a); };
 export const deleteDoc = (...a) => { const h = hook("deleteDoc"); return h ? h(...a) : f(...a); };
 export const addDoc = async () => ({ id: "auto" + ++autoId });
-export const setDoc = async () => {};
+export const setDoc = async (...a) => { const h = hook("setDoc"); return h ? h(...a) : undefined; };
 `;
-const OVERRIDDEN = new Set(["collection", "doc", "getDocs", "writeBatch", "serverTimestamp", "onSnapshot", "addDoc", "setDoc", "runTransaction", "updateDoc", "deleteDoc"]);
+const OVERRIDDEN = new Set(["collection", "doc", "getDocs", "writeBatch", "serverTimestamp", "onSnapshot", "addDoc", "setDoc", "getDoc", "runTransaction", "updateDoc", "deleteDoc"]);
 const SRC = `const f = (...a) => ({ __stub: true, args: a });\n${OVERRIDES}\n` + [...names].filter((n) => !OVERRIDDEN.has(n)).map((n) => `export const ${n} = f;`).join("\n") + "\n";
 
 export async function resolve(specifier, context, next) {

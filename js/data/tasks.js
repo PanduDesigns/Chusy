@@ -54,6 +54,8 @@ import { offerCompletionFields, planTaskToOffer } from "../offers.js";
 import { getOffersProject } from "./projects.js";
 import { allocateProjectCode } from "./project-codes.js";
 import { trashTasks } from "./trash.js";
+// v81: `withSectionEnteredAt` (pura) anota cuándo entra una tarea en su sección actual, para medir el flujo sin imputar horas.
+import { withSectionEnteredAt } from "../flow-metrics.js";
 // v73 (Etapa 1 del Store): las tareas de un proyecto se escuchan a través del
 // store (js/store.js), que las guarda UNA vez en memoria y no abre dos veces la
 // misma escucha — ver subscribeToProjectTasks y getTask más abajo.
@@ -109,6 +111,7 @@ export async function createTask(projectId, data) {
     createdBy: data.createdBy,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+    sectionEnteredAt: serverTimestamp(), // v81: entra en su sección al crearse
   });
   return ref.id;
 }
@@ -144,8 +147,9 @@ export async function duplicateTask(task) {
   return newId;
 }
 
-export function updateTask(taskId, data) {
-  return updateDoc(doc(db, "tasks", taskId), { ...data, updatedAt: serverTimestamp() });
+export function updateTask(taskId, data, prev) {
+  // v81: `prev` (opcional) = la tarea tal como estaba; con él, `sectionEnteredAt` solo se anota si de verdad cambia de sección o proyecto.
+  return updateDoc(doc(db, "tasks", taskId), { ...withSectionEnteredAt(data, prev, serverTimestamp()), updatedAt: serverTimestamp() });
 }
 
 // Eliminar tareas ya no se hace aquí: desde la v67 va a la papelera (trashTasks
@@ -164,7 +168,8 @@ export function toggleTaskComplete(task, isComplete) {
   return updateDoc(doc(db, "tasks", task.id), {
     isComplete,
     completedAt: isComplete ? serverTimestamp() : null,
-    ...offerCompletionFields(getOffersProject(), task, isComplete),
+    // v81: una oferta que se completa o reabre cambia de sección (Entregadas/Nuevas/Revisiones): se anota la entrada.
+    ...withSectionEnteredAt(offerCompletionFields(getOffersProject(), task, isComplete), task, serverTimestamp()),
     updatedAt: serverTimestamp(),
   });
 }
@@ -179,8 +184,9 @@ export function toggleTaskComplete(task, isComplete) {
  * dentro de `extraSections`, sin tocar la sección que tenga en su proyecto
  * principal ni en ningún otro adicional.
  */
-export function moveTask(taskId, sectionId, order, contextProjectId, isExtraProject) {
-  const fields = isExtraProject ? { [`extraSections.${contextProjectId}`]: sectionId } : { sectionId };
+export function moveTask(taskId, sectionId, order, contextProjectId, isExtraProject, prev) {
+  // v81: `prev` = la tarea antes de moverla (sin él, se anota siempre); dentro de un proyecto adicional no se anota (se mide la sección del principal).
+  const fields = isExtraProject ? { [`extraSections.${contextProjectId}`]: sectionId } : withSectionEnteredAt({ sectionId }, prev, serverTimestamp());
   return updateDoc(doc(db, "tasks", taskId), { ...fields, order, updatedAt: serverTimestamp() });
 }
 
@@ -410,7 +416,7 @@ export function bulkUpdateTasks(taskIds, data) {
 export function bulkMoveToSectionInProject(tasks, projectId, sectionId) {
   return runBatchedUpdate(tasks.map((t) => t.id), (id) => {
     const t = tasks.find((x) => x.id === id);
-    return t && t.projectId === projectId ? { sectionId } : { [`extraSections.${projectId}`]: sectionId };
+    return t && t.projectId === projectId ? withSectionEnteredAt({ sectionId }, t, serverTimestamp()) : { [`extraSections.${projectId}`]: sectionId };
   });
 }
 
@@ -427,7 +433,7 @@ export function bulkSetComplete(tasks, isComplete) {
   return runBatchedUpdate(tasks.map((t) => t.id), (id) => ({
     isComplete,
     completedAt: isComplete ? serverTimestamp() : null,
-    ...offerCompletionFields(offersProject, byId.get(id), isComplete),
+    ...withSectionEnteredAt(offerCompletionFields(offersProject, byId.get(id), isComplete), byId.get(id), serverTimestamp()), // v81
   }));
 }
 
@@ -537,7 +543,8 @@ export async function bulkConvertToOffers(tasks, { defaultSector } = {}) {
     // v70: una tarea que pasa a ser oferta recibe su ID (uno por tarea, en orden)
     if (fields) plans.set(t.id, { ...fields, offerCode: t.offerCode || (await allocateProjectCode({ date: now })) });
   }
-  if (plans.size) await runBatchedUpdate([...plans.keys()], (id) => plans.get(id));
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  if (plans.size) await runBatchedUpdate([...plans.keys()], (id) => withSectionEnteredAt(plans.get(id), taskById.get(id), serverTimestamp())); // v81
   return { converted: plans.size, skipped: tasks.length - plans.size };
 }
 

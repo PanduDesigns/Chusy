@@ -8,12 +8,14 @@
 // fechas, y el calendario laboral (festivos y ausencias, v78).
 //
 // Reglas:
+//  · QUIÉN LO VE (canViewWorkload, departments.js — v81): solo los admin y los
+//    Responsables de Departamento. Un trabajador normal NO ve la carga de nadie
+//    (ni la suya): workloadWorkers le devuelve una lista vacía.
 //  · QUIÉN SE VE (workloadWorkers): el mismo alcance por departamento que
 //    Métricas (v77, metricsScopeFor): un admin ve a todos y puede acotar por
-//    departamento; el resto, solo a las personas de su GRUPO de departamento
-//    (los dos Diseño van juntos); sin departamento reconocido, solo a sí mismo
-//    (verse a uno mismo no enseña nada ajeno). No salen las cuentas borradas ni
-//    las ficticias de la importación de Asana.
+//    departamento; un Responsable, solo a las personas de su GRUPO de departamento
+//    (los dos Diseño van juntos). No salen las cuentas borradas ni las ficticias
+//    de la importación de Asana.
 //  · TAREA ACTIVA = sin completar y que no sea un hito (un hito es un punto, no
 //    ocupa tiempo). Ocupa cada día de su rango inicio→límite; con una sola fecha
 //    ocupa solo ese día. Solo cuentan los días LABORABLES de esa persona (no
@@ -27,7 +29,7 @@
 //  · Los totales de la cabecera de cada persona (`stats`) miran de HOY en
 //    adelante: lo pasado ya no se puede mover.
 // ============================================================================
-import { metricsScopeFor, memberMatchesDepartmentFilter } from "./departments.js";
+import { metricsScopeFor, memberMatchesDepartmentFilter, canViewWorkload } from "./departments.js";
 import { dateKey, parseDateKey, isWeekend, isWorkingDay, getHoliday, getAbsence, taskCalendarIssues, formatDayMonth, ABSENCE_TYPES } from "./work-calendar.js";
 
 /** Tareas activas el mismo día a partir de las cuales una persona está saturada. */
@@ -52,15 +54,26 @@ export function loadLevel(active) {
 /**
  * Las personas que `viewer` puede ver en la carga. `departmentFilter`: el filtro de
  * departamento que elige un admin (ver metricsScopeFor; los demás roles lo ignoran).
- * Ordenadas por nombre.
+ * Ordenadas por nombre. v81: sin permiso (ni admin ni Responsable de Departamento) →
+ * lista vacía, sea cual sea el filtro que se pida.
  */
 export function workloadWorkers({ viewer, members, departmentFilter }) {
-  if (!viewer) return [];
+  if (!canViewWorkload(viewer)) return [];
   const scope = metricsScopeFor(viewer, departmentFilter);
   return (members || [])
     .filter((m) => m && m.uid && !m.deleted && !m.isImported)
-    .filter((m) => memberMatchesDepartmentFilter(m, scope) || (viewer.role !== "admin" && m.uid === viewer.uid))
+    .filter((m) => memberMatchesDepartmentFilter(m, scope))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+}
+
+/**
+ * El modo de agrupar de la línea de tiempo global que de verdad se aplica (v81): «person»
+ * solo si se pide («person», o «workload», el valor que guardaba la idea original) Y la
+ * persona puede ver la carga; en cualquier otro caso, «project». Así un valor viejo o
+ * forzado a mano nunca abre la carga a quien no debe.
+ */
+export function resolveTimelineGroupBy(user, requested) {
+  return (requested === "person" || requested === "workload") && canViewWorkload(user) ? "person" : "project";
 }
 
 /** ¿Ocupa tiempo? (sin completar y no es un hito) */

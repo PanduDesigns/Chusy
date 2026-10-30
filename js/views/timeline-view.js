@@ -25,7 +25,7 @@
 // saldría a medias): conmutador «Agrupar por: Proyecto / Persona (carga)». En vez de un
 // grupo por proyecto, un bloque por persona visible (workloadWorkers, js/workload.js: el
 // mismo alcance por departamento que Métricas; un admin puede filtrar por departamento)
-// con sus tareas sin completar CON fecha, cada una con el código XXXYY de su proyecto (en
+// con sus tareas sin completar CON fecha, cada una con el código YYXXX de su proyecto (en
 // la etiqueta y dentro de la barra). La fila de cabecera de cada persona es una franja de
 // «calor»: por columna, el pico de tareas activas (≥3 = saturado, ámbar; ≥5 = crítico,
 // rojo) y una marca si hay ≥2 entregas el mismo día; sus vacaciones/ausencias se sombrean
@@ -36,6 +36,10 @@
 // un clic y se arrastran para mover fechas (las que participan en un día saturado llevan
 // un contorno rojo). Toda la cuenta vive en workload.js (lógica pura, con pruebas); aquí
 // solo se pinta. Los modos Secciones/Tareas no aplican en este modo (se ocultan).
+// v81: el conmutador «Agrupar por» SOLO lo ven los admin y los Responsables de Departamento
+// (canViewWorkload, departments.js); a un trabajador normal ni se le enseña, y aunque llegara
+// groupBy: "person" (un valor guardado de antes, o forzado), resolveTimelineGroupBy lo deja en
+// «project». Un Responsable solo ve a las personas de su departamento (workloadWorkers).
 //
 // Vacaciones inhábiles (apartado más abajo): solo se pueden marcar en día,
 // semana o mes — a partir de un zoom más amplio que eso, prácticamente
@@ -149,8 +153,8 @@ import { saveProjectSections, updateProject } from "../data/projects.js";
 import { projectKeyDates } from "../project-properties.js";
 import { openSectionsModal } from "../components/sections-modal.js";
 import { getHoliday, taskCalendarIssues, describeIssue, canSeeAbsenceNote, formatDayMonth } from "../work-calendar.js";
-import { workloadWorkers, personWorkload, columnSummary, describeAbsence, describeStats } from "../workload.js";
-import { metricsScopeFor, metricsDepartmentOptions, metricsFilterLabel, departmentLabel } from "../departments.js";
+import { workloadWorkers, personWorkload, columnSummary, describeAbsence, describeStats, resolveTimelineGroupBy } from "../workload.js";
+import { metricsScopeFor, metricsDepartmentOptions, metricsFilterLabel, departmentLabel, canViewWorkload } from "../departments.js";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -335,7 +339,7 @@ function buildSectionModeGroups(groups, currentProjectId) {
  * Modo «Persona (carga)» (v79): de los `groups` por proyecto de la línea global a un grupo por
  * persona visible. Cada grupo lleva sus tareas sin completar con fecha (`tasks`) y el cálculo de
  * su carga (`wl`, ver personWorkload). `projectOfTask`: de qué proyecto es cada tarea (id, nombre
- * y código XXXYY), para pintar el código en la barra.
+ * y código YYXXX), para pintar el código en la barra.
  */
 function buildPersonModel({ groups, teamMembers, currentUser, departmentFilter, workCalendar }) {
   const unique = new Map();
@@ -386,7 +390,8 @@ export function renderTimelineView(container, {
   const prevScrollLeft = prevScrollBox && prevScrollBox.dataset.scrollCtx === scrollCtxKey ? prevScrollBox.scrollLeft : null;
 
   // v79: modo «Persona (carga)» — solo en la global (sin `project`).
-  const personMode = !project && groupBy === "person";
+  const canWorkload = canViewWorkload(currentUser); // v81: solo admin y Responsables de Departamento
+  const personMode = !project && resolveTimelineGroupBy(currentUser, groupBy) === "person";
   const wlModel = personMode ? buildPersonModel({ groups, teamMembers, currentUser, departmentFilter, workCalendar }) : null;
   const srcGroups = personMode ? wlModel.groups : groups;
   const canSeeNote = (absence) => canSeeAbsenceNote(absence, currentUser);
@@ -472,7 +477,7 @@ export function renderTimelineView(container, {
 
   // v79: conmutador «Agrupar por» (solo en la global), selector de departamento (solo admin) y,
   // en modo Persona, sin los botones Secciones/Tareas (no aplican).
-  const groupByButtons = !project
+  const groupByButtons = !project && canWorkload
     ? `<div class="topbar__views tl-groupby" style="margin-left:0;"><span class="tl-groupby__label">Agrupar por</span>
         <button type="button" class="topbar__view-btn${!personMode ? " is-active" : ""}" data-groupby="project">Proyecto</button>
         <button type="button" class="topbar__view-btn${personMode ? " is-active" : ""}" data-groupby="person">Persona (carga)</button></div>`

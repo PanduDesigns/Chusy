@@ -18,7 +18,7 @@ import { PROJECT_CODE_SEED } from "../project-codes.js";
 import { store } from "../store.js";
 import { subscribeToStoreList } from "./store-subscriptions.js";
 import { allocateProjectCode, backfillProjectCodes, healProjectCodes } from "./project-codes.js";
-// v75: al editar el nombre de un proyecto con carpeta en Drive, esa carpeta se renombra (`XXXYY - Nombre`).
+// v75: al editar el nombre de un proyecto con carpeta en Drive, esa carpeta se renombra (`YYXXX - Nombre`).
 import { renameDriveFolder } from "../drive-service.js";
 import {
   collection,
@@ -64,7 +64,7 @@ const DEFAULT_SECTIONS = [
  * "+ Nuevo proyecto" no las pregunta, y se rellenan después desde
  * "Propiedades" en el menú de clic derecho del proyecto.
  *
- * `code` (v70) — el ID del proyecto (XXXYY, ver project-codes.js). Si no se
+ * `code` (v70) — el ID del proyecto (YYXXX, ver project-codes.js). Si no se
  * pasa, se reparte uno nuevo ahora; solo lo pasa la conversión de una oferta
  * (offer-conversion.js), porque el proyecto HEREDA el ID de la oferta. Los
  * proyectos exclusivos (Ofertas, la «sección», no una oferta) no llevan ID.
@@ -105,7 +105,7 @@ export async function createProject({ name, description, color, icon, creatorUid
 
 /**
  * Cambia campos de un proyecto. v75: si cambia el NOMBRE de un proyecto con ID, su carpeta de Drive
- * (si tiene) se renombra a `XXXYY - Nombre nuevo`, por su cuenta y sin hacer esperar: ordenar Drive nunca
+ * (si tiene) se renombra a `YYXXX - Nombre nuevo`, por su cuenta y sin hacer esperar: ordenar Drive nunca
  * debe impedir ni retrasar guardar el proyecto (ver renameDriveFolder en drive-service.js).
  */
 export async function updateProject(projectId, data) {

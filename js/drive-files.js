@@ -18,7 +18,7 @@
 // vídeos — Drive no la sirve a quien no tiene cuenta de Google).
 // ============================================================================
 
-import { codedName } from "./project-codes.js"; // v75: el formato «XXXYY - Nombre» es UNO solo (ver codedName)
+import { codedName } from "./project-codes.js"; // v75: el formato «YYXXX - Nombre» es UNO solo (ver codedName)
 
 export const DRIVE_API = "https://www.googleapis.com/drive/v3";
 export const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
@@ -172,7 +172,7 @@ export const DRIVE_ROOTS = {
   proyectos: { key: "root:proyectos", name: "Proyectos" },
 };
 
-/** El nombre de la carpeta de un ID: `XXXYY - Nombre` (sin duplicar el ID si el nombre ya lo trae), seguro para Drive. */
+/** El nombre de la carpeta de un ID: `YYXXX - Nombre` (sin duplicar el ID si el nombre ya lo trae), seguro para Drive. */
 export function codedFolderName(code, name) {
   const c = String(code ?? "").trim();
   return sanitizeFolderName(codedName(c, name), c || "Sin nombre");

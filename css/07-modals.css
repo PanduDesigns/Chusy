@@ -17,8 +17,13 @@
 .modal--sm { max-width: 440px; }
 .modal__header { display: flex; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid var(--color-line); }
 .modal__title-input {
-  flex: 1; background: transparent; border: none; font-family: var(--font-display);
-  font-size: 17px; font-weight: 600; color: var(--color-text-hi); padding: 4px 0;
+  flex: 1; min-width: 0; background: transparent; border: none; font-family: var(--font-display);
+  font-size: 17px; font-weight: 600; line-height: 1.35; color: var(--color-text-hi); padding: 4px 0;
+}
+/* v80: el título es un <textarea rows="1"> que crece con el texto (title-field.js): se ve entero, en 2 o más líneas, y se puede pinchar en cualquier palabra. v82: `overflow: hidden` y sin tope de alto —sin tirador `//` ni barra interna—; la altura la fija SOLO autoResizeTitleField. */
+textarea.modal__title-input {
+  display: block; margin: 0; resize: none; overflow: hidden;
+  overflow-wrap: break-word; word-break: normal; white-space: pre-wrap;
 }
 .modal__close { background: none; border: none; color: var(--color-text-faint); font-size: 18px; padding: 4px 8px; border-radius: var(--radius-sm); }
 .modal__close:hover { color: var(--color-text-hi); background: var(--color-panel-raised); }
@@ -29,10 +34,17 @@
   transition: var(--transition-fast);
 }
 .modal__title-bold-btn:hover { color: var(--color-text-hi); background: var(--color-panel-raised); border-color: var(--color-line-bright); }
+/* v80: cabecera + vista previa van juntas en `.modal__head`, y es ESA envoltura la que lleva la línea divisoria de abajo (la cabecera, dentro, ya no pinta la suya): antes la vista previa subía con margen negativo por debajo de la línea de la cabecera y esta le atravesaba el texto. */
+.modal__head { border-bottom: 1px solid var(--color-line); }
+.modal__head > .modal__header { border-bottom: none; }
+.modal__header--multiline { align-items: flex-start; }
+/* v82: el check (17px) y el botón B (26px) se centran en la PRIMERA línea del título: su centro queda a 4px (padding del textarea) + 11.5px (media línea de 17px×1.35) = 15.5px del borde de arriba → 15.5 − 17/2 = 7px y 15.5 − 26/2 = 2.5px. Si cambia el tamaño o el interlineado del título, recalcular los dos. */
+.modal__header--multiline > .task-row__check { margin-top: 7px; }
+.modal__header--multiline > .modal__title-bold-btn { margin-top: 2.5px; }
 /* Solo ocupa sitio si el título tiene alguna marca `**` (ver renderTitlePreview en task-modal.js) — en el caso normal, sin negrita, no añade ni una línea de alto bajo la cabecera. */
 .modal__title-preview {
-  display: none; padding: 0 24px 14px; margin-top: -6px;
-  font-size: 12px; color: var(--color-text-faint); border-bottom: 1px solid var(--color-line);
+  display: none; margin: 0; padding: 6px 24px 10px 53px; /* v82: sin margen negativo; 53px = 24 (cabecera) + 17 (check) + 12 (hueco): el texto cae justo bajo el título */
+  font-size: 12px; line-height: 1.5; color: var(--color-text-faint); overflow-wrap: anywhere;
 }
 .modal__title-preview.is-visible { display: block; }
 .modal__title-preview b { color: var(--color-text-hi); font-weight: 700; }
@@ -160,6 +172,11 @@
 .open-location-btn { flex-shrink: 0; }
 .open-location-btn--compact { padding: 2px 9px; font-size: 12px; line-height: 1.35; }
 .open-location-btn.is-busy { cursor: progress; opacity: 0.7; }
+/* v81: «Asignar carpeta sugerida» bajo la casilla Ubicación */
+.suggest-location { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; min-width: 0; }
+.suggest-location[hidden], .suggest-location [hidden] { display: none; }
+.suggest-location .btn { padding: 2px 9px; font-size: 12px; line-height: 1.35; }
+.suggest-location__assign { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* En la barra superior (muy justa de ancho — la campana de notificaciones le
    reserva el hueco de la derecha): el botón se encoge con la pantalla. Los
    cortes son de ventana, contando la barra lateral abierta (260 px): con
@@ -194,7 +211,9 @@
 .wc-tab:hover { color: var(--color-text-hi); }
 .wc-tab.is-active { color: var(--color-signal-text); border-bottom-color: var(--color-signal); }
 .wc-tab:focus-visible { outline: 2px solid var(--color-signal); outline-offset: -2px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
-.wc-body { gap: 14px; }
+/* v80: el cuerpo del modal no se desplaza (la cabecera del año/filtro y el formulario de abajo se quedan siempre a la vista); solo la LISTA hace scroll. Antes, `.wc-list` tenía `overflow: hidden` y, al ser hija flex con min-height 0, se encogía y recortaba a partir del 5.º elemento en vez de dejar scroll. */
+.wc-body { gap: 14px; overflow: hidden; min-height: 0; }
+.wc-body > * { flex-shrink: 0; }
 .wc-hint { margin: 0; }
 .wc-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .wc-toolbar .wc-in { max-width: 240px; }
@@ -202,7 +221,18 @@
 .wc-year strong { min-width: 44px; text-align: center; }
 .wc-check { align-items: center; margin-left: auto; }
 
-.wc-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--color-line); border-radius: var(--radius-sm); overflow: hidden; }
+.wc-list {
+  list-style: none; margin: 0; padding: 0; border: 1px solid var(--color-line); border-radius: var(--radius-sm);
+  flex: 1 1 auto; min-height: 0; max-height: 260px;
+  /* v82: UNA sola regla; scroll siempre dibujado (`scroll`, no `auto`: con barras superpuestas —macOS— la de `auto` no se ve hasta que se desliza y parecía que la lista se cortaba). */
+  overflow-x: hidden; overflow-y: scroll; overscroll-behavior: contain; scrollbar-gutter: stable;
+  scrollbar-width: thin; scrollbar-color: var(--border-strong, #cbd5e1) transparent;
+}
+.wc-list::-webkit-scrollbar { width: 8px; }
+.wc-list::-webkit-scrollbar-track { background: transparent; }
+.wc-list::-webkit-scrollbar-thumb { background: var(--border-strong, #cbd5e1); border-radius: 4px; }
+.wc-list::-webkit-scrollbar-thumb:hover { background: var(--color-text-faint, #94a3b8); }
+.wc-body > .wc-list { flex-shrink: 1; }
 .wc-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--color-line); font-size: 13px; }
 .wc-row:last-child { border-bottom: none; }
 .wc-row.is-past { opacity: 0.55; }

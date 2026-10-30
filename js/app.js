@@ -5,6 +5,7 @@
 import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { auth } from "./firebase-init.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
+import { migrateLegacyCodesToYYXXX } from "./data/project-codes.js";
 import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
 import { convertOfferToProject, conversionMessage } from "./data/offer-conversion.js";
@@ -40,7 +41,8 @@ import { renderMyTasksView } from "./views/my-tasks-view.js";
 import { renderTrashView, visibleTrashItems } from "./views/trash-view.js";
 import { renderArchiveView } from "./views/archive-view.js";
 import { renderMetricsView } from "./views/metrics-view.js";
-import { metricsScopeFor, metricsFilterLabel } from "./departments.js";
+import { metricsScopeFor, metricsFilterLabel, canViewWorkload, canViewMetrics } from "./departments.js";
+import { resolveTimelineGroupBy } from "./workload.js"; // v81
 import { openProjectModal } from "./components/project-modal.js";
 import { openTaskModal } from "./components/task-modal.js";
 import { openProjectPropertiesModal, openOfferConversionModal } from "./components/project-properties-modal.js";
@@ -305,6 +307,25 @@ let hasRestoredLocation = false; // solo se restaura la sección al arrancar una
 let hasAnnouncedNews = false; // v67: se avisa de las novedades como mucho una vez por sesión — ver announceNews()
 let hasPurgedTrash = false; // v67: un admin purga lo caducado de la papelera como mucho una vez por sesión
 let hasSeededExclusiveProjects = false; // mismo criterio (v55): el sembrado de secciones exclusivas se intenta como mucho una vez por sesión — ver ensureExclusiveProjectsSeeded()
+let hasMigratedCodes = false; // v82: la migración de IDs XXXYY → YYXXX se intenta como mucho una vez por sesión (y solo un admin) — ver migrateLegacyCodesToYYXXX()
+
+/**
+ * v82: pasa los IDs del formato antiguo (XXXYY, `00126`) al nuevo (YYXXX, `26001`) en proyectos, ofertas y
+ * Papelera —y renombra en segundo plano sus carpetas de Drive— la primera vez que entra un admin con esta
+ * versión; después, lo único que cuesta es leer la marca `formatVersion` de `meta/projectCounter`. Va DESPUÉS
+ * del sembrado de Ofertas (para encontrar su campo Ubicación) y nunca impide arrancar: un fallo solo
+ * queda en la consola y se reintenta en la próxima entrada de un admin.
+ */
+async function runCodeMigration(allProjects) {
+  if (hasMigratedCodes || !currentUser || currentUser.role !== "admin") return;
+  hasMigratedCodes = true;
+  try {
+    const offersProject = (allProjects || []).find((p) => p.exclusiveKey === "ofertas") || null;
+    await migrateLegacyCodesToYYXXX({ offersProject });
+  } catch (e) {
+    console.error("migrateLegacyCodesToYYXXX:", e);
+  }
+}
 
 function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
 function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.add("hidden"); authScreen.classList.remove("hidden"); }
@@ -356,6 +377,10 @@ applyTheme(getCachedTheme());
 
 onAuthChange((profile, message) => {
   currentUser = profile;
+  // v81: un modo «workload» guardado de antes en este navegador (chusy_timeline_mode) no puede abrir la
+  // carga por persona a quien no tiene permiso: se vuelve a «project». (El modo de esta versión es solo de sesión.)
+  try { if (profile && !canViewWorkload(profile) && localStorage.getItem("chusy_timeline_mode") === "workload") localStorage.setItem("chusy_timeline_mode", "project"); } catch { /* sin localStorage */ }
+  timelineGroupBy = resolveTimelineGroupBy(profile, timelineGroupBy);
   // La cuenta manda en cuanto se conoce (puede diferir de la caché de
   // este navegador si la persona cambió el tema desde otro dispositivo);
   // sin sesión, nos quedamos con lo último aplicado en este navegador.
@@ -384,6 +409,7 @@ function cleanup() {
   quickCreateEnabled = false;
   hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
   hasSeededExclusiveProjects = false;
+  hasMigratedCodes = false;
   hasPurgedTrash = false;
   hasAnnouncedNews = false;
   removeBulkToolbar();
@@ -544,7 +570,9 @@ function handleProjectsList(allProjects) {
   // filtrar es lo correcto para decidir si ya existe.
   if (!hasSeededExclusiveProjects && currentUser.role === "admin") {
     hasSeededExclusiveProjects = true;
-    ensureExclusiveProjectsSeeded(allProjects, currentUser.uid).catch((e) => console.error("ensureExclusiveProjectsSeeded:", e));
+    ensureExclusiveProjectsSeeded(allProjects, currentUser.uid)
+      .catch((e) => console.error("ensureExclusiveProjectsSeeded:", e))
+      .then(() => runCodeMigration(allProjects));
   }
   renderShell();
 }
@@ -735,7 +763,7 @@ function loadingStateHtml(text) {
  * comprobación de rol solo hace falta escribirla una vez.
  */
 function selectMetrics() {
-  if (!currentUser || (currentUser.role !== "admin" && currentUser.role !== "revisor")) { selectMyTasks(); return; }
+  if (!canViewMetrics(currentUser)) { selectMyTasks(); return; } // v81: admin, Revisor y Responsables de Departamento
   mode = "metrics";
   saveLastLocation({ mode: "metrics" });
   taskLoader.ensureAll(); // v66: Métricas cuenta las tareas de todos los proyectos
@@ -755,7 +783,8 @@ function toggleTimelineHolidays() {
 }
 
 function setTimelineGroupBy(groupBy) {
-  timelineGroupBy = groupBy === "person" ? "person" : "project";
+  // v81: «Persona (carga)» solo para admin y Responsables de Departamento.
+  timelineGroupBy = resolveTimelineGroupBy(currentUser, groupBy);
   renderShell();
 }
 
@@ -908,7 +937,7 @@ function renderShell() {
     // sidebarEl se repinta más arriba con userProfile.role actualizado en
     // cuanto cambie, así que el botón habría desaparecido, pero el modo en
     // sí podría seguir activo un instante más sin este segundo aviso.
-    if (currentUser.role !== "admin" && currentUser.role !== "revisor") { selectMyTasks(); return; }
+    if (!canViewMetrics(currentUser)) { selectMyTasks(); return; } // v81
     // v77: un admin ve toda la empresa (con selector); el resto, solo su departamento.
     const metricsScope = currentUser.role === "admin" ? "" : metricsScopeFor(currentUser);
     const metricsCountText = currentUser.role === "admin" ? "todos los proyectos" : metricsScope ? `departamento de ${escapeHtml(metricsFilterLabel(metricsScope))}` : "sin departamento";
@@ -918,6 +947,7 @@ function renderShell() {
     if (!taskLoader.isAllLoaded()) { mainContentEl.innerHTML = loadingStateHtml("Cargando las tareas de todos los proyectos…"); return; }
     renderMetricsView(mainContentEl, {
       tasks: getAllProjectTasksDeduped(), teamMembers, projects, onOpenTask: openTask,
+      workCalendar: getWorkCalendar(), // v81: días hábiles de «Salud del flujo»
       currentUser, departmentFilter: metricsDepartmentFilter,
       onChangeDepartmentFilter: (value) => { metricsDepartmentFilter = value; },
     });
@@ -999,7 +1029,7 @@ function renderTimelineContent() {
     // sus propias secciones, en vez de agregar el proyecto entero de
     // golpe — ver buildSectionModeGroups en ese archivo.
     sections: p.sections,
-    code: p.code || "", // v79: el XXXYY del proyecto, que la carga por persona pinta en cada barra
+    code: p.code || "", // v79: el YYXXX del proyecto, que la carga por persona pinta en cada barra
     tasks: applyTaskFilters((globalTasksByProject[p.id] || []).filter((t) => !t.isComplete), activeFilters, searchText),
   }));
   renderTimelineView(mainContentEl, {
@@ -1010,7 +1040,7 @@ function renderTimelineContent() {
     onOpenTask: openTask,
     exportTitle: "Chusy — Línea de tiempo global", groupLabel: "Proyecto", teamMembers, currentUser,
     workCalendar: getWorkCalendar(), // v78
-    groupBy: timelineGroupBy, onGroupByChange: setTimelineGroupBy, // v79
+    groupBy: resolveTimelineGroupBy(currentUser, timelineGroupBy), onGroupByChange: setTimelineGroupBy, // v79 (v81: se fuerza «project» a quien no pueda ver la carga)
     departmentFilter: timelineDepartmentFilter, onDepartmentFilterChange: setTimelineDepartmentFilter,
   });
 }

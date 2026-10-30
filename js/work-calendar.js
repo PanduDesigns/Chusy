@@ -362,6 +362,47 @@ export function mergeHolidays(cfg, list) {
   return { cfg: normalizeWorkCalendar({ holidays: [...base.holidays, ...fresh], absences: base.absences }), added: fresh.length, skipped };
 }
 
+// ------------------------------------------------------------------ limpieza de festivos obsoletos (v82)
+
+/** Un nombre de festivo sin tildes, en minúsculas y sin el «(estimado)» / «(por confirmar)» del final — para comparar. */
+const plainHolidayName = (name) =>
+  String(name ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase();
+
+const EASTER_MONDAY_NAME = "lunes de pascua";
+
+/** ¿Este festivo es EXACTAMENTE uno de los que publica el decreto de ese año (misma fecha y mismo nombre)? */
+function isDecreedHoliday(holiday) {
+  const year = Number(String(holiday.date).slice(0, 4));
+  const mmdd = String(holiday.date).slice(5);
+  return !!OFFICIAL[year] && OFFICIAL[year].some(([d, name]) => d === mmdd && plainHolidayName(name) === plainHolidayName(holiday.name));
+}
+
+/**
+ * ¿Es un «Lunes de Pascua» de Castilla-La Mancha que NO respalda ningún decreto? Las primeras versiones
+ * (v78/v79) lo sembraban como festivo fijo de la comunidad en todos los años, y quedó guardado en Firestore;
+ * `mergeHolidays` solo añade, así que nada lo quitaba. Pero Castilla-La Mancha solo lo declara festivo
+ * algunos años: en 2026 sí (Decreto 44/2025, DOCM 26/06/2025: el 6 de abril sustituye al 19 de marzo,
+ * San José), de modo que ESE se conserva —está en la tabla oficial—; cualquier otro (los «estimados» de
+ * otros años, o uno con el id antiguo `clm-easter-monday-…`) se considera sobrante.
+ */
+export function isObsoleteHoliday(holiday) {
+  if (!holiday || !holiday.date) return false;
+  const named = plainHolidayName(holiday.name) === EASTER_MONDAY_NAME;
+  const legacyId = typeof holiday.id === "string" && holiday.id.startsWith("clm-easter-monday-");
+  if (!named && !legacyId) return false;
+  if (!legacyId && holiday.scope !== "autonomico") return false; // uno del propio equipo (empresa/local) no se toca
+  return !isDecreedHoliday(holiday);
+}
+
+/** Quita del calendario los festivos obsoletos (isObsoleteHoliday). Devuelve `{ cfg, removed }`; sin nada que quitar, el mismo `cfg`. */
+export function removeObsoleteHolidays(cfg) {
+  const base = cfg || EMPTY_CALENDAR;
+  const keep = base.holidays.filter((h) => !isObsoleteHoliday(h));
+  const removed = base.holidays.length - keep.length;
+  if (!removed) return { cfg: base, removed: 0 };
+  return { cfg: normalizeWorkCalendar({ holidays: keep, absences: base.absences }), removed };
+}
+
 export function addAbsence(cfg, input) {
   const base = cfg || EMPTY_CALENDAR;
   if (base.absences.length >= MAX_ABSENCES) throw new Error(`Hay demasiadas ausencias (máximo ${MAX_ABSENCES}).`);

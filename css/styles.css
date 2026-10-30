@@ -9,15 +9,17 @@
    otro sin comprobar que no se cruza con otra de mismo peso (el prefijo
    numérico está precisamente para que el orden se vea de un vistazo).
 
-   Cómo se carga:
-   · Directo (servidor estático sin compilar, p. ej. GitHub Pages desde la
-     raíz del repositorio): el navegador sigue los @import de forma nativa.
-     OJO: los @import van SIN «?v=N» a propósito — Vite no resuelve un
-     @import con query string y dejaría el CSS vacío sin avisar. La marca
-     anti-caché vive solo en el <link> de index.html (css/styles.css?v=N); los
-     módulos se refrescan con Ctrl+F5 tras publicar (ver «Al publicar»).
-   · Con Vite (`npm run dev` / `npm run build`): Vite resuelve los @import y
-     deja UN solo CSS minificado en dist/.
+   Cómo se carga (v82):
+   · index.html carga CADA módulo con su propio <link ...css/NN-nombre.css?v=N>,
+     en este mismo orden, y todos con el mismo N (la versión de la entrega). Así
+     el navegador invalida la caché de todos al publicar: un @import de este
+     archivo no puede llevar «?v=N» (Vite no lo resuelve y dejaría el CSS vacío
+     sin avisar), y antes solo este archivo se versionaba, de modo que los
+     módulos podían servirse viejos tras publicar. scripts/check-integrity.mjs
+     comprueba que los <link> coinciden en orden con los @import de abajo.
+   · Este archivo se mantiene como ÍNDICE (y como punto de entrada si alguien
+     vuelve a enlazarlo solo): al añadir un módulo, añadirlo aquí Y en
+     index.html.
 
    Los @import tienen que ir antes de cualquier otra regla (si no, el
    navegador los ignora): no añadir reglas debajo de esta cabecera; van en el
@@ -36,4 +38,4 @@
 @import './11-responsive.css';             /* ajustes para pantallas estrechas (a propósito, a mitad de cascada) */
 @import './12-metrics-notifications.css';  /* panel de métricas, campana y aviso grande de notificaciones */
 @import './13-admin-undo-trash.css';       /* Creación Rápida (admin), Deshacer, Papelera, Novedades */
-@import './14-drive-ids.css';              /* archivos en Google Drive e ID XXXYY */
+@import './14-drive-ids.css';              /* archivos en Google Drive e ID YYXXX */

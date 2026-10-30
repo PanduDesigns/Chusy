@@ -22,8 +22,21 @@
 // El filtro se calcula AQUÍ a partir de `currentUser` (metricsScopeFor), no se
 // fía de lo que pida quien llama: un Revisor no puede ampliar su alcance.
 // Como en el resto de Métricas (v54), es un límite de interfaz, no de datos.
+//
+// v81 — Cuadro de mando pasivo (nadie imputa horas; ver flow-metrics.js):
+//  · «Embudo de ofertas»: solo si la cuenta ve el proyecto Ofertas (admin o un
+//    departamento con acceso, ya filtrado antes de llegar aquí). Son cifras de
+//    la sección entera, no de personas, así que NO se acotan por departamento.
+//  · «Salud del flujo»: cuánto llevan las tareas abiertas en su sección actual
+//    (días hábiles, calendario laboral) y cuáles están estancadas (> 7 días
+//    hábiles). Esta sí va por el alcance de departamento de arriba: solo las
+//    tareas de las personas visibles. Un clic en una tarea la abre.
+//  · Acceso a Métricas: admin, Revisor y, desde la v81, Responsables de
+//    Departamento (canViewMetrics), siempre con su propio departamento.
 // ============================================================================
 import { escapeHtml, toDate, initials, colorFromString, textColorFor, projectIcon, isOverdue, renderTitleHtml } from "../utils.js";
+import { offerFunnel, flowHealth } from "../flow-metrics.js";
+import { isOffersProject } from "../offers.js";
 import { metricsScopeFor, metricsDepartmentOptions, memberMatchesDepartmentFilter, metricsFilterLabel } from "../departments.js";
 
 /**
@@ -40,8 +53,98 @@ export function scopeMetricsData({ tasks, teamMembers }, filter) {
   return { tasks: tasks.filter((t) => (t.assigneeIds || []).some((id) => ids.has(id))), members };
 }
 
+const fmtDays = (n, unit = "días") => (n === null || n === undefined ? "—" : `${String(n).replace(".", ",")} ${unit}`);
+
+/** HTML del panel «Embudo de ofertas» (`funnel`: ver offerFunnel); "" si no hay proyecto Ofertas. */
+export function offerFunnelHtml(funnel) {
+  if (!funnel) return "";
+  if (!funnel.total) {
+    return `<div class="metrics__section" id="metrics-offer-funnel">
+        <h3 class="metrics__section-title">Embudo de ofertas</h3>
+        <p class="metrics__empty">Todavía no hay ofertas.</p>
+      </div>`;
+  }
+  const maxCount = Math.max(1, ...funnel.bySection.map((s) => s.count));
+  return `
+      <div class="metrics__section" id="metrics-offer-funnel">
+        <h3 class="metrics__section-title">Embudo de ofertas <span class="metrics__section-count">${funnel.total}</span></h3>
+        <p class="metrics__section-hint">Ofertas en curso, entregadas y convertidas en proyecto. La conversión es sobre las ya resueltas (entregadas + convertidas): una oferta en curso aún no ha tenido ocasión de convertirse.</p>
+        <div class="metrics__cards">
+          <div class="metric-card"><span class="metric-card__value">${funnel.active}</span><span class="metric-card__label">En curso</span></div>
+          <div class="metric-card"><span class="metric-card__value">${funnel.delivered}</span><span class="metric-card__label">Entregadas, sin proyecto</span></div>
+          <div class="metric-card"><span class="metric-card__value" style="color:var(--color-success);">${funnel.converted}</span><span class="metric-card__label">Convertidas en proyecto</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-funnel="pct">${funnel.conversionPct === null ? "—" : funnel.conversionPct + "%"}</span><span class="metric-card__label">Conversión (${funnel.converted} de ${funnel.resolved})</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-funnel="delivery">${fmtDays(funnel.avgDeliveryDays, "d")}</span><span class="metric-card__label">Tiempo medio hasta entregar</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-funnel="conversion">${fmtDays(funnel.avgConversionDays, "d")}</span><span class="metric-card__label">Tiempo medio hasta convertir</span></div>
+        </div>
+        <p class="metrics__section-hint" style="margin-top:16px;">Dónde está cada oferta ahora, por sección de Ofertas:</p>
+        <div class="metrics__bars">${funnel.bySection
+          .map(
+            (s) => `
+          <div class="metric-bar-row" data-funnel-section="${escapeHtml(s.id)}">
+            <span class="metric-bar-row__name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
+            <div class="metric-bar-row__track"><div class="metric-bar-row__fill" style="width:${s.count ? Math.max(4, Math.round((s.count / maxCount) * 100)) : 0}%;"></div></div>
+            <span class="metric-bar-row__count">${s.count}</span>
+          </div>`
+          )
+          .join("")}</div>
+      </div>`;
+}
+
+const STAGNANT_LIST_LIMIT = 20;
+
+/** HTML del panel «Salud del flujo y cuellos de botella» (`health`: ver flowHealth). `teamMembers`: para los avatares. */
+export function flowHealthHtml(health, teamMembers) {
+  if (!health.count) {
+    return `<div class="metrics__section" id="metrics-flow-health">
+        <h3 class="metrics__section-title">Salud del flujo y cuellos de botella</h3>
+        <p class="metrics__empty">No hay tareas abiertas que medir.</p>
+      </div>`;
+  }
+  const shown = health.stagnant.slice(0, STAGNANT_LIST_LIMIT);
+  const more = health.stagnant.length - shown.length;
+  return `
+      <div class="metrics__section" id="metrics-flow-health">
+        <h3 class="metrics__section-title">Salud del flujo y cuellos de botella</h3>
+        <p class="metrics__section-hint">Cuánto llevan las tareas abiertas en su sección actual, en días hábiles (sin fines de semana ni festivos). Se mide desde que la tarea entró en la sección; las anteriores a esta medición usan su última modificación.</p>
+        <div class="metrics__cards">
+          <div class="metric-card"><span class="metric-card__value">${health.count}</span><span class="metric-card__label">Tareas abiertas</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-flow="avg">${fmtDays(health.avgDays, "d")}</span><span class="metric-card__label">Tiempo medio en su sección (hábiles)</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-flow="stagnant" style="color:${health.stagnant.length ? "var(--color-danger)" : "inherit"};">${health.stagnant.length}</span><span class="metric-card__label">Estancadas (más de ${health.threshold} días hábiles)</span></div>
+        </div>
+        <div class="metrics-flow-table" role="table" aria-label="Tiempo en cada sección">
+          <div class="metrics-flow-table__row metrics-flow-table__row--head" role="row"><span role="columnheader">Sección</span><span role="columnheader">Abiertas</span><span role="columnheader">Media (d. hábiles)</span><span role="columnheader">Estancadas</span></div>
+          ${health.bySection
+            .map(
+              (s) => `
+          <div class="metrics-flow-table__row" role="row" data-flow-section="${escapeHtml(s.key)}">
+            <span role="cell" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span><span role="cell">${s.count}</span><span role="cell">${fmtDays(s.avgDays, "")}</span><span role="cell" class="${s.stagnant ? "is-danger" : ""}">${s.stagnant}</span>
+          </div>`
+            )
+            .join("")}
+        </div>
+        <h4 class="metrics__subtitle">Tareas estancadas${health.stagnant.length ? ` <span class="metrics__section-count">${health.stagnant.length}</span>` : ""}</h4>
+        <div class="metrics__overdue-list" id="metrics-stagnant-list">
+          ${shown.length
+            ? shown
+                .map(({ task: t, project, sectionName, days }) => {
+                  const assignees = (t.assigneeIds || []).map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean);
+                  return `
+          <button type="button" class="metrics-overdue-row" data-open="${escapeHtml(t.id)}">
+            <span class="metrics-overdue-row__title">${renderTitleHtml(t.title)}</span>
+            ${project ? `<span class="tag-pill" style="background:${project.color};color:${textColorFor(project.color)};">${escapeHtml(projectIcon(project))} ${escapeHtml(project.name)}</span>` : ""}
+            <span class="avatar-stack">${assignees.map((m) => `<span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}" title="${escapeHtml(m.name)}">${initials(m.name)}</span>`).join("")}</span>
+            <span class="metrics-overdue-row__days">${days} ${days === 1 ? "día hábil" : "días hábiles"} en «${escapeHtml(sectionName)}»</span>
+          </button>`;
+                })
+                .join("") + (more > 0 ? `<p class="metrics__empty">…y ${more} más.</p>` : "")
+            : `<p class="metrics__empty">Ninguna tarea lleva más de ${health.threshold} días hábiles en la misma sección. 👌</p>`}
+        </div>
+      </div>`;
+}
+
 export function renderMetricsView(container, options) {
-  const { tasks: allTasks, teamMembers: allMembers, projects, onOpenTask, currentUser, departmentFilter, onChangeDepartmentFilter } = options;
+  const { tasks: allTasks, teamMembers: allMembers, projects, onOpenTask, currentUser, departmentFilter, onChangeDepartmentFilter, workCalendar } = options;
   const isAdmin = !!currentUser && currentUser.role === "admin";
   const filter = metricsScopeFor(currentUser, departmentFilter); // null = sin departamento: nadie
   const scoped = scopeMetricsData({ tasks: allTasks, teamMembers: allMembers }, filter);
@@ -104,6 +207,11 @@ export function renderMetricsView(container, options) {
     .filter((x) => x.count > 0)
     .sort((a, b) => b.count - a.count);
   const maxLoad = loadByPerson.length ? loadByPerson[0].count : 1;
+
+  // v81: embudo de ofertas (sin acotar por departamento: es de la sección entera, y solo si se ve Ofertas) y salud del flujo (acotada).
+  const offersProject = (projects || []).find((p) => isOffersProject(p)) || null;
+  const funnel = offersProject ? offerFunnel({ tasks: allTasks, offersProject }) : null;
+  const health = flowHealth({ tasks, projects: projects || [], cfg: workCalendar, now: new Date() });
 
   const overdueSorted = [...overdue].sort((a, b) => toDate(a.dueDate) - toDate(b.dueDate)); // más antigua primero
 
@@ -170,8 +278,13 @@ export function renderMetricsView(container, options) {
           ${overdueSorted.length ? "" : `<p class="metrics__empty">No hay ninguna tarea vencida — todo al día. 🎉</p>`}
         </div>
       </div>
+      ${flowHealthHtml(health, teamMembers)}
+      ${offerFunnelHtml(funnel)}
     </div>
   `;
+  container.querySelectorAll("#metrics-stagnant-list [data-open]").forEach((row) => {
+    row.addEventListener("click", () => onOpenTask(row.dataset.open));
+  });
 
   if (overdueSorted.length) {
     const listEl = container.querySelector("#metrics-overdue-list");

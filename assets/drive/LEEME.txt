@@ -79,7 +79,7 @@ Dónde están los archivos
 En el Drive de esa cuenta, carpeta "Chusy - archivos" (puedes moverla a otro
 sitio; no cambia nada). Cada archivo lleva su nombre original. Dentro, Chusy
 los ordena solo en dos carpetas, "Ofertas" y "Proyectos", y dentro en carpetas con
-el ID de la oferta o del proyecto y el mes (por ejemplo "Ofertas" > "00126 - Cabina
+el ID de la oferta o del proyecto y el mes (por ejemplo "Ofertas" > "26001 - Cabina
 Togg" > "2026-10"). La oferta y el proyecto en que se convierte comparten el ID y,
 por tanto, la carpeta: al convertir la oferta, Chusy la mueve de "Ofertas" a
 "Proyectos" y le pone el nombre del proyecto; también la renombra si cambias el

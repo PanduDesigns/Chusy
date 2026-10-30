@@ -11,10 +11,10 @@ const { normalizeWorkCalendar } = await import("../js/work-calendar.js");
 
 const members = [
   { uid: "admin", name: "Admin", role: "admin" },
-  { uid: "ana", name: "Ana", role: "member", department: "tecnicos" },
-  { uid: "bea", name: "Bea", role: "member", department: "diseno-industria" },
-  { uid: "luis", name: "Luis", role: "member", department: "produccion" },
-  { uid: "zoe", name: "Zoe", role: "member" },
+  { uid: "ana", name: "Ana", role: "member", department: "tecnicos", isDepartmentHead: true }, // v81: Responsable de Técnicos
+  { uid: "bea", name: "Bea", role: "member", department: "diseno-industria", isDepartmentHead: true }, // Responsable de Diseño
+  { uid: "luis", name: "Luis", role: "member", department: "produccion" }, // trabajador normal
+  { uid: "zoe", name: "Zoe", role: "member", isDepartmentHead: true }, // marca de Responsable SIN departamento: no vale
 ];
 const calendar = normalizeWorkCalendar({
   holidays: [{ id: "h1", date: "2026-11-09", name: "Fiesta local", scope: "local" }],
@@ -25,8 +25,8 @@ const T = (id, projectId, start, due, who, extra = {}) => ({ id, title: "Tarea "
 const p1 = [T("a1", "P1", "2026-11-03", "2026-11-05", ["ana"]), T("a2", "P1", "2026-11-04", "2026-11-06", ["ana"]), T("a3", "P1", "2026-11-05", "2026-11-05", ["ana"]), T("a4", "P1", "2026-11-10", "2026-11-12", ["ana"])];
 const p2 = [T("l1", "P2", "2026-11-03", "2026-11-04", ["luis"], { title: "Solo de Luis" }), T("b1", "P2", "2026-11-05", "2026-11-06", ["bea"]), T("s1", "P2", "2026-11-05", "2026-11-05", ["ana", "luis"], { title: "Compartida" })];
 const groups = [
-  { id: "P1", label: "Proyecto Uno", color: "#c00", code: "00126", sections: [], tasks: p1 },
-  { id: "P2", label: "Proyecto Dos", color: "#0a0", code: "00226", sections: [], tasks: p2 },
+  { id: "P1", label: "Proyecto Uno", color: "#c00", code: "26001", sections: [], tasks: p1 },
+  { id: "P2", label: "Proyecto Dos", color: "#0a0", code: "26002", sections: [], tasks: p2 },
 ];
 
 const calls = { groupBy: [], dept: [], open: [] };
@@ -53,16 +53,26 @@ check("… y no aparece ninguna tarea de Luis ni de Bea", !c.textContent.include
 check("… pero sí la compartida de Ana", c.textContent.includes("Compartida"));
 c = render(admin, { departmentFilter: "diseno" });
 eq("admin filtra por el grupo Diseño: Bea", people(c), ["bea"]);
-c = render(members[1]); // Ana, Técnicos
-eq("un técnico solo ve a Técnicos", people(c), ["ana"]);
-check("el técnico no ve el selector de departamento, sino su departamento", !c.querySelector("#tl-dept-filter") && c.textContent.includes("Departamento: Técnicos"));
-check("el técnico no ve las tareas de otros", !c.textContent.includes("Solo de Luis"));
-c = render(members[2]); // Bea, Diseño - Industria
-eq("Diseño ve el grupo Diseño (aquí solo Bea)", people(c), ["bea"]);
-c = render(members[4]); // Zoe, sin departamento
-eq("sin departamento: solo uno mismo", people(c), ["zoe"]);
-check("… y se lo explica", c.textContent.includes("Sin departamento asignado"));
-check("una persona sin tareas sale igualmente (capacidad libre)", !!c.querySelector('[data-person="zoe"]'));
+c = render(members[1]); // Ana, Responsable de Técnicos
+eq("v81: la Responsable de Técnicos solo ve a Técnicos", people(c), ["ana"]);
+check("… no ve el selector de departamento, sino su departamento", !c.querySelector("#tl-dept-filter") && c.textContent.includes("Departamento: Técnicos"));
+check("… y ve el conmutador «Persona (carga)»", !!c.querySelector('[data-groupby="person"]'));
+check("… no ve las tareas de otros", !c.textContent.includes("Solo de Luis"));
+c = render(members[2]); // Bea, Responsable de Diseño - Industria
+eq("v81: la Responsable de Diseño ve el grupo Diseño (aquí solo Bea)", people(c), ["bea"]);
+// v81: quien no es admin ni Responsable NO ve la carga de nadie
+c = render(members[3]); // Luis, trabajador normal de Producción, pide el modo Persona
+eq("v81: un trabajador normal no ve ningún bloque de persona (ni el suyo)", people(c), []);
+check("… ni el conmutador «Agrupar por»", !c.querySelector("[data-groupby]"));
+check("… vuelve a la línea de tiempo por Proyecto (Secciones/Tareas visibles, sin leyenda de carga)", !!c.querySelector("[data-viewmode]") && !c.querySelector(".tl-wl-legend"));
+check("… y las tareas de todos siguen saliendo agrupadas por proyecto (no se pierde nada)", c.textContent.includes("Proyecto Uno") && c.textContent.includes("Proyecto Dos"));
+c = render(members[3], { groupBy: "workload" }); // el valor que guardaba la idea original
+eq("v81: un valor «workload» forzado tampoco abre la carga", people(c), []);
+c = render(members[4]); // Zoe: marca de Responsable pero sin departamento
+eq("v81: la marca de Responsable sin departamento no vale: nadie", people(c), []);
+check("… y no hay conmutador", !c.querySelector("[data-groupby]"));
+c = render({ uid: "viejo", role: "member", name: "Viejo", department: "tecnicos" }); // cuenta anterior a la v81 (sin marca)
+eq("v81: una cuenta anterior, sin marca de Responsable, no ve la carga", people(c), []);
 c = render(admin);
 const sel = c.querySelector("#tl-dept-filter");
 check("el admin tiene el selector de departamento con todos los grupos", !!sel && [...sel.options].map((o) => o.value).join() === ",diseno,diseno-industria,diseno-automocion,tecnicos,produccion,none", sel && [...sel.options].map((o) => o.value));
@@ -89,8 +99,8 @@ check("el sombreado cubre todo su bloque (cabecera + 5 tareas)", abs.every((a) =
 check("el festivo del 9 se sombrea (columna de festivo de la v78)", c.querySelectorAll(".tl-cal-holiday-col").length >= 1);
 // Barras y códigos
 const bars = [...c.querySelectorAll(".tl-bar")];
-check("cada barra lleva el código XXXYY de su proyecto", bars.length >= 5 && bars.every((b) => /^(00126|00226)$/.test((b.querySelector(".tl-bar__code") || {}).textContent)), bars.map((b) => b.textContent));
-check("la etiqueta de la tarea también lleva el código", [...c.querySelectorAll(".tl-code")].some((e) => e.textContent === "00126"));
+check("cada barra lleva el código YYXXX de su proyecto", bars.length >= 5 && bars.every((b) => /^(26001|26002)$/.test((b.querySelector(".tl-bar__code") || {}).textContent)), bars.map((b) => b.textContent));
+check("la etiqueta de la tarea también lleva el código", [...c.querySelectorAll(".tl-code")].some((e) => e.textContent === "26001"));
 check("las barras que coinciden en el día saturado llevan el contorno rojo", c.querySelector('.tl-bar[data-task-id="a1"]').classList.contains("tl-bar--hot") && !c.querySelector('.tl-bar[data-task-id="a4"]').classList.contains("tl-bar--hot"));
 check("la tarea compartida sale en el bloque de Ana", !!c.querySelector('[data-task-id="s1"]'));
 c = render(admin, { departmentFilter: "produccion" });
@@ -118,12 +128,15 @@ check("modo Persona: botones Secciones/Tareas ocultos, leyenda visible", !c.quer
 c = render(admin, { groupBy: "person", project: { id: "P1", name: "Proyecto Uno", sections: [] } });
 check("en la línea de tiempo de un proyecto NO hay conmutador ni modo Persona", !c.querySelector("[data-groupby]") && people(c).length === 0);
 
-// Departamento sin gente → mensaje claro
-c = render({ uid: "nuevo", role: "member", name: "Nuevo", department: "produccion" });
+// Responsable de un departamento cuyo único miembro es otro
+c = render({ uid: "nuevo", role: "member", name: "Nuevo", department: "produccion", isDepartmentHead: true });
 // (su alcance es Producción: Luis; él mismo no está en `members`)
 eq("alcance Producción: solo Luis", people(c), ["luis"]);
 const none = render(admin, { departmentFilter: "none", groupBy: "person" });
 eq("admin con «sin departamento»: Admin y Zoe", people(none), ["admin", "zoe"]);
+// v81: el estado «Persona» en app.js (groupBy) de un admin sigue funcionando
+c = render(admin, { groupBy: "person", project: undefined });
+check("admin: el conmutador sigue visible", !!c.querySelector('[data-groupby="person"]'));
 
 done("Carga por persona · línea de tiempo (jsdom)");
 process.exit(0);

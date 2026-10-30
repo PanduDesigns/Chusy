@@ -31,7 +31,7 @@
 //                        lleva en `appProperties.folder` una clave estable (v70: el ID de la
 //                        oferta o del proyecto, no su nombre) y así se encuentra siempre.
 //                        v75: las de ID viven en `Ofertas/` o `Proyectos/` y se llaman
-//                        `XXXYY - Nombre`; se mueven (oferta → proyecto, moveCodeFolderToProjects)
+//                        `YYXXX - Nombre`; se mueven (oferta → proyecto, moveCodeFolderToProjects)
 //                        y se renombran (renameCodeFolder) con un PATCH de Drive — también desde el
 //                        navegador, tampoco hace falta tocar el puente.
 // ============================================================================
@@ -56,7 +56,7 @@ import {
   DRIVE_ROOTS,
   codedFolderName,
 } from "./drive-files.js";
-import { hasCodePrefix } from "./project-codes.js";
+import { hasCodePrefix, legacyCodeOf } from "./project-codes.js";
 
 const NETWORK_MESSAGE = "No se pudo conectar con Google Drive. Comprueba tu conexión e inténtalo de nuevo.";
 const GATEWAY_UNREACHABLE_MESSAGE =
@@ -362,30 +362,46 @@ export function createDriveStorage({
    */
   async function locateCodeFolder(code, hintId) {
     const key = `c:${code}`;
+    // v82: una carpeta creada con el ID del formato antiguo (`c:00126`, nombre `00126 - Cliente`) sigue siendo LA
+    // carpeta de ese ID cuando se pide con el nuevo (`26001`): la migración XXXYY → YYXXX no toca Drive de golpe.
+    // Se acepta —por la pista o buscándola— y quien la encuentra le pone la clave y el nombre nuevos (retocarCarpeta).
+    const legacy = legacyCodeOf(code);
+    const legacyKey = legacy ? `c:${legacy}` : null;
     if (hintId) {
       const hinted = await getFolder(hintId);
-      if (hinted && hinted.appProperties && hinted.appProperties.folder === key) return hinted;
+      const have = hinted && hinted.appProperties ? hinted.appProperties.folder : null;
+      if (hinted && have && (have === key || have === legacyKey)) return hinted;
     }
-    return findFolder(null, key);
+    const found = await findFolder(null, key);
+    if (found || !legacyKey) return found;
+    return findFolder(null, legacyKey);
   }
 
-  /** PATCH de una carpeta: nuevo nombre y/o moverla (`move` = { add, remove[] }). Un solo viaje a Drive. */
-  async function patchFolder(id, { name = null, move = null } = {}) {
+  /** Lo que hay que ponerle a una carpeta de ID para que quede «al día»: su clave `c:<ID>` si aún lleva la del formato antiguo (`{}` si ya está bien). */
+  function keyPatchFor(folder, code) {
+    const have = folder && folder.appProperties ? folder.appProperties.folder : null;
+    return have && have !== `c:${code}` ? { appProperties: { folder: `c:${code}` } } : {};
+  }
+
+  /** PATCH de una carpeta: nuevo nombre, moverla (`move` = { add, remove[] }) y/o actualizar sus `appProperties` (v82: la clave `c:<ID>`). Un solo viaje a Drive. */
+  async function patchFolder(id, { name = null, move = null, appProperties = null } = {}) {
     const qs = new URLSearchParams({ fields: "id,name,parents" });
     if (move && move.add) qs.set("addParents", move.add);
     if (move && move.remove && move.remove.length) qs.set("removeParents", move.remove.join(","));
     const res = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(id)}?${qs.toString()}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(name ? { name } : {}),
+      body: JSON.stringify({ ...(name ? { name } : {}), ...(appProperties ? { appProperties } : {}) }),
     });
     if (!res.ok) throw await driveHttpError(res);
   }
 
   /** Olvida lo recordado de la carpeta de un ID (después de renombrarla o moverla). */
   function forgetCodeFolder(code) {
-    const prefix = `code/c:${code}/`;
-    for (const k of [...folderCache.keys()]) if (k.startsWith(prefix)) folderCache.delete(k);
+    const prefixes = [`code/c:${code}/`];
+    const legacy = legacyCodeOf(code);
+    if (legacy) prefixes.push(`code/c:${legacy}/`);
+    for (const k of [...folderCache.keys()]) if (prefixes.some((prefix) => k.startsWith(prefix))) folderCache.delete(k);
   }
 
   /** La carpeta madre `Ofertas` o `Proyectos` (se crea la primera vez), dentro de «Chusy - archivos». */
@@ -397,7 +413,7 @@ export function createDriveStorage({
    * v75: encuentra —o crea— la carpeta de un ID (`seg`, ver driveFolderPath) y la deja «en regla»:
    *   · se busca DONDE esté, no solo dentro de una madre (por la pista `seg.hint` y por su clave);
    *   · si existe pero su nombre no lleva el ID por delante (alguien la renombró a mano) se le pone
-   *     `XXXYY - …` (se conserva lo que escribió esa persona; el nombre de la oferta o del proyecto lo
+   *     `YYXXX - …` (se conserva lo que escribió esa persona; el nombre de la oferta o del proyecto lo
    *     sincroniza renameCodeFolder cuando se edita, no una subida);
    *   · si es de un PROYECTO y no está en `Proyectos` (se quedó en `Ofertas` porque falló el traspaso al
    *     convertir, o es de la v70, suelta en «Chusy - archivos») se mueve a `Proyectos`; si es de una OFERTA,
@@ -417,11 +433,13 @@ export function createDriveStorage({
       const found = await locateCodeFolder(seg.code, seg.hint);
       if (!found) return { id: await createFolder(root.id, seg), created: true, renamed: false, moved: false };
       const parents = Array.isArray(found.parents) ? found.parents : [];
+      // v82: un nombre con el ID del formato antiguo (`00126 - Cliente`) pasa a `26001 - Cliente` (codedName no lo duplica).
       const rename = !hasCodePrefix(found.name, seg.code) ? codedFolderName(seg.code, found.name) : null;
+      const keyPatch = keyPatchFor(found, seg.code);
       const shouldMove = seg.root === "proyectos" ? !parents.includes(root.id) : parents.includes(tok.folderId);
-      if (rename || shouldMove) {
+      if (rename || shouldMove || keyPatch.appProperties) {
         try {
-          await patchFolder(found.id, { name: rename, move: shouldMove ? { add: root.id, remove: parents.filter((p) => p !== root.id) } : null });
+          await patchFolder(found.id, { name: rename, move: shouldMove ? { add: root.id, remove: parents.filter((p) => p !== root.id) } : null, ...keyPatch });
         } catch (e) {
           console.warn("Drive: no se pudo ordenar la carpeta de", seg.code, "(se usa tal como está)", e);
           return { id: found.id, created: false, renamed: false, moved: false };
@@ -481,7 +499,7 @@ export function createDriveStorage({
   }
 
   /**
-   * v75: pone a la carpeta de un ID el nombre `XXXYY - Nombre` de ahora (la oferta o el proyecto cambió de
+   * v75: pone a la carpeta de un ID el nombre `YYXXX - Nombre` de ahora (la oferta o el proyecto cambió de
    * nombre). NO crea nada: si esa oferta o proyecto aún no tiene carpeta (nunca se subió un archivo),
    * devuelve `{ folderId: null }`. Sin nombre no se renombra (no se sabe a qué).
    * Devuelve `{ folderId, renamed }`; `folderId` es el que hay que anotar si la ficha aún no lo tenía.
@@ -493,14 +511,18 @@ export function createDriveStorage({
     forgetCodeFolder(code);
     if (!String(name ?? "").trim()) return { folderId: found.id, renamed: false };
     const want = codedFolderName(code, name);
-    if (found.name === want) return { folderId: found.id, renamed: false };
-    await patchFolder(found.id, { name: want });
+    const keyPatch = keyPatchFor(found, code); // v82: y la clave `c:<ID>` si aún es la del formato antiguo
+    if (found.name === want) {
+      if (keyPatch.appProperties) await patchFolder(found.id, keyPatch);
+      return { folderId: found.id, renamed: false };
+    }
+    await patchFolder(found.id, { name: want, ...keyPatch });
     return { folderId: found.id, renamed: true };
   }
 
   /**
    * v75: al convertir una oferta en proyecto, su carpeta pasa de `Ofertas` a `Proyectos` y se renombra a
-   * `XXXYY - Nombre del proyecto`, en UNA sola operación de Drive (el id de la carpeta no cambia, y todo lo
+   * `YYXXX - Nombre del proyecto`, en UNA sola operación de Drive (el id de la carpeta no cambia, y todo lo
    * de dentro —los adjuntos de la oferta, con sus ids— se va con ella). No crea nada: sin carpeta (la oferta
    * nunca tuvo archivos) devuelve `{ folderId: null }`. Si ya está en `Proyectos`, solo la renombra.
    * Devuelve `{ folderId, moved, renamed }`.
@@ -516,10 +538,12 @@ export function createDriveStorage({
     const moved = !parents.includes(root.id);
     const want = String(name ?? "").trim() ? codedFolderName(code, name) : null;
     const renamed = !!want && found.name !== want;
-    if (moved || renamed) {
+    const keyPatch = keyPatchFor(found, code); // v82: la clave del formato antiguo se actualiza de paso
+    if (moved || renamed || keyPatch.appProperties) {
       await patchFolder(found.id, {
         name: renamed ? want : null,
         move: moved ? { add: root.id, remove: parents.filter((p) => p !== root.id) } : null,
+        ...keyPatch,
       });
     }
     return { folderId: found.id, moved, renamed };

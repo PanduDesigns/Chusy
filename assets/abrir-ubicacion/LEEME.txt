@@ -18,6 +18,21 @@ Instalar (una vez por ordenador y usuario de Windows)
 No hace falta ser administrador: solo escribe en
 %LOCALAPPDATA%\Chusy y en el registro del propio usuario (HKCU).
 
+Novedad v81: crear la carpeta si no existe
+-----------------------------------------
+Si la carpeta de destino no existe todavia pero SU CARPETA PADRE si, y se llama
+como un ID de Chusy ("YYXXX - Nombre", por ejemplo "26001 - Cabina"), el
+ayudante pregunta con un Si/No: "La carpeta ... no existe todavia. Deseas
+crearla ahora y abrirla?". Con "Si" crea esa UNICA carpeta y la abre; con "No"
+no hace nada. En cualquier otro caso (la carpeta padre tampoco existe, o el
+nombre no lleva ID) se comporta como siempre: avisa de que no se encuentra.
+Ademas, en Chusy, con la casilla Ubicacion vacia y una ruta raiz recordada,
+aparece el boton "Asignar carpeta sugerida: RutaRaiz\YYXXX - Nombre".
+
+Si ya lo tenias instalado, sigue funcionando exactamente igual que antes. Para
+tener tambien lo nuevo, vuelve a ejecutar Instalar-AbrirUbicacion.bat (copia la
+version nueva del script; no hace falta desinstalar ni volver a dar permisos).
+
 Quitar
 ------
 Doble clic en  Desinstalar-AbrirUbicacion.bat

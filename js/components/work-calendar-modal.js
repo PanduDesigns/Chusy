@@ -28,7 +28,7 @@ import { el, escapeHtml, showToast, initials, colorFromString, toDateInputValue 
 import { subscribeToWorkCalendar, updateWorkCalendar } from "../data/work-calendar.js";
 import {
   ABSENCE_TYPES, HOLIDAY_SCOPES, EMPTY_CALENDAR,
-  addHoliday, updateHoliday, removeHoliday, mergeHolidays, addAbsence, updateAbsence, removeAbsence,
+  addHoliday, updateHoliday, removeHoliday, mergeHolidays, removeObsoleteHolidays, addAbsence, updateAbsence, removeAbsence,
   officialHolidaysForSeed, seedYears, hasOfficialHolidays,
   visibleAbsences, canSeeAbsenceNote, countWorkingDays, parseDateKey, dateKey,
 } from "../work-calendar.js";
@@ -92,7 +92,8 @@ export function openWorkCalendarModal({ currentUser, teamMembers }) {
     render();
     try {
       const result = await updateWorkCalendar(mutator, currentUser.uid);
-      if (okMessage) showToast(typeof okMessage === "function" ? okMessage(result) : okMessage);
+      const message = typeof okMessage === "function" ? okMessage(result) : okMessage;
+      if (message) showToast(message);
       return true;
     } catch (e) {
       const denied = e && (e.code === "permission-denied" || /permission/i.test(e.message || ""));
@@ -253,9 +254,14 @@ export function openWorkCalendarModal({ currentUser, teamMembers }) {
     const seed = panel.querySelector("#wc-seed");
     if (seed) seed.addEventListener("click", async () => {
       const years = seedYears();
-      const ok = await run((base) => mergeHolidays(base, officialHolidaysForSeed()), (r) => {
+      // v82: antes de añadir, se quitan los festivos sobrantes que dejaron versiones anteriores (Lunes de Pascua sin decreto): mergeHolidays solo añade.
+      const ok = await run((base) => {
+        const cleaned = removeObsoleteHolidays(base);
+        return { ...mergeHolidays(cleaned.cfg, officialHolidaysForSeed()), removed: cleaned.removed };
+      }, (r) => {
         const estimated = years.filter((y) => !hasOfficialHolidays(y));
-        const base = r.added ? `Se añadieron ${r.added} festivos oficiales de ${years.join(" y ")}${r.skipped ? ` (${r.skipped} ya estaban)` : ""}.` : "Todos los festivos oficiales ya estaban cargados.";
+        const cleanedNote = r.removed ? ` Se quitó ${r.removed === 1 ? "1 festivo sobrante" : `${r.removed} festivos sobrantes`} (Lunes de Pascua sin decreto).` : "";
+        const base = (r.added ? `Se añadieron ${r.added} festivos oficiales de ${years.join(" y ")}${r.skipped ? ` (${r.skipped} ya estaban)` : ""}.` : "Todos los festivos oficiales ya estaban cargados.") + cleanedNote;
         return estimated.length ? `${base} Los de ${estimated.join(" y ")} son una estimación: revísalos cuando se publique el decreto.` : base;
       });
       if (ok) state.year = Math.min(Math.max(state.year, years[0]), years[1]);
@@ -370,9 +376,19 @@ export function openWorkCalendarModal({ currentUser, teamMembers }) {
   overlay.querySelector("#wc-done").addEventListener("click", close);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
 
+  // v82: al abrir (solo un admin puede escribir), se limpian los festivos sobrantes que dejaron versiones anteriores
+  // —Lunes de Pascua de Castilla-La Mancha sin decreto— y se guarda la lista limpia. Una sola vez por apertura.
+  let cleanedOnOpen = false;
+  function cleanObsoleteOnOpen() {
+    if (!isAdmin || cleanedOnOpen || state.busy || !removeObsoleteHolidays(cfg).removed) return;
+    cleanedOnOpen = true;
+    run((base) => removeObsoleteHolidays(base), (r) => (r.removed ? `Se quitó ${r.removed === 1 ? "1 festivo sobrante" : `${r.removed} festivos sobrantes`} de versiones anteriores (Lunes de Pascua sin decreto).` : null));
+  }
+
   render();
   unsub = subscribeToWorkCalendar((next) => {
     cfg = next;
+    cleanObsoleteOnOpen();
     // Si lo que se estaba editando ya no existe (lo borró otra persona), se sale de la edición.
     if (state.editingHoliday && !cfg.holidays.some((h) => h.id === state.editingHoliday)) state.editingHoliday = null;
     if (state.editingAbsence && !cfg.absences.some((a) => a.id === state.editingAbsence)) state.editingAbsence = null;

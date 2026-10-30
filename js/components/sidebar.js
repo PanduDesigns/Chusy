@@ -49,7 +49,7 @@
 // app.js, igual que el resto de acciones que necesitan datos de fuera.
 // ============================================================================
 import { initials, colorFromString, escapeHtml, projectBadgeHtml, projectIcon, showToast } from "../utils.js";
-import { findDepartment } from "../departments.js";
+import { findDepartment, canViewMetrics } from "../departments.js";
 import { openContextMenu } from "./context-menu.js";
 import { updateProject, archiveProject } from "../data/projects.js";
 import { trashProject } from "../data/trash.js";
@@ -247,7 +247,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     // Revisor de Miembro, así que va en su propia comprobación en vez de
     // colgar del bloque de arriba (estrictamente admin) o del de abajo
     // (estrictamente admin también).
-    if (userProfile.role === "admin" || userProfile.role === "revisor") {
+    if (canViewMetrics(userProfile)) { // v81: admin, Revisor y Responsables de Departamento
       items.push({ label: "Métricas", icon: "📊", onClick: onSelectMetrics });
     }
     if (userProfile.role === "admin") {

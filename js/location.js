@@ -206,16 +206,16 @@ export function findLocationInDescription(description) {
 // ---------------------------------------------------------------------------
 // v75 · El ID en la carpeta local. Chusy no construye rutas locales (no conoce la unidad ni el servidor de
 // cada ordenador: la Ubicación es el texto que escribe la persona, o el que pone la macro de Outlook), pero sí
-// puede decir CÓMO se llamaría la carpeta —con el mismo formato `XXXYY - Nombre` que la carpeta de Drive, y
+// puede decir CÓMO se llamaría la carpeta —con el mismo formato `YYXXX - Nombre` que la carpeta de Drive, y
 // con el mismo helper (codedName en project-codes.js)— y avisar si la que se ha escrito no lleva el ID.
 // ---------------------------------------------------------------------------
 
-/** El nombre de la carpeta local de un ID: `XXXYY - Nombre`, sin los caracteres que Windows no admite en un nombre de carpeta ni puntos/espacios finales. */
+/** El nombre de la carpeta local de un ID: `YYXXX - Nombre`, sin los caracteres que Windows no admite en un nombre de carpeta ni puntos/espacios finales. */
 export function localFolderName(code, name) {
   return codedName(code, name).replace(/[\\/:*?"<>|]/g, "_").replace(/[. ]+$/, "").trim();
 }
 
-/** El último tramo de una ruta de carpeta (`\\srv\Ofertas\00126 - Cabina` → `00126 - Cabina`); "" si no hay carpeta (vacío o dirección web). */
+/** El último tramo de una ruta de carpeta (`\\srv\Ofertas\26001 - Cabina` → `26001 - Cabina`); "" si no hay carpeta (vacío o dirección web). */
 export function locationFolderName(raw) {
   const location = normalizeLocation(raw);
   if (location.kind !== "folder") return "";
@@ -232,4 +232,97 @@ export function locationHasCode(raw, code) {
   const folder = locationFolderName(raw);
   if (!folder || !String(code ?? "").trim()) return true;
   return hasCodePrefix(folder, code);
+}
+
+// ---------------------------------------------------------------------------
+// v81 · Ruta raíz recordada y carpeta sugerida. Chusy sigue sin conocer la unidad ni el servidor de cada
+// ordenador, pero lo recuerda EN ESTE NAVEGADOR: la «ruta raíz de proyectos/ofertas» (p. ej. `Z:\Proyectos` o
+// `\\Servidor\Compartido\Ofertas`) que la persona escribe una vez, o la carpeta PADRE de la última ubicación
+// que usó. Con ella, a un proyecto u oferta con ID y nombre pero sin Ubicación se le ofrece la carpeta
+// `RutaRaíz\YYXXX - Nombre` con un clic, sin teclear ni copiar nada desde el Explorador.
+// Todo lo de aquí es puro salvo leer/escribir `storage` (localStorage por defecto, siempre con try/catch).
+// ---------------------------------------------------------------------------
+
+/** Ruta raíz escrita a mano (manda sobre la deducida). */
+export const LOCATION_ROOT_KEY = "chusy_location_root";
+/** Ruta raíz deducida de la última carpeta padre usada. */
+export const LOCATION_ROOT_AUTO_KEY = "chusy_location_root_auto";
+
+/** Quita las barras finales de una ruta, salvo la raíz de una unidad (`Z:\` se queda). */
+function trimTrailingSeparators(path) {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  return /^[A-Za-z]:$/.test(trimmed) ? `${trimmed}\\` : trimmed;
+}
+
+/** ¿Tiene forma de ruta absoluta de Windows? (`Z:\algo`, `Z:/algo`, `Z:\`, `\\servidor\recurso`) */
+function isAbsolutePath(path) {
+  return /^(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/][^\\/])/.test(path);
+}
+
+/**
+ * Una ruta raíz limpia (sin comillas ni barras finales), o "" si lo escrito no es una ruta de carpeta
+ * absoluta (una dirección web, una ruta relativa o texto cualquiera no sirven de raíz).
+ */
+export function normalizeRoot(raw) {
+  const { kind, value } = normalizeLocation(raw);
+  if (kind !== "folder" || !isAbsolutePath(value)) return "";
+  return trimTrailingSeparators(value);
+}
+
+/**
+ * La carpeta que contiene a la de una Ubicación (`Z:\Proyectos\26001 - Cabina` → `Z:\Proyectos`;
+ * `\\srv\Ofertas\26001 - X` → `\\srv\Ofertas`; `Z:\26001 - X` → `Z:\`), o "" si la ubicación no es una
+ * carpeta local/de red con al menos un nivel por encima (`\\srv\recurso` no tiene padre aprovechable).
+ */
+export function parentFolderOf(raw) {
+  const { kind, value } = normalizeLocation(raw);
+  if (kind !== "folder" || !isAbsolutePath(value)) return "";
+  const path = trimTrailingSeparators(value);
+  const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  if (cut < 0) return "";
+  const parent = path.slice(0, cut);
+  if (/^[A-Za-z]:$/.test(parent)) return `${parent}\\`;
+  return isAbsolutePath(parent) ? parent : "";
+}
+
+/** Une una carpeta y un nombre con la barra que ya use la ruta (`\` salvo que solo lleve `/`). */
+export function joinPath(root, name) {
+  const base = normalizeRoot(root);
+  const leaf = String(name ?? "").trim();
+  if (!base || !leaf) return "";
+  const sep = base.includes("\\") || !base.includes("/") ? "\\" : "/";
+  return base.endsWith("\\") || base.endsWith("/") ? `${base}${leaf}` : `${base}${sep}${leaf}`;
+}
+
+/**
+ * La carpeta que se sugiere para un proyecto u oferta: `RutaRaíz\YYXXX - Nombre`. "" si falta la raíz, el ID
+ * o el nombre (sin ID no hay forma de llamarla `YYXXX - Nombre`; sin nombre sería solo el ID).
+ */
+export function suggestedLocation(root, code, name) {
+  const c = String(code ?? "").trim();
+  if (!c || !String(name ?? "").trim() || !normalizeRoot(root)) return "";
+  return joinPath(root, localFolderName(c, name));
+}
+
+const defaultStorage = () => { try { return globalThis.localStorage || null; } catch { return null; } };
+const readKey = (storage, key) => { try { return (storage && storage.getItem(key)) || ""; } catch { return ""; } };
+const writeKey = (storage, key, value) => { try { if (storage) { if (value) storage.setItem(key, value); else storage.removeItem(key); return true; } } catch { /* sin almacenamiento */ } return false; };
+
+/** La ruta raíz que se usa: la escrita a mano o, si no hay, la deducida de la última carpeta padre. "" si ninguna. */
+export function getRememberedRoot(storage = defaultStorage()) {
+  return normalizeRoot(readKey(storage, LOCATION_ROOT_KEY)) || normalizeRoot(readKey(storage, LOCATION_ROOT_AUTO_KEY));
+}
+
+/** Guarda (o, con "", borra) la ruta raíz escrita a mano. Devuelve la ruta guardada ("" si no era válida o se borró). */
+export function setRememberedRoot(raw, storage = defaultStorage()) {
+  const root = normalizeRoot(raw);
+  writeKey(storage, LOCATION_ROOT_KEY, root);
+  return root;
+}
+
+/** Anota la carpeta PADRE de una ubicación usada como raíz deducida. Devuelve la raíz deducida ("" si no había). */
+export function rememberRootFromLocation(raw, storage = defaultStorage()) {
+  const parent = parentFolderOf(raw);
+  if (parent) writeKey(storage, LOCATION_ROOT_AUTO_KEY, parent);
+  return parent;
 }

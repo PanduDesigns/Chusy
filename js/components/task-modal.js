@@ -103,7 +103,7 @@ import { attachTextSuggest } from "./text-suggest.js";
 import { defaultSectorOf } from "../departments.js";
 import { getWorkCalendar } from "../data/work-calendar.js";
 import { describeDay, nextWorkingDay, dateKey, formatDayMonth } from "../work-calendar.js";
-import { createOpenLocationButton } from "./open-location.js";
+import { createOpenLocationButton, createSuggestLocationControls } from "./open-location.js";
 import { localFolderName } from "../location.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
@@ -182,6 +182,7 @@ export function openTaskModal({
   // nunca lo tuvo) — no es parte del draft porque no se elige a mano en
   // ningún control del formulario, ver computeOwnerIdOnSave().
   let loadedOwnerId = null;
+  let loadedPrimary = null; // v81: proyecto y sección con los que se abrió, para saber si guardar cambia la sección (sectionEnteredAt)
   // Responsables que tenía la tarea al abrirla — para, al guardar, avisar
   // SOLO a quien se haya añadido de nuevo (ver notifyNewAssignees en
   // handleAccept), no a quien ya estaba antes de este cambio.
@@ -263,6 +264,7 @@ export function openTaskModal({
       if (t.projectId) sectionByProject[t.projectId] = t.sectionId || null;
       Object.entries(t.extraSections || {}).forEach(([pid, sid]) => { sectionByProject[pid] = sid || null; });
       loadedOwnerId = t.ownerId || null;
+      loadedPrimary = { projectId: t.projectId || null, sectionId: t.sectionId || null };
       loadedAssigneeIds = t.assigneeIds || [];
       convertedProjectId = t.convertedProjectId || null;
       offerCode = t.offerCode || null;
@@ -703,6 +705,11 @@ export function openTaskModal({
       locationSlot.appendChild(openButton.el);
       locationInput.addEventListener("input", openButton.refresh);
       locationInput.addEventListener("change", openButton.refresh);
+      // v81: «Asignar carpeta sugerida» (ruta raíz recordada + ID + título de la oferta) bajo la casilla vacía.
+      const suggest = createSuggestLocationControls({ input: locationInput, getCode: () => offerCode, getName: () => plainTitleText(draft.title) });
+      locationInput.insertAdjacentElement("afterend", suggest.el);
+      const titleInput = locationInput.closest(".modal")?.querySelector("#t-title");
+      if (titleInput) titleInput.addEventListener("input", suggest.refresh);
     }
   }
 
@@ -801,7 +808,7 @@ export function openTaskModal({
   /**
    * v75: tras guardar una OFERTA, su carpeta de Drive lleva el título de ahora: si se editó el título
    * (o el título con que se creó la carpeta al subir el primer archivo ya no es el definitivo) se renombra
-   * a `XXXYY - Título`. Sin carpeta o con Drive apagado no pasa nada; y si la oferta no tenía anotado el
+   * a `YYXXX - Título`. Sin carpeta o con Drive apagado no pasa nada; y si la oferta no tenía anotado el
    * id de su carpeta (es de antes de la v75) y se encuentra, se anota. Va por su cuenta: no hace esperar
    * a «Aceptar» ni puede hacerlo fallar.
    */
@@ -1509,7 +1516,7 @@ export function openTaskModal({
           ...(offers && offerCodeAssignedHere ? { offerCode } : {}),
           // v75: solo si ha cambiado (la carpeta se creó en esta apertura); si ya lo tenía, no se vuelve a escribir.
           ...(offers && offerDriveFolderId && offerDriveFolderId !== loadedOfferDriveFolderId ? { driveFolderId: offerDriveFolderId } : {}),
-        });
+        }, loadedPrimary); // v81: con lo que había al abrir, para anotar sectionEnteredAt solo si de verdad cambia de sección
         if (offers) syncOfferFolderAfterSave(taskId);
         onSaved(taskId);
         // Tarea existente: solo avisa a quien esté en la lista nueva pero

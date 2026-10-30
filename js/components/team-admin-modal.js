@@ -4,8 +4,8 @@
 // el registro. Se abre desde el pie de la barra lateral.
 // ============================================================================
 import { el, escapeHtml, initials, colorFromString, showToast } from "../utils.js";
-import { updateUserRole, updateUserDepartment, setUserDeleted, getTeamConfig, updateTeamConfig } from "../data/users.js";
-import { departmentOptionsFor } from "../departments.js";
+import { updateUserRole, updateUserDepartment, updateUserDepartmentHead, setUserDeleted, getTeamConfig, updateTeamConfig } from "../data/users.js";
+import { departmentOptionsFor, findDepartment } from "../departments.js";
 
 /**
  * Cuentas ficticias (isImported, del importador de Asana — nunca un UID de
@@ -89,7 +89,7 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
     overlay.querySelector("#admin-users-list").innerHTML = active
       .map(
         (m) => `
-      <div class="list-row" style="grid-template-columns:1fr 110px 150px 32px;align-items:center;">
+      <div class="list-row" style="grid-template-columns:1fr 110px 150px 84px 32px;align-items:center;">
         <span class="list-row__title-cell">
           <span class="avatar avatar--sm" style="background:${colorFromString(m.uid)}">${initials(m.name)}</span>
           <span style="min-width:0;">
@@ -106,6 +106,10 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
           <option value="" ${!m.department ? "selected" : ""}>Sin departamento</option>
           ${departmentOptionsFor(m.department).map((d) => `<option value="${d.value}" ${m.department === d.value ? "selected" : ""}>${d.label}</option>`).join("")}
         </select>
+        <label class="acc-switch-row" style="display:inline-flex;" title="Responsable del departamento: puede ver la carga de trabajo por persona de su departamento (los admin la ven siempre). Necesita un departamento asignado.">
+          <input type="checkbox" class="acc-head-check" data-uid="${m.uid}" ${m.isDepartmentHead === true ? "checked" : ""} ${findDepartment(m.department) ? "" : "disabled"}>
+          <span>Resp.</span>
+        </label>
         ${m.uid === currentUser.uid
           ? `<span></span>`
           : `<button type="button" class="acc-delete-btn" data-delete-uid="${m.uid}" title="Eliminar cuenta">🗑</button>`}
@@ -134,6 +138,7 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
 
     wireRoleSelects();
     wireDeptSelects();
+    wireHeadChecks();
     wireDeleteButtons();
     wireReactivateButtons();
   }
@@ -185,11 +190,37 @@ export function openTeamAdminModal({ teamMembers, currentUser }) {
         try {
           await updateUserDepartment(uid, newDept);
           if (member) member.department = newDept;
+          // v81: la marca de Responsable solo tiene sentido con departamento.
+          const headCheck = overlay.querySelector(`.acc-head-check[data-uid="${uid}"]`);
+          if (headCheck) headCheck.disabled = !findDepartment(newDept);
           showToast("Departamento actualizado.");
         } catch (e) {
           showToast("No se pudo cambiar el departamento.", "error");
           select.value = member ? member.department || "" : "";
         }
+      });
+    });
+  }
+
+  // ---- Responsable de departamento (v81) ----
+  // Guardado inmediato, como el departamento. Sin la protección de «mínimo de
+  // admins»: no controla ningún acceso general, solo la carga por persona.
+  function wireHeadChecks() {
+    overlay.querySelectorAll(".acc-head-check").forEach((cb) => {
+      cb.addEventListener("change", async () => {
+        const uid = cb.dataset.uid;
+        const member = members.find((m) => m.uid === uid);
+        const wanted = cb.checked;
+        cb.disabled = true;
+        try {
+          await updateUserDepartmentHead(uid, wanted);
+          if (member) member.isDepartmentHead = wanted;
+          showToast(wanted ? "Marcado como Responsable de departamento." : "Ya no es Responsable de departamento.");
+        } catch (e) {
+          cb.checked = !wanted; // revertir
+          showToast("No se pudo cambiar la marca de Responsable.", "error");
+        }
+        cb.disabled = !findDepartment(member && member.department);
       });
     });
   }

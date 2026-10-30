@@ -26,7 +26,7 @@
 // ============================================================================
 import { el, escapeHtml, uid, showToast, toDateInputValue } from "../utils.js";
 import { attachTextSuggest } from "./text-suggest.js";
-import { createOpenLocationButton } from "./open-location.js";
+import { createOpenLocationButton, createSuggestLocationControls } from "./open-location.js";
 import { localFolderName } from "../location.js";
 import { idChipHtml, idPendingHtml, wireIdChips } from "./id-chip.js";
 import { isIdError } from "../project-codes.js";
@@ -158,7 +158,7 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
   // mientras esté vacía. Aquí la etiqueta SÍ es un <label for>: el botón va
   // fuera de ella, en su fila, así que clicar el texto sigue enfocando la casilla.
   const ubicacionInput = overlay.querySelector("#pp-ubicacion");
-  // v75: con ID, la casilla sugiere cómo se llamaría la carpeta (`XXXYY - Nombre`, como la de Drive) y el
+  // v75: con ID, la casilla sugiere cómo se llamaría la carpeta (`YYXXX - Nombre`, como la de Drive) y el
   // botón avisa si la carpeta escrita no lleva el ID. El nombre es el del campo «Nombre del proyecto» al
   // convertir (se actualiza al escribirlo) o el del proyecto en «Propiedades».
   const idCode = (idInfo && idInfo.code) || "";
@@ -171,6 +171,10 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
   if (nameInputEl) nameInputEl.addEventListener("input", refreshLocationHint);
   const openLocationButton = createOpenLocationButton({ getValue: () => ubicacionInput.value, getCode: () => idCode, compact: true });
   overlay.querySelector("#pp-open-location-slot").appendChild(openLocationButton.el);
+  // v81: «Asignar carpeta sugerida» (ruta raíz recordada + ID + nombre del proyecto) bajo la casilla vacía.
+  const suggestLocation = createSuggestLocationControls({ input: ubicacionInput, getCode: () => idCode, getName: () => (nameInputEl ? nameInputEl.value : folderName) });
+  ubicacionInput.insertAdjacentElement("afterend", suggestLocation.el);
+  if (nameInputEl) nameInputEl.addEventListener("input", suggestLocation.refresh);
   ubicacionInput.addEventListener("input", (e) => { state.ubicacion = e.target.value; markDirty(); openLocationButton.refresh(); });
   overlay.querySelector("#pp-sector").addEventListener("change", (e) => { state.sector = e.target.value; markDirty(); });
   overlay.querySelector("#pp-approvedVersion").addEventListener("input", (e) => { state.approvedVersion = e.target.value; markDirty(); });

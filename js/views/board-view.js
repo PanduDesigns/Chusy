@@ -111,7 +111,7 @@ export function renderBoardView(container, { project, tasks, teamMembers, tagsRe
         const beforeTask = beforeEl ? tasks.find((t) => t.id === beforeEl.dataset.taskId) : null;
         newOrder = beforeTask ? (beforeTask.order + afterTask.order) / 2 : afterTask.order - 1;
       }
-      moveTask(taskId, sectionId, newOrder, project.id, task.projectId !== project.id);
+      moveTask(taskId, sectionId, newOrder, project.id, task.projectId !== project.id, task); // v81: `task` = cómo estaba, para anotar sectionEnteredAt solo si cambia de sección
     });
   });
 }

@@ -183,3 +183,37 @@ export function metricsFilterLabel(filter) {
   const found = DEPARTMENT_GROUPS.find((g) => g.value === filter) || findDepartment(filter);
   return found ? found.label : "";
 }
+
+// ============================================================================
+// Responsables de departamento y «Persona (carga)» (v81)
+//
+// La carga de trabajo por persona (línea de tiempo global, modo «Persona
+// (carga)») es información sobre COMPAÑEROS, así que no está abierta a todo el
+// mundo: solo la ven los administradores (todos los departamentos) y los
+// Responsables de Departamento (únicamente a las personas de su departamento,
+// con el mismo alcance que Métricas: `metricsScopeFor`).
+//
+// Quién es Responsable: una marca por persona, `users/{uid}.isDepartmentHead`
+// (true), que pone un admin en «Administrar equipo» junto al departamento. Una
+// marca ausente (todas las cuentas anteriores a la v81) = no es Responsable, así
+// que nada cambia para nadie hasta que un admin la active. Sin departamento
+// reconocido la marca no vale: no habría a quién enseñar.
+// ============================================================================
+/** ¿Es esta persona Responsable de su departamento? (marca + un departamento que exista) */
+export function isDepartmentHead(user) {
+  return !!user && user.isDepartmentHead === true && !!findDepartment(user.department);
+}
+
+/** ¿Puede esta persona abrir la carga por persona? Solo admin y Responsables de Departamento. */
+export function canViewWorkload(user) {
+  return !!user && (user.role === "admin" || isDepartmentHead(user));
+}
+
+/**
+ * ¿Puede esta persona abrir Métricas? Admin y Revisor (v54) y, desde la v81, los
+ * Responsables de Departamento: ven las métricas de SU departamento (el alcance lo
+ * fija metricsScopeFor, igual que para el Revisor; nunca pueden ampliarlo).
+ */
+export function canViewMetrics(user) {
+  return !!user && (user.role === "admin" || user.role === "revisor" || isDepartmentHead(user));
+}
