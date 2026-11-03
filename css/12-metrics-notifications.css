@@ -201,3 +201,45 @@
 .metrics-flow-table__row--head > span:not(:first-child) { font-family: inherit; font-size: inherit; }
 .metrics-flow-table__row .is-danger { color: var(--color-danger); font-weight: 600; }
 @media (max-width: 640px) { .metrics-flow-table__row { grid-template-columns: minmax(0, 1fr) 56px 80px 70px; } }
+
+/* ---- v83: analítica de ofertas (filtros, evolución, efectividad por comercial, revisiones ↔ cierre) ---- */
+.offer-filters { margin: 12px 0 4px; flex-wrap: wrap; }
+.offer-filters .metrics__select { min-width: 150px; }
+.offer-filters__clear { margin-left: auto; }
+.offer-import-btn { margin-left: 12px; font-size: 12px; padding: 4px 10px; vertical-align: middle; }
+
+.offer-legend { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; }
+.offer-legend::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+.offer-legend--won::before, .offer-evolution__seg--won { background: var(--color-success); }
+.offer-legend--lost::before, .offer-evolution__seg--lost { background: var(--color-text-faint); }
+.offer-legend--open::before, .offer-evolution__seg--open { background: var(--color-signal); }
+
+.offer-evolution { display: flex; flex-direction: column; gap: 2px; max-width: 760px; }
+.offer-evolution__row { display: grid; grid-template-columns: 52px 1fr 36px 52px; align-items: center; gap: 10px; padding: 4px 8px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--color-text-lo); font: inherit; font-size: 12.5px; text-align: left; cursor: default; }
+button.offer-evolution__row { cursor: pointer; }
+button.offer-evolution__row:hover { background: var(--color-panel-raised); }
+.offer-evolution__row.is-selected { border-color: var(--color-signal); background: rgba(252, 208, 0, .08); }
+.offer-evolution__row.is-empty { opacity: .55; }
+.offer-evolution__label { font-weight: 600; color: var(--color-text-hi); }
+.offer-evolution__bar { display: flex; height: 12px; background: var(--color-line); border-radius: 3px; overflow: hidden; }
+.offer-evolution__seg { display: block; height: 100%; }
+.offer-evolution__count, .offer-evolution__pct { text-align: right; font-variant-numeric: tabular-nums; }
+
+.metrics-offer-table { display: flex; flex-direction: column; border: 1px solid var(--color-line); border-radius: var(--radius-sm); overflow-x: auto; margin-top: 8px; }
+.metrics-offer-table__row { display: grid; align-items: center; gap: 10px; padding: 8px 12px; font-size: 12.5px; color: var(--color-text-lo); border-top: 1px solid var(--color-line); min-width: 640px; }
+.metrics-offer-table__row:first-child { border-top: 0; }
+.metrics-offer-table__row--head { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-faint); background: var(--color-panel-raised); }
+.metrics-offer-table--ranking .metrics-offer-table__row { grid-template-columns: minmax(130px, 2fr) repeat(8, minmax(52px, 1fr)); }
+.metrics-offer-table--revisions .metrics-offer-table__row { grid-template-columns: minmax(180px, 2fr) repeat(4, minmax(80px, 1fr)); }
+.metrics-offer-table__row > span:first-child { color: var(--color-text-hi); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-offer-table .is-won { color: var(--color-success); font-weight: 600; }
+.metrics-offer-table .is-low { color: var(--color-text-faint); font-style: italic; }
+.metrics-offer-table__bar { display: block; height: 4px; margin-top: 3px; background: var(--color-line); border-radius: 2px; overflow: hidden; }
+.metrics-offer-table__bar > span { display: block; height: 100%; background: var(--color-success); }
+
+.metrics-insight { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--color-line); border-left-width: 4px; border-radius: var(--radius-sm); font-size: 13px; color: var(--color-text-lo); }
+.metrics-insight strong { color: var(--color-text-hi); font-weight: 600; }
+.metrics-insight ul { margin: 6px 0 0 18px; padding: 0; }
+.metrics-insight--first { border-left-color: var(--color-success); }
+.metrics-insight--revised { border-left-color: var(--color-signal); }
+.metrics-insight--equal, .metrics-insight--unknown { border-left-color: var(--color-text-faint); }

@@ -25,6 +25,18 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 83,
+    date: "2026-10-30",
+    title: "Embudo de ofertas con filtros, efectividad por comercial e importar históricos",
+    items: [
+      "En Métricas, el «Embudo de ofertas» tiene ahora filtros de Comercial, Año y Mes: al cambiar cualquiera se recalcula todo el bloque al instante (tarjetas, secciones y gráficos), con una evolución mes a mes del año elegido (pulsa un mes para filtrar por él).",
+      "Nueva tabla de efectividad por comercial: ofertas totales, en curso, ganadas, sin convertir, % de éxito, tiempo medio de ciclo, revisiones pedidas y media de revisiones por oferta.",
+      "Nueva matriz «Impacto de las revisiones en el cierre»: agrupa las ofertas por 0, 1, 2 o 3 o más revisiones y compara cuántas se cierran en cada tramo, con un resumen que te dice si las ofertas con más revisiones se cierran más o menos que las aprobadas a la primera.",
+      "Las ofertas que se convierten en proyecto conservan su comercial, sus revisiones y sus fechas, y Métricas las sigue contando aunque se borre la oferta original.",
+      "Los administradores pueden importar el histórico de ofertas de antes de Chusy desde un Excel o CSV (botón «Importar histórico» en el embudo): se ve una vista previa antes de guardar y las que ya existían no se duplican.",
+    ],
+  },
+  {
     id: 82,
     date: "2026-10-29",
     title: "Nuevo formato de ID (año + número), calendario y ventanas más claros",

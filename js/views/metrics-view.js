@@ -33,10 +33,30 @@
 //    tareas de las personas visibles. Un clic en una tarea la abre.
 //  · Acceso a Métricas: admin, Revisor y, desde la v81, Responsables de
 //    Departamento (canViewMetrics), siempre con su propio departamento.
+//
+// v83 — Analítica de ofertas (ver «ANALÍTICA DE OFERTAS» en flow-metrics.js): el bloque «Embudo de ofertas» gana
+// una barra de filtros propia (Comercial, Año y Mes) que recalcula todo el bloque al instante —tarjetas,
+// secciones, evolución mensual, efectividad por comercial y correlación revisiones ↔ cierre— sin repintar el
+// resto de Métricas, y un botón (solo admin) para importar históricos desde Excel/CSV
+// (components/offer-import-modal.js). Los filtros elegidos se recuerdan mientras la página siga abierta.
 // ============================================================================
 import { escapeHtml, toDate, initials, colorFromString, textColorFor, projectIcon, isOverdue, renderTitleHtml } from "../utils.js";
-import { offerFunnel, flowHealth } from "../flow-metrics.js";
+import {
+  flowHealth,
+  collectOfferRecords,
+  offerFilterOptions,
+  applyOfferFilters,
+  summarizeOffers,
+  commercialRanking,
+  evolutionSeries,
+  sectionBreakdown,
+  revisionCorrelation,
+  revisionInsight,
+  MONTH_NAMES,
+  MIN_RELIABLE_SAMPLE,
+} from "../flow-metrics.js";
 import { isOffersProject } from "../offers.js";
+import { openOfferImportModal } from "../components/offer-import-modal.js";
 import { metricsScopeFor, metricsDepartmentOptions, memberMatchesDepartmentFilter, metricsFilterLabel } from "../departments.js";
 
 /**
@@ -55,30 +75,139 @@ export function scopeMetricsData({ tasks, teamMembers }, filter) {
 
 const fmtDays = (n, unit = "días") => (n === null || n === undefined ? "—" : `${String(n).replace(".", ",")} ${unit}`);
 
-/** HTML del panel «Embudo de ofertas» (`funnel`: ver offerFunnel); "" si no hay proyecto Ofertas. */
-export function offerFunnelHtml(funnel) {
-  if (!funnel) return "";
-  if (!funnel.total) {
-    return `<div class="metrics__section" id="metrics-offer-funnel">
-        <h3 class="metrics__section-title">Embudo de ofertas</h3>
-        <p class="metrics__empty">Todavía no hay ofertas.</p>
-      </div>`;
-  }
-  const maxCount = Math.max(1, ...funnel.bySection.map((s) => s.count));
+const fmtPct = (n) => (n === null || n === undefined ? "—" : `${n}%`);
+const fmtNum = (n) => (n === null || n === undefined ? "—" : String(n).replace(".", ","));
+
+/** Los filtros del embudo de ofertas. Viven a nivel de módulo para sobrevivir a los repintados de Métricas. */
+const offerFilters = { commercial: "", year: "", month: "" };
+/** Vuelve a «todos» (la «Limpiar filtros» del panel; también lo usan las pruebas). */
+export function resetOfferFilters() { offerFilters.commercial = ""; offerFilters.year = ""; offerFilters.month = ""; }
+/** Copia de los filtros actuales (para las pruebas). */
+export function getOfferFilters() { return { ...offerFilters }; }
+
+/** Quita de los filtros lo que ya no existe (un comercial o año que dejó de haber): vuelven a «todos». */
+function sanitizeOfferFilters(options) {
+  if (offerFilters.commercial && !options.commercials.some((c) => c.value === offerFilters.commercial)) offerFilters.commercial = "";
+  if (offerFilters.year !== "" && !options.years.includes(Number(offerFilters.year))) offerFilters.year = "";
+  if (offerFilters.month !== "" && !(Number(offerFilters.month) >= 1 && Number(offerFilters.month) <= 12)) offerFilters.month = "";
+}
+
+function offerFilterBarHtml(options) {
+  const active = !!(offerFilters.commercial || offerFilters.year !== "" || offerFilters.month !== "");
   return `
-      <div class="metrics__section" id="metrics-offer-funnel">
-        <h3 class="metrics__section-title">Embudo de ofertas <span class="metrics__section-count">${funnel.total}</span></h3>
-        <p class="metrics__section-hint">Ofertas en curso, entregadas y convertidas en proyecto. La conversión es sobre las ya resueltas (entregadas + convertidas): una oferta en curso aún no ha tenido ocasión de convertirse.</p>
+        <div class="metrics__toolbar offer-filters" id="offer-filters">
+          <label class="metrics__toolbar-label" for="offer-filter-commercial">Comercial</label>
+          <select class="metrics__select" id="offer-filter-commercial">
+            <option value="">Todos los comerciales</option>
+            ${options.commercials.map((c) => `<option value="${escapeHtml(c.value)}"${c.value === offerFilters.commercial ? " selected" : ""}>${escapeHtml(c.label)}</option>`).join("")}
+          </select>
+          <label class="metrics__toolbar-label" for="offer-filter-year">Año</label>
+          <select class="metrics__select" id="offer-filter-year">
+            <option value="">Todos los años</option>
+            ${options.years.map((y) => `<option value="${y}"${String(y) === String(offerFilters.year) ? " selected" : ""}>${y}</option>`).join("")}
+          </select>
+          <label class="metrics__toolbar-label" for="offer-filter-month">Mes</label>
+          <select class="metrics__select" id="offer-filter-month">
+            <option value="">Todo el año</option>
+            ${MONTH_NAMES.map((m, i) => `<option value="${i + 1}"${String(i + 1) === String(offerFilters.month) ? " selected" : ""}>${m}</option>`).join("")}
+          </select>
+          <button type="button" class="btn btn--ghost offer-filters__clear" id="offer-filter-clear"${active ? "" : " disabled"}>Limpiar filtros</button>
+        </div>`;
+}
+
+function evolutionHtml(series, selectedMonth) {
+  if (!series.rows.length) return "";
+  const max = Math.max(1, ...series.rows.map((r) => r.total));
+  const title = series.kind === "month" ? `Evolución mensual de ${offerFilters.year}` : "Evolución por año";
+  return `
+        <h4 class="metrics__subtitle">${title}</h4>
+        <p class="metrics__section-hint">Ofertas por ${series.kind === "month" ? "mes" : "año"} de creación: <span class="offer-legend offer-legend--won">convertidas</span> <span class="offer-legend offer-legend--lost">sin convertir</span> <span class="offer-legend offer-legend--open">en curso</span>.${series.kind === "month" ? " Pulsa un mes para filtrar por él." : ""}${series.undated ? ` ${series.undated} oferta${series.undated === 1 ? "" : "s"} sin mes conocido no aparece${series.undated === 1 ? "" : "n"} aquí.` : ""}</p>
+        <div class="offer-evolution" id="offer-evolution" role="table" aria-label="${title}">
+          ${series.rows
+            .map((r) => {
+              const pct = (n) => (n ? `${(n / max) * 100}%` : "0");
+              return `
+          <${series.kind === "month" ? `button type="button" data-month="${r.key}"` : `div`} class="offer-evolution__row${series.kind === "month" && String(r.key) === String(selectedMonth) ? " is-selected" : ""}${r.total ? "" : " is-empty"}" role="row">
+            <span class="offer-evolution__label">${escapeHtml(r.label)}</span>
+            <span class="offer-evolution__bar"><span class="offer-evolution__seg offer-evolution__seg--won" style="width:${pct(r.converted)}"></span><span class="offer-evolution__seg offer-evolution__seg--lost" style="width:${pct(r.notConverted)}"></span><span class="offer-evolution__seg offer-evolution__seg--open" style="width:${pct(r.active)}"></span></span>
+            <span class="offer-evolution__count" title="Ofertas">${r.total}</span>
+            <span class="offer-evolution__pct" title="% de éxito (convertidas sobre resueltas)">${fmtPct(r.conversionPct)}</span>
+          </${series.kind === "month" ? "button" : "div"}>`;
+            })
+            .join("")}
+        </div>`;
+}
+
+function rankingHtml(rows) {
+  if (!rows.length) return "";
+  return `
+        <h4 class="metrics__subtitle">Efectividad por comercial</h4>
+        <p class="metrics__section-hint">Según el año y mes elegidos. «Sin convertir» = entregadas que no pasaron a proyecto + descartadas. El % de éxito son las convertidas sobre las resueltas (las en curso no cuentan); lo marcado con * tiene menos de ${MIN_RELIABLE_SAMPLE} resueltas y es poco fiable.</p>
+        <div class="metrics-offer-table metrics-offer-table--ranking" id="offer-ranking" role="table" aria-label="Efectividad por comercial">
+          <div class="metrics-offer-table__row metrics-offer-table__row--head" role="row"><span role="columnheader">Comercial</span><span role="columnheader">Ofertas</span><span role="columnheader">En curso</span><span role="columnheader">Ganadas</span><span role="columnheader">Sin convertir</span><span role="columnheader">% Éxito</span><span role="columnheader">Ciclo medio</span><span role="columnheader">Revisiones</span><span role="columnheader">Rev./oferta</span></div>
+          ${rows
+            .map(
+              (r) => `
+          <div class="metrics-offer-table__row" role="row" data-commercial="${escapeHtml(r.key)}">
+            <span role="cell" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span><span role="cell">${r.total}</span><span role="cell">${r.active}</span><span role="cell" class="is-won">${r.converted}</span><span role="cell">${r.notConverted}</span><span role="cell" data-cell="pct" class="${r.lowSample ? "is-low" : ""}" title="${r.lowSample ? `Solo ${r.resolved} resuelta${r.resolved === 1 ? "" : "s"}: poco fiable` : `${r.converted} de ${r.resolved} resueltas`}">${fmtPct(r.conversionPct)}${r.lowSample && r.conversionPct !== null ? "*" : ""}</span><span role="cell">${fmtDays(r.avgCycleDays, "d")}</span><span role="cell">${r.revisionsTotal}</span><span role="cell" data-cell="avg">${fmtNum(r.revisionsAvg)}</span>
+          </div>`
+            )
+            .join("")}
+        </div>`;
+}
+
+function correlationHtml(buckets, insight) {
+  return `
+        <h4 class="metrics__subtitle">Impacto de las revisiones en el cierre</h4>
+        <p class="metrics__section-hint">Las ofertas agrupadas por el nº de revisiones de su histórico (sin contar la versión original). El % de éxito son las convertidas sobre las resueltas; la media de días es de creación a cierre.</p>
+        <div class="metrics-offer-table metrics-offer-table--revisions" id="offer-revisions" role="table" aria-label="Revisiones y cierre">
+          <div class="metrics-offer-table__row metrics-offer-table__row--head" role="row"><span role="columnheader">Revisiones</span><span role="columnheader">Ofertas</span><span role="columnheader">Convertidas</span><span role="columnheader">% Éxito</span><span role="columnheader">Media de días</span></div>
+          ${buckets
+            .map(
+              (b) => `
+          <div class="metrics-offer-table__row" role="row" data-bucket="${escapeHtml(b.key)}">
+            <span role="cell">${escapeHtml(b.label)}</span><span role="cell">${b.total}</span><span role="cell" class="is-won">${b.converted}</span><span role="cell" data-cell="pct" title="${b.converted} de ${b.resolved} resueltas">${fmtPct(b.conversionPct)}<span class="metrics-offer-table__bar"><span style="width:${b.conversionPct || 0}%"></span></span></span><span role="cell">${fmtDays(b.avgDays, "d")}</span>
+          </div>`
+            )
+            .join("")}
+        </div>
+        <div class="metrics-insight metrics-insight--${insight.direction}" id="offer-revision-insight">
+          <strong>${escapeHtml(insight.summary)}</strong>
+          ${insight.details.length ? `<ul>${insight.details.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul>` : ""}
+        </div>`;
+}
+
+/** HTML del panel «Embudo de ofertas» ya filtrado (`records`: todas las ofertas; ver collectOfferRecords). */
+export function offerAnalyticsHtml({ records, offersProject, canImport }) {
+  const options = offerFilterOptions(records);
+  sanitizeOfferFilters(options);
+  const filtered = applyOfferFilters(records, offerFilters);
+  const summary = summarizeOffers(filtered);
+  const header = `
+        <h3 class="metrics__section-title">Embudo de ofertas <span class="metrics__section-count">${summary.total}</span>${canImport ? ` <button type="button" class="btn btn--ghost offer-import-btn" id="offer-import-btn">Importar histórico</button>` : ""}</h3>`;
+  if (!records.length) {
+    return `${header}
+        <p class="metrics__empty">Todavía no hay ofertas.${canImport ? " Puedes importar un histórico desde Excel o CSV." : ""}</p>`;
+  }
+  const maxCount = Math.max(1, ...sectionBreakdown(filtered, offersProject).map((s) => s.count));
+  const sections = sectionBreakdown(filtered, offersProject);
+  const evolution = evolutionSeries(records, { commercial: offerFilters.commercial, year: offerFilters.year });
+  return `${header}
+        <p class="metrics__section-hint">Ofertas en curso, entregadas y convertidas en proyecto, con los filtros de abajo. La conversión es sobre las ya resueltas (entregadas + convertidas): una oferta en curso aún no ha tenido ocasión de convertirse.</p>
+        ${offerFilterBarHtml(options)}
+        ${summary.total ? `
         <div class="metrics__cards">
-          <div class="metric-card"><span class="metric-card__value">${funnel.active}</span><span class="metric-card__label">En curso</span></div>
-          <div class="metric-card"><span class="metric-card__value">${funnel.delivered}</span><span class="metric-card__label">Entregadas, sin proyecto</span></div>
-          <div class="metric-card"><span class="metric-card__value" style="color:var(--color-success);">${funnel.converted}</span><span class="metric-card__label">Convertidas en proyecto</span></div>
-          <div class="metric-card"><span class="metric-card__value" data-funnel="pct">${funnel.conversionPct === null ? "—" : funnel.conversionPct + "%"}</span><span class="metric-card__label">Conversión (${funnel.converted} de ${funnel.resolved})</span></div>
-          <div class="metric-card"><span class="metric-card__value" data-funnel="delivery">${fmtDays(funnel.avgDeliveryDays, "d")}</span><span class="metric-card__label">Tiempo medio hasta entregar</span></div>
-          <div class="metric-card"><span class="metric-card__value" data-funnel="conversion">${fmtDays(funnel.avgConversionDays, "d")}</span><span class="metric-card__label">Tiempo medio hasta convertir</span></div>
+          <div class="metric-card"><span class="metric-card__value">${summary.active}</span><span class="metric-card__label">En curso</span></div>
+          <div class="metric-card"><span class="metric-card__value">${summary.delivered}</span><span class="metric-card__label">Entregadas, sin proyecto</span></div>
+          ${summary.discarded ? `<div class="metric-card"><span class="metric-card__value">${summary.discarded}</span><span class="metric-card__label">Descartadas</span></div>` : ""}
+          <div class="metric-card"><span class="metric-card__value" style="color:var(--color-success);">${summary.converted}</span><span class="metric-card__label">Convertidas en proyecto</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-funnel="pct">${summary.conversionPct === null ? "—" : summary.conversionPct + "%"}</span><span class="metric-card__label">Conversión (${summary.converted} de ${summary.resolved})</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-funnel="delivery">${fmtDays(summary.avgCycleDays, "d")}</span><span class="metric-card__label">Tiempo medio de ciclo</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-funnel="conversion">${fmtDays(summary.avgConversionDays, "d")}</span><span class="metric-card__label">Tiempo medio hasta convertir</span></div>
+          <div class="metric-card"><span class="metric-card__value" data-funnel="revisions">${summary.revisionsTotal}</span><span class="metric-card__label">Revisiones pedidas · ${fmtNum(summary.revisionsAvg)} por oferta</span></div>
         </div>
         <p class="metrics__section-hint" style="margin-top:16px;">Dónde está cada oferta ahora, por sección de Ofertas:</p>
-        <div class="metrics__bars">${funnel.bySection
+        <div class="metrics__bars">${sections
           .map(
             (s) => `
           <div class="metric-bar-row" data-funnel-section="${escapeHtml(s.id)}">
@@ -88,7 +217,44 @@ export function offerFunnelHtml(funnel) {
           </div>`
           )
           .join("")}</div>
-      </div>`;
+        ${evolutionHtml(evolution, offerFilters.month)}
+        ${rankingHtml(commercialRanking(filtered))}
+        ${correlationHtml(revisionCorrelation(filtered), revisionInsight(revisionCorrelation(filtered)))}` : `
+        <p class="metrics__empty" id="offer-no-results">No hay ofertas con estos filtros.</p>
+        ${evolutionHtml(evolution, offerFilters.month)}`}`;
+}
+
+/**
+ * Pinta el panel en `wrapper` y lo deja vivo: cambiar un filtro lo repinta solo a él (no a toda Métricas).
+ * `ctx`: { records, offersProject, canImport, existing, currentUser }.
+ */
+export function mountOfferAnalytics(wrapper, ctx) {
+  const paint = (focusId) => {
+    wrapper.innerHTML = offerAnalyticsHtml(ctx);
+    const bind = (id, key) => {
+      const select = wrapper.querySelector(id);
+      if (!select) return;
+      select.addEventListener("change", () => {
+        offerFilters[key] = select.value;
+        paint(id);
+      });
+    };
+    bind("#offer-filter-commercial", "commercial");
+    bind("#offer-filter-year", "year");
+    bind("#offer-filter-month", "month");
+    const clear = wrapper.querySelector("#offer-filter-clear");
+    if (clear) clear.addEventListener("click", () => { resetOfferFilters(); paint("#offer-filter-commercial"); });
+    wrapper.querySelectorAll("#offer-evolution [data-month]").forEach((row) => {
+      row.addEventListener("click", () => {
+        offerFilters.month = String(offerFilters.month) === row.dataset.month ? "" : row.dataset.month;
+        paint("#offer-filter-month");
+      });
+    });
+    const importBtn = wrapper.querySelector("#offer-import-btn");
+    if (importBtn) importBtn.addEventListener("click", () => openOfferImportModal({ offersProject: ctx.offersProject, existing: ctx.existing || [], currentUser: ctx.currentUser }));
+    if (focusId) { const again = wrapper.querySelector(focusId); if (again) again.focus(); }
+  };
+  paint(null);
 }
 
 const STAGNANT_LIST_LIMIT = 20;
@@ -210,7 +376,7 @@ export function renderMetricsView(container, options) {
 
   // v81: embudo de ofertas (sin acotar por departamento: es de la sección entera, y solo si se ve Ofertas) y salud del flujo (acotada).
   const offersProject = (projects || []).find((p) => isOffersProject(p)) || null;
-  const funnel = offersProject ? offerFunnel({ tasks: allTasks, offersProject }) : null;
+  const offerRecords = offersProject ? collectOfferRecords({ tasks: allTasks, projects: projects || [], offersProject }) : [];
   const health = flowHealth({ tasks, projects: projects || [], cfg: workCalendar, now: new Date() });
 
   const overdueSorted = [...overdue].sort((a, b) => toDate(a.dueDate) - toDate(b.dueDate)); // más antigua primero
@@ -279,9 +445,19 @@ export function renderMetricsView(container, options) {
         </div>
       </div>
       ${flowHealthHtml(health, teamMembers)}
-      ${offerFunnelHtml(funnel)}
+      ${offersProject ? `<div class="metrics__section" id="metrics-offer-funnel"></div>` : ""}
     </div>
   `;
+  const funnelEl = container.querySelector("#metrics-offer-funnel");
+  if (funnelEl) {
+    mountOfferAnalytics(funnelEl, {
+      records: offerRecords,
+      offersProject,
+      canImport: isAdmin,
+      currentUser,
+      existing: allTasks.filter((t) => t.projectId === offersProject.id || (t.extraProjectIds || []).includes(offersProject.id)),
+    });
+  }
   container.querySelectorAll("#metrics-stagnant-list [data-open]").forEach((row) => {
     row.addEventListener("click", () => onOpenTask(row.dataset.open));
   });

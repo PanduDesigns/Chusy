@@ -259,8 +259,17 @@ export function matchSector(value) {
 }
 
 /** ¿Es esta fila del histórico la de partida (A1 o «Versión original»)? Mismo criterio que lacksOriginalRevision. */
-function isOriginalRevisionRow(row) {
+export function isOriginalRevisionRow(row) {
   return normalizeName(row.version) === normalizeName(OFFER_FIRST_VERSION) || normalizeName(row.changes) === normalizeName(ORIGINAL_REVISION_TEXT);
+}
+
+/**
+ * Cuántas REVISIONES de verdad tiene una oferta (v83): las filas de su histórico (`revisions`) que no son la de
+ * partida (A1 «Versión original»). Es el mismo criterio que isOfferRevised, pero contado. Una oferta sin histórico,
+ * o solo con la fila original, tiene 0 (se aprobó «a la primera»); una con A1, A2 y A3, 2.
+ */
+export function countOfferRevisions(revisions) {
+  return (Array.isArray(revisions) ? revisions : []).filter((r) => r && !isOriginalRevisionRow(r)).length;
 }
 
 /**

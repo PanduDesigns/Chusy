@@ -65,7 +65,7 @@ function loadScriptOnce(src, isReady) {
   });
 }
 
-const ensureXlsx = () => loadScriptOnce(XLSX_CDN, () => !!window.XLSX);
+export const ensureXlsx = () => loadScriptOnce(XLSX_CDN, () => !!window.XLSX);
 const ensureJsPdf = () => loadScriptOnce(JSPDF_CDN, () => !!(window.jspdf && window.jspdf.jsPDF));
 const ensureJsZip = () => loadScriptOnce(JSZIP_CDN, () => !!window.JSZip);
 

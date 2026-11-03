@@ -17,6 +17,12 @@
 //                               createdAt}
 //   sourceOfferId /             solo si el proyecto nació de "Convertir en
 //   sourceOfferTitle            proyecto": qué oferta fue (para mostrarlo)
+//   offerCreatedAt /            v83: solo si nació de una oferta — cuándo se creó
+//   offerRevisionCount          esa oferta (ISO) y cuántas revisiones llevaba al
+//                               convertirla. Son la copia de seguridad con la que
+//                               Métricas sigue leyendo la oferta aunque la tarea
+//                               original se borre (flow-metrics.js,
+//                               readProjectOfferRecord)
 //
 // v58: las tres fechas también se dibujan en la línea de tiempo del proyecto
 // (projectKeyDates, más abajo, decide cuáles hay y en qué orden).
@@ -28,6 +34,7 @@
 // data/offer-conversion.js.
 // ============================================================================
 import {
+  countOfferRevisions,
   OFFER_FIRST_VERSION,
   nextOfferVersion,
   makeOriginalRevision,
@@ -68,6 +75,13 @@ function isoOrNull(value) {
   return d ? d.toISOString() : null;
 }
 
+/** Un número entero ≥ 0, o null si no hay (ni null, ni undefined, ni texto): `0` es un valor válido («a la primera»). */
+function countOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+}
+
 /** Una fila del histórico tal como la usa el formulario (siempre con id). */
 function historyRow(row) {
   const r = row || {};
@@ -97,6 +111,8 @@ export function normalizeProperties(raw) {
     history: (Array.isArray(p.history) ? p.history : []).map(historyRow),
     sourceOfferId: p.sourceOfferId || null,
     sourceOfferTitle: text(p.sourceOfferTitle),
+    offerCreatedAt: isoOrNull(p.offerCreatedAt),
+    offerRevisionCount: countOrNull(p.offerRevisionCount),
   };
 }
 
@@ -128,6 +144,9 @@ export function propertiesForSave(state) {
     out.sourceOfferId = state.sourceOfferId;
     out.sourceOfferTitle = text(state.sourceOfferTitle);
   }
+  // v83: lo que se guardó al convertir la oferta se conserva al editar las propiedades (el formulario no lo muestra).
+  if (state.offerCreatedAt) out.offerCreatedAt = state.offerCreatedAt;
+  if (state.offerRevisionCount !== null && state.offerRevisionCount !== undefined) out.offerRevisionCount = state.offerRevisionCount;
   return out;
 }
 
@@ -196,6 +215,9 @@ export function propertiesFromOffer({ offer, offersProject, today }) {
       history,
       sourceOfferId: offer.id || null,
       sourceOfferTitle: plainTitleText(offer.title).trim(),
+      // v83: copia de lo que Métricas lee de la oferta (cuándo nació y cuántas revisiones llevaba).
+      offerCreatedAt: isoOrNull(offer.createdAt),
+      offerRevisionCount: countOfferRevisions(offer.revisions),
     },
   };
 }
