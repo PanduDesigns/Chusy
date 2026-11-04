@@ -11,7 +11,10 @@
 // vista de Lista de cualquier proyecto (ver components/table-columns.js).
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, toDate, initials, colorFromString, textColorFor, projectIcon, setListHtml, getTaskProjectIds, renderTitleHtml } from "../utils.js";
-import { toggleTaskComplete } from "../data/tasks.js";
+import { toggleTaskWithWorkflow } from "../components/stage-handoff.js";
+import { stageBadgeHtml } from "../components/stage-badge.js";
+import { getOffersProject } from "../data/projects.js";
+import { isUpcomingForUser, upcomingStageOf, STAGE_SHORT } from "../workflow-stages.js";
 import { celebrateTask } from "../components/celebration.js";
 import { openTaskContextMenu } from "./list-view.js";
 import { openCustomFieldsModal } from "../components/custom-fields-modal.js";
@@ -40,6 +43,10 @@ const BASE_COLUMNS = [
 
 const SCOPE_KEY = "mytasks";
 
+// v84: la sección plegable «Próximas etapas asignadas a mí» (tareas con etapas que aún no me tocan). Vive fuera de la
+// función para sobrevivir a los repintados; arranca plegada para no mezclarla con el trabajo de hoy.
+let upcomingOpen = false;
+
 // Selección múltiple: vive fuera de renderMyTasksView() para sobrevivir a
 // que esta función se vuelva a llamar (cada cambio de filtro/orden, cada
 // actualización en tiempo real de Firestore...) — mismo patrón que
@@ -50,7 +57,11 @@ const SCOPE_KEY = "mytasks";
 const selection = createSelectionController();
 
 export function renderMyTasksView(container, opts) {
-  const { tasks, teamMembers, projects, tagsRegistry, sortState, onSortChange, onOpenTask, currentUser } = opts;
+  const { tasks: allMine, teamMembers, projects, tagsRegistry, sortState, onSortChange, onOpenTask, currentUser } = opts;
+  // v84: lo que aún no me toca (una etapa futura de una tarea con flujo) va aparte; el resto es mi trabajo de siempre.
+  const offersId = (getOffersProject() || {}).id;
+  const upcoming = allMine.filter((t) => isUpcomingForUser(t, currentUser.uid, offersId));
+  const tasks = allMine.filter((t) => !upcoming.includes(t));
   selection.prune(tasks.map((t) => t.id));
 
   /** Vuelve a pintar esta misma vista con los mismos datos — para cuando
@@ -120,7 +131,7 @@ export function renderMyTasksView(container, opts) {
       <button type="button" class="btn btn--ghost btn--sm" id="mt-add-field">+ Campo personalizado</button>
     </div>`;
 
-  if (!nonEmpty.length) {
+  if (!nonEmpty.length && !upcoming.length) {
     removeBulkToolbar(); // no puede haber selección con la lista vacía (ya podada arriba), pero la barra pudo quedar pintada de un render anterior
     container.innerHTML = `
       ${toolbarHtml}
@@ -139,6 +150,7 @@ export function renderMyTasksView(container, opts) {
     </div>`;
 
   const rowHtml = (task) => {
+    const upcomingTask = upcoming.includes(task);
     const taskProjectIds = getTaskProjectIds(task);
     const overdue = isOverdue(task.dueDate, task.isComplete);
     const assignees = task.assigneeIds.map((id) => teamMembers.find((m) => m.uid === id)).filter(Boolean);
@@ -148,8 +160,11 @@ export function renderMyTasksView(container, opts) {
           return `
             <span class="list-row__title-cell">
               <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
-              <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
+              ${upcomingTask
+                ? `<button class="task-row__check is-waiting" disabled title="Aún no te toca: espera a que se complete la etapa anterior"></button>`
+                : `<button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>`}
               <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${renderTitleHtml(task.title)}</span>
+              ${upcomingTask ? `<span class="wf-badge wf-badge--waiting" title="Aún no te toca: espera a la etapa anterior">Te tocará: ${escapeHtml(STAGE_SHORT[upcomingStageOf(task, currentUser.uid, offersId)] || "")}</span>` : stageBadgeHtml(task)}
             </span>`;
         }
         if (col.key === "dueDate") {
@@ -210,7 +225,22 @@ export function renderMyTasksView(container, opts) {
     )
     .join("");
 
-  setListHtml(container, `${toolbarHtml}<div class="list-table-scroll"><div class="list-table">${headerHtml}${sectionsHtml}</div></div>`);
+  const upcomingHtml = upcoming.length
+    ? `
+      <div class="section-block wf-upcoming">
+        <button type="button" class="section-header wf-upcoming__toggle" id="mt-upcoming-toggle" aria-expanded="${upcomingOpen}">
+          <span class="tl-agg-chevron">${upcomingOpen ? "▾" : "▸"}</span>
+          <span class="section-header__name">Próximas etapas asignadas a mí (en espera de etapa previa)</span>
+          <span class="section-header__count">${upcoming.length}</span>
+        </button>
+        ${upcomingOpen ? upcoming.map(rowHtml).join("") : ""}
+      </div>`
+    : "";
+  const emptyTodayHtml = !nonEmpty.length ? `<p class="field__hint" style="padding:10px;">No tienes tareas activas ahora mismo.</p>` : "";
+
+  setListHtml(container, `${toolbarHtml}<div class="list-table-scroll"><div class="list-table">${headerHtml}${emptyTodayHtml}${sectionsHtml}${upcomingHtml}</div></div>`);
+  const upToggle = container.querySelector("#mt-upcoming-toggle");
+  if (upToggle) upToggle.addEventListener("click", () => { upcomingOpen = !upcomingOpen; renderMyTasksView(container, opts); });
 
   container.querySelectorAll("[data-sort]").forEach((btn) => {
     btn.addEventListener("click", () => onSortChange(btn.dataset.sort));
@@ -232,16 +262,15 @@ export function renderMyTasksView(container, opts) {
       e.stopPropagation();
       const task = tasks.find((t) => t.id === btn.dataset.check);
       if (!task) return;
-      const willComplete = !task.isComplete;
-      toggleTaskComplete(task, willComplete);
-      if (willComplete) celebrateTask(btn); // pequeña recompensa — solo al completar, no al desmarcar
+      // v84: con etapas el círculo hace el relevo a la siguiente (ver components/stage-handoff.js); sin etapas, como siempre.
+      toggleTaskWithWorkflow(task, { currentUser, teamMembers, projects, onFinish: () => celebrateTask(btn) });
     });
   });
   container.querySelectorAll(".list-row").forEach((row) => {
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const task = tasks.find((t) => t.id === row.dataset.taskId);
-      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser);
+      const task = allMine.find((t) => t.id === row.dataset.taskId);
+      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser, teamMembers, projects);
     });
     // Selección múltiple al estilo Asana, igual que en la vista de Lista:
     // Ctrl/Cmd+clic añade o quita esa tarea sola; Shift+clic selecciona

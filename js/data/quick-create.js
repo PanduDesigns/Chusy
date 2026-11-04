@@ -214,6 +214,8 @@ export async function createTasksFromQuickCreateInsertion(tasks, { projectId, cr
         subtasks: [],
         attachments: [],
         customFields: {},
+        // v84: etapas encadenadas (Diseño → Compra/Pedido → Recepción/Fab.) cuando la tarea de plantilla las lleva.
+        ...(t.workflow ? { workflow: t.workflow, upcomingAssigneeIds: t.upcomingAssigneeIds || [] } : {}),
         isComplete: false,
         isMilestone: false,
         completedAt: null,

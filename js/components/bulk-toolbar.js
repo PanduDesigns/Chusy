@@ -257,10 +257,10 @@ function openMoreMenu(anchorBtn, { ids, selectedTasks, teamMembers, currentUser,
     x: rect.left, y: rect.top,
     items: [
       { label: "Marcar como completadas", icon: "✓", onClick: () => {
-        runAction(bulkSetComplete(selectedTasks, true), "Marcadas como completadas.", selectedTasks);
+        runAction(bulkSetComplete(selectedTasks, true, { userId: currentUser && currentUser.uid }), "Marcadas como completadas.", selectedTasks);
         celebrateBulk(ids.length); // la recompensa "grande" — varias de golpe
       } },
-      { label: "Marcar como sin finalizar", icon: "↺", onClick: () => runAction(bulkSetComplete(selectedTasks, false), "Marcadas como sin finalizar.", selectedTasks) },
+      { label: "Marcar como sin finalizar", icon: "↺", onClick: () => runAction(bulkSetComplete(selectedTasks, false, { userId: currentUser && currentUser.uid }), "Marcadas como sin finalizar.", selectedTasks) },
       { label: "Agregar colaboradores…", icon: "+", onClick: () => openCollabPopover(rect, { ids, teamMembers, selectedTasks, currentUser, projects }) },
       { label: "Combinar tareas duplicadas…", icon: "⧉", onClick: () => startMergeFlow(rect, { selectedTasks, currentUser, projects }) },
       { label: "Convertir en hitos", icon: "🚩", onClick: () => runAction(bulkUpdateTasks(ids, { isMilestone: true }), "Convertidas en hitos.", selectedTasks) },

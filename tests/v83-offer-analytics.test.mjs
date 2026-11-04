@@ -296,13 +296,13 @@ check("sin resultados: lo dice y los filtros siguen ahí para cambiarlos", count
 resetOfferFilters();
 c = renderM();
 check("la interpretación de revisiones se enseña con su dirección", !!q(c, "#offer-revision-insight.metrics-insight--revised") && /con revisiones se cierran más/.test(q(c, "#offer-revision-insight").textContent));
-check("el botón «Importar histórico» es solo para admin", !!q(c, "#offer-import-btn") && !q(renderM(members[1]), "#offer-import-btn"));
+check("v84: el botón «Importar histórico» está oculto (ni admin ni resto lo ven) y la ventana sigue en el proyecto", !q(c, "#offer-import-btn") && !q(renderM(members[1]), "#offer-import-btn") && metrics.OFFER_IMPORT_BUTTON_VISIBLE === false && typeof modal.openOfferImportModal === "function");
 check("sin proyecto Ofertas visible no hay embudo", !q(renderM(members[0], [OTHER]), "#metrics-offer-funnel"));
 
 // ---------------------------------------------------------------- 11) la ventana de importar (jsdom)
-q(c, "#offer-import-btn").click();
+modal.openOfferImportModal({ offersProject: OFF, existing: [], currentUser: members[0] }); // v84: sin botón visible, se abre directo
 const mm = document.querySelector("#modal-root .offer-import");
-check("el botón abre la ventana de importación", !!mm);
+check("la ventana de importación sigue funcionando (se abre por código)", !!mm);
 const upload = async (name, text) => {
   const input = mm.querySelector("#oi-file");
   const buf = Buffer.from(text, "utf8");
@@ -327,10 +327,10 @@ eq("«Importar» escribe las 4 ofertas y cierra la ventana", [fb.sets.length, !!
 resetOfferFilters();
 
 // ---------------------------------------------------------------- 12) entrega: versión, CSS, README y novedades
-check("package.json y el ?v= de index.html son 83", JSON.parse(read("package.json")).version === "83.0.0" && (read("index.html").match(/\?v=83/g) || []).length === 14 && !/\?v=82/.test(read("index.html")));
+check("package.json y el ?v= de index.html van a la par (≥ 83, 14 enlaces CSS iguales)", (() => { const major = parseInt(JSON.parse(read("package.json")).version, 10); return major >= 83 && (read("index.html").match(new RegExp(`\\?v=${major}\\b`, "g")) || []).length === 14 && !/\?v=82/.test(read("index.html")); })());
 check("CSS: estilos del embudo (metrics) y de la ventana de importar (modals)", /\.offer-evolution/.test(read("css/12-metrics-notifications.css")) && /\.metrics-insight/.test(read("css/12-metrics-notifications.css")) && /\.offer-import__table/.test(read("css/07-modals.css")));
 const wn = await import("../js/whats-new.js");
-check("Novedades: la v83 es la más reciente y habla de filtros, comerciales, revisiones e importar", wn.RELEASES[0].id === 83 && /filtr/i.test(JSON.stringify(wn.RELEASES[0])) && /revisiones/i.test(JSON.stringify(wn.RELEASES[0])) && /import/i.test(JSON.stringify(wn.RELEASES[0])));
+check("Novedades: la v83 consta y habla de filtros, comerciales, revisiones e importar", (() => { const r = wn.RELEASES.find((x) => x.id === 83); return !!r && wn.RELEASES[0].id >= 83 && /filtr/i.test(JSON.stringify(r)) && /revisiones/i.test(JSON.stringify(r)) && /import/i.test(JSON.stringify(r)); })());
 check("README documenta la v83", /v83/.test(read("README.md")) && /Chusy-83/.test(read("README.md")));
 check("no se crearon campos nuevos de Comercial/Revisiones en el modal de tareas", !/offerFilters|importedOutcome|offerRevisionCount/.test(read("js/components/task-modal.js")));
 

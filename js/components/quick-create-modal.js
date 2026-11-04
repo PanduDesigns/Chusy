@@ -61,6 +61,8 @@ import { getWorkCalendar } from "../data/work-calendar.js";
 import { setProjectSections } from "../data/projects.js";
 import { notifyBulkAssignment } from "../data/notifications.js";
 import { openQuickCreateAdminModal } from "./quick-create-admin-modal.js";
+import { isOffersProject } from "../offers.js";
+import { planTemplateWorkflow, normalizeTemplateStages, STAGE_KEYS, STAGE_SHORT, describeStageDates } from "../workflow-stages.js";
 
 const NEW_SECTION_VALUE = "__new_section__"; // valor especial del desplegable de sección para "crear una nueva con este nombre"
 
@@ -89,6 +91,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     lastUsedDeliveryDate: "", // comodidad: la última fecha de entrega usada se propone como punto de partida del siguiente producto
     assignPeople: [], // [uid, ...] — orden en que se han ido marcando
     assignments: {}, // { [uid]: Set(taskId) } — taskId incluye mainTaskIdFor(productId)
+    stageOverrides: {}, // v84: { [taskId]: { design?: bool, purchase?: bool, production?: bool } } — etapas que el usuario marca/quita en «Fechas resultantes» para ESTA inserción
     busy: false,
   };
 
@@ -314,10 +317,18 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       const mainLabel = config.instanceName.trim() || product.name;
       result.push({ id: mainTaskIdFor(productId), title: mainLabel, isMain: true, description: "", priority: "media", durationDays: null, productId, productName: product.name });
       resolveQuickCreateTasks(product, config.selections).forEach((t) => {
-        result.push({ id: t.id, title: t.title, description: t.description || "", priority: t.priority || "media", durationDays: t.durationDays ?? null, productId, productName: product.name });
+        result.push({ id: t.id, title: t.title, description: t.description || "", priority: t.priority || "media", durationDays: t.durationDays ?? null, stages: t.stages, productId, productName: product.name });
       });
     });
     return result;
+  }
+
+  /** v84: las etapas de una tarea de plantilla con lo que el usuario haya marcado/quitado en esta inserción. */
+  function stagesOf(t) {
+    const base = normalizeTemplateStages(t.stages);
+    const over = state.stageOverrides[t.id] || {};
+    STAGE_KEYS.forEach((k) => { if (k in over) base[k] = { ...base[k], enabled: !!over[k] }; });
+    return base;
   }
 
   /**
@@ -331,7 +342,11 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     return buildAllAssignableTasks().map((t) => {
       const assigneeIds = assignedUidsFor(t.id);
       const plan = planTaskDates({ insertionDate: today, deliveryDate: state.configs[t.productId].deliveryDate, durationDays: t.durationDays, assigneeIds, isMain: !!t.isMain, cfg });
-      return { ...t, assigneeIds, plan };
+      // v84: etapas de la tarea de plantilla (Diseño → Compra/Pedido → Recepción/Fab.) con sus fechas encadenadas en días
+      // laborables. La tarea principal de cada producto y las de un proyecto Ofertas no llevan etapas.
+      const stages = t.isMain || isOffersProject(project) ? null : stagesOf(t);
+      const wfPlan = stages ? planTemplateWorkflow({ stages, durationDays: t.durationDays, assigneeIds, insertionDate: today, cfg, firstPlan: plan }) : null;
+      return { ...t, assigneeIds, plan, wfPlan };
     });
   }
 
@@ -346,7 +361,16 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
         const lines = items
           .map((p) => {
             const who = p.assigneeIds.length ? p.assigneeIds.map((u) => escapeHtml(nameOf(u) || "—")).join(", ") : `<span style="color:var(--color-text-faint);">sin asignar</span>`;
-            return `<li class="qc-dates__row"><span class="qc-dates__title">${escapeHtml(p.title)}${p.isMain ? ` <span style="color:var(--color-text-faint);">(principal)</span>` : ""}</span><span class="qc-dates__who">${who}</span><span class="qc-dates__when">${planBadgeHtml(p.plan)}</span></li>`;
+            // v84: las etapas de la tarea (casillas por etapa) y su cadena de fechas laborables.
+            let stagesLine = "";
+            if (!p.isMain && !isOffersProject(project)) {
+              const eff = stagesOf(p);
+              const chain = p.wfPlan
+                ? STAGE_KEYS.filter((k) => p.wfPlan.workflow[k].enabled).map((k) => describeStageDates(STAGE_SHORT[k], p.wfPlan.workflow[k].startDate, p.wfPlan.workflow[k].dueDate)).join(" › ")
+                : "sin etapas";
+              stagesLine = `<span class="qc-dates__stages" style="grid-column:1 / -1;">${STAGE_KEYS.map((k) => `<label class="wf-check wf-check--${k}"><input type="checkbox" data-qc-stage="${escapeHtml(p.id)}" data-qc-stage-key="${k}"${eff[k].enabled ? " checked" : ""}> ${escapeHtml(STAGE_SHORT[k])}</label>`).join("")}<span class="qc-dates__chain">${escapeHtml(chain)}</span></span>`;
+            }
+            return `<li class="qc-dates__row"><span class="qc-dates__title">${escapeHtml(p.title)}${p.isMain ? ` <span style="color:var(--color-text-faint);">(principal)</span>` : ""}</span><span class="qc-dates__who">${who}</span><span class="qc-dates__when">${planBadgeHtml(p.plan)}</span>${stagesLine}</li>`;
           })
           .join("");
         return `${head}<ul class="qc-dates__list">${lines}</ul>`;
@@ -480,7 +504,7 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
     overlay.querySelector("#qc-cancel")?.addEventListener("click", close);
     overlay.querySelector("#qc-go-admin")?.addEventListener("click", () => {
       close();
-      openQuickCreateAdminModal({ currentUser, quickCreateEnabled });
+      openQuickCreateAdminModal({ currentUser, quickCreateEnabled, teamMembers });
     });
     overlay.querySelector("#qc-back-step")?.addEventListener("click", goBack);
 
@@ -564,6 +588,15 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
   }
 
   function wireAssignScreen() {
+    // v84: marcar/quitar etapas de una tarea (delegado: el bloque de fechas se repinta entero al cambiar).
+    const datesBox = overlay.querySelector("#qc-dates");
+    if (datesBox) datesBox.addEventListener("change", (e) => {
+      const cb = e.target.closest && e.target.closest("[data-qc-stage]");
+      if (!cb) return;
+      const id = cb.dataset.qcStage;
+      state.stageOverrides = { ...state.stageOverrides, [id]: { ...(state.stageOverrides[id] || {}), [cb.dataset.qcStageKey]: cb.checked } };
+      refreshDatesPreview();
+    });
     overlay.querySelectorAll("[data-assign-person]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const personUid = btn.dataset.assignPerson;
@@ -677,11 +710,13 @@ export function openQuickCreateModal({ project, currentUser, quickCreateEnabled,
       const allTasks = planned.map((p) => ({
         title: p.isMain ? state.configs[p.productId].instanceName.trim() : p.title,
         description: p.description,
-        startDate: p.plan.startKey || null,
-        dueDate: p.plan.dueKey || null,
-        assigneeIds: p.assigneeIds,
+        startDate: (p.wfPlan && p.wfPlan.patch.startDate) || p.plan.startKey || null,
+        dueDate: (p.wfPlan && p.wfPlan.patch.dueDate) || p.plan.dueKey || null,
+        assigneeIds: (p.wfPlan && p.wfPlan.patch.assigneeIds) || p.assigneeIds,
         priority: p.priority,
         sectionId: sectionIdByProduct[p.productId],
+        // v84: el flujo de etapas, ya con su responsable y fechas encadenadas
+        ...(p.wfPlan ? { workflow: p.wfPlan.workflow, upcomingAssigneeIds: p.wfPlan.patch.upcomingAssigneeIds } : {}),
       }));
 
       // 3) Crear todo de golpe.

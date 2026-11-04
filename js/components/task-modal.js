@@ -68,6 +68,12 @@
 // ============================================================================
 import { createTask, updateTask, getTask, nextPersonalOwnerId } from "../data/tasks.js";
 import { notifyNewAssignees } from "../data/notifications.js";
+import { openStageHandoffDialog } from "./stage-handoff.js";
+import {
+  STAGE_KEYS, STAGE_LABELS, STAGE_SHORT, defaultWorkflow, normalizeWorkflow, workflowFromEnabled, currentStageKey, stageStatus,
+  setStageEnabled, updateStage, activeFieldsFor, workflowTaskPatch, planTaskCheck, completeCurrentStage, reopenLastStage, reopenStage,
+  canReturnToPreviousStage,
+} from "../workflow-stages.js";
 import { addComment, subscribeToComments } from "../data/comments.js";
 import {
   el,
@@ -187,6 +193,8 @@ export function openTaskModal({
   // SOLO a quien se haya añadido de nuevo (ver notifyNewAssignees en
   // handleAccept), no a quien ya estaba antes de este cambio.
   let loadedAssigneeIds = [];
+  let loadedStage = null; // v84: la etapa activa al abrir, para avisar del relevo (stageLabel) solo si cambia al guardar
+  let wfDefaulted = false; // v84: una tarea nueva de proyecto arranca con las 3 etapas marcadas (una sola vez)
   let dirty = false;
   let comments = [];
   let unsubComments = null;
@@ -286,7 +294,9 @@ export function openTaskModal({
         subtasks: t.subtasks || [], attachments: t.attachments || [],
         customFields: t.customFields || {},
         isMilestone: !!t.isMilestone, isComplete: !!t.isComplete,
+        workflow: normalizeWorkflow(t.workflow), // v84: null en las tareas anteriores (sin etapas hasta que se activen aquí)
       };
+      loadedStage = currentStageKey(draft.workflow);
       buildForm();
       unsubComments = subscribeToComments(taskId, (c) => { comments = c; renderComments(); });
     });
@@ -380,6 +390,8 @@ export function openTaskModal({
                 </button>`).join("")}
             </div>
           </div>
+
+          <div class="field wf-section" id="t-workflow" hidden></div>
 
           <div class="field">
             <span class="field__label">Etiquetas</span>
@@ -568,6 +580,7 @@ export function openTaskModal({
         renderRevisions();
       });
     });
+    renderWorkflow(); // v84: la sección de etapas depende de los proyectos (no sale en Ofertas ni en tareas personales)
   }
 
   function openAddProjectPopover(anchorBtn) {
@@ -1077,12 +1090,155 @@ export function openTaskModal({
     });
   }
 
+  // ==========================================================================
+  // v84 — Flujo de etapas (Diseño › Compra/Pedido › Recepción/Fab.). Todo sobre el borrador; se guarda con «Aceptar».
+  // La lógica (qué etapa está activa, qué campos principales refleja, relevos) es pura: js/workflow-stages.js.
+  // ==========================================================================
+  function wfEligible() { return draft.projectIds.length > 0 && !offersProject(); }
+  /** ¿Hay una etapa activa que gobierne responsable y fechas de la tarea? */
+  function wfActive() { return !!(draft.workflow && wfEligible() && currentStageKey(draft.workflow)); }
+  function wfMembers() {
+    return [...(teamMembers || [])].filter((m) => m && m.uid && (!m.isImported && !m.deleted)).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
+
+  function wfRefreshAssigneeChips() {
+    overlay.querySelectorAll("#t-assignees .chip").forEach((c) => c.classList.toggle("is-selected", draft.assigneeIds.includes(c.dataset.uid)));
+  }
+
+  /** Copia la etapa activa a los campos principales (responsable, inicio, fin) y a sus controles. */
+  function wfPullActive() {
+    const a = activeFieldsFor(draft.workflow);
+    if (!a) return;
+    if (a.assigneeIds) { draft.assigneeIds = a.assigneeIds; wfRefreshAssigneeChips(); }
+    if (a.startDate) { draft.startDate = a.startDate; const f = overlay.querySelector("#t-start"); if (f) f.value = toDateInputValue(a.startDate); }
+    if (a.dueDate) { draft.dueDate = a.dueDate; const f = overlay.querySelector("#t-due"); if (f) f.value = toDateInputValue(a.dueDate); }
+    updateScheduleWarning();
+  }
+
+  /** Una etapa activa recién habilitada, sin responsable ni fechas, hereda los de la tarea (tareas anteriores a la v84). */
+  function wfSeedActiveFromMain() {
+    const cur = currentStageKey(draft.workflow);
+    if (!cur) return;
+    const s = draft.workflow[cur];
+    if (s.assigneeId || s.startDate || s.dueDate) return;
+    draft.workflow = updateStage(draft.workflow, cur, { assigneeId: draft.assigneeIds[0] || null, startDate: draft.startDate, dueDate: draft.dueDate });
+  }
+
+  /** Cambia el flujo del borrador y deja la tarea coherente con su etapa activa. */
+  function wfCommit(next) {
+    draft.workflow = next;
+    wfSeedActiveFromMain();
+    wfPullActive();
+    markDirty();
+    renderWorkflow();
+  }
+
+  /** El relevo/devolución del círculo principal: nuevo flujo + si la tarea queda completada. */
+  function wfApply(next, complete) {
+    draft.workflow = next;
+    draft.isComplete = complete;
+    const btn = overlay.querySelector("#t-complete");
+    if (btn) { btn.classList.toggle("is-checked", complete); btn.textContent = complete ? "✓" : ""; }
+    wfPullActive();
+    markDirty();
+    updateScheduleWarning();
+    renderWorkflow();
+  }
+
+  /** Lo que se edita en los campos principales (responsable/fechas) pasa también a la etapa activa. */
+  function wfPushMainToStage(patch) {
+    if (!wfActive()) return;
+    draft.workflow = updateStage(draft.workflow, currentStageKey(draft.workflow), patch);
+    renderWorkflow();
+  }
+
+  function renderWorkflow() {
+    const box = overlay.querySelector("#t-workflow");
+    if (!box) return;
+    if (!wfEligible()) { box.hidden = true; box.innerHTML = ""; return; }
+    if (isNew && !draft.workflow && !wfDefaulted) { draft.workflow = defaultWorkflow(); wfDefaulted = true; } // tarea nueva: las 3 etapas marcadas
+    box.hidden = false;
+    const wf = draft.workflow || workflowFromEnabled([]);
+    const members = wfMembers();
+    const STATE_TEXT = { done: "✓ Completada", current: "En curso", pending: "Pendiente" };
+    const rows = STAGE_KEYS.filter((k) => wf[k].enabled).map((k) => {
+      const st = stageStatus(wf, k);
+      const s = wf[k];
+      const known = members.some((m) => m.uid === s.assigneeId);
+      const extra = s.assigneeId && !known ? `<option value="${escapeHtml(s.assigneeId)}" selected>${escapeHtml(((teamMembers || []).find((m) => m.uid === s.assigneeId) || {}).name || "Responsable")}</option>` : "";
+      return `
+        <div class="wf-row wf-row--${st}" data-stage="${k}">
+          <span class="wf-row__name"><span class="wf-dot wf-dot--${k}"></span>${escapeHtml(STAGE_SHORT[k])}</span>
+          <span class="wf-row__state wf-state--${st}">${STATE_TEXT[st]}</span>
+          <select class="field__select wf-row__who" data-wf-who="${k}" aria-label="Responsable de ${escapeHtml(STAGE_LABELS[k])}">
+            <option value="">Sin responsable</option>
+            ${members.map((m) => `<option value="${escapeHtml(m.uid)}"${m.uid === s.assigneeId ? " selected" : ""}>${escapeHtml(m.name || "Sin nombre")}</option>`).join("")}${extra}
+          </select>
+          <input class="field__input wf-row__date" type="date" data-wf-start="${k}" value="${toDateInputValue(s.startDate)}" aria-label="Inicio de ${escapeHtml(STAGE_SHORT[k])}">
+          <input class="field__input wf-row__date" type="date" data-wf-due="${k}" value="${toDateInputValue(s.dueDate)}" aria-label="Fin de ${escapeHtml(STAGE_SHORT[k])}">
+          ${st === "done" ? `<button type="button" class="btn btn--ghost btn--sm wf-row__reopen" data-wf-reopen="${k}" title="Desmarcar esta etapa y las posteriores">Reabrir</button>` : `<span></span>`}
+          <input class="field__input wf-row__note" type="text" maxlength="500" data-wf-note="${k}" placeholder="Nota de relevo (opcional)" value="${escapeHtml(s.note || "")}">
+        </div>`;
+    }).join("");
+    box.innerHTML = `
+      <span class="field__label">Flujo de Etapas (Diseño &gt; Compra &gt; Recepción/Fab.)</span>
+      <div class="wf-checks">
+        ${STAGE_KEYS.map((k) => `<label class="wf-check wf-check--${k}"><input type="checkbox" data-wf-enable="${k}"${wf[k].enabled ? " checked" : ""}> ${escapeHtml(STAGE_LABELS[k])}</label>`).join("")}
+      </div>
+      ${rows ? `<div class="wf-rows">${rows}</div>` : `<p class="field__hint" style="margin:0;">Sin etapas: la tarea se completa de una vez. Marca las que necesite (p. ej. solo Diseño para dibujar un plano).</p>`}
+      ${canReturnToPreviousStage(wf) ? `<button type="button" class="btn btn--ghost btn--sm wf-return" id="wf-return">↩ Devolver a etapa anterior</button>` : ""}`;
+
+    box.querySelectorAll("[data-wf-enable]").forEach((cb) => cb.addEventListener("change", () => {
+      wfCommit(setStageEnabled(draft.workflow || workflowFromEnabled([]), cb.dataset.wfEnable, cb.checked));
+    }));
+    box.querySelectorAll("[data-wf-who]").forEach((sel) => sel.addEventListener("change", () => wfCommit(updateStage(draft.workflow, sel.dataset.wfWho, { assigneeId: sel.value || null }))));
+    box.querySelectorAll("[data-wf-start]").forEach((inp) => inp.addEventListener("change", () => wfCommit(updateStage(draft.workflow, inp.dataset.wfStart, { startDate: inp.value || null }))));
+    box.querySelectorAll("[data-wf-due]").forEach((inp) => inp.addEventListener("change", () => wfCommit(updateStage(draft.workflow, inp.dataset.wfDue, { dueDate: inp.value || null }))));
+    box.querySelectorAll("[data-wf-note]").forEach((inp) => inp.addEventListener("input", () => {
+      draft.workflow = updateStage(draft.workflow, inp.dataset.wfNote, { note: inp.value });
+      markDirty();
+    }));
+    box.querySelectorAll("[data-wf-reopen]").forEach((btn) => btn.addEventListener("click", () => {
+      const next = reopenStage(draft.workflow, btn.dataset.wfReopen);
+      if (next) wfApply(next, false);
+    }));
+    const ret = box.querySelector("#wf-return");
+    if (ret) ret.addEventListener("click", () => {
+      const r = reopenLastStage(draft.workflow);
+      if (r) wfApply(r.workflow, false);
+    });
+  }
+
   function wireStaticListeners() {
     overlay.querySelector("#t-close").addEventListener("click", attemptClose);
     overlay.querySelector("#t-cancel").addEventListener("click", attemptClose);
 
     const completeBtn = overlay.querySelector("#t-complete");
-    completeBtn.addEventListener("click", () => {
+    completeBtn.addEventListener("click", async () => {
+      // v84: con etapas, el círculo hace el relevo a la siguiente (o completa la última, o devuelve la última hecha);
+      // todo sobre el borrador, se guarda con «Aceptar». Sin etapas, como siempre.
+      const offers = offersProject();
+      const plan = draft.workflow && draft.projectIds.length && !offers
+        ? planTaskCheck({ projectId: draft.projectIds[0], extraProjectIds: draft.projectIds.slice(1), workflow: draft.workflow, isComplete: draft.isComplete }, null)
+        : { kind: "legacy" };
+      if (plan.kind !== "legacy") {
+        if (plan.kind === "reopen") {
+          const r = reopenLastStage(draft.workflow);
+          if (r) wfApply(r.workflow, false);
+        } else if (plan.kind === "finish") {
+          const r = completeCurrentStage(draft.workflow, { userId: currentUserProfile && currentUserProfile.uid });
+          if (r) wfApply(r.workflow, true);
+        } else {
+          const handoff = await openStageHandoffDialog({
+            workflow: draft.workflow, from: plan.from, to: plan.to, taskTitle: draft.title, teamMembers,
+            projectName: (projects.find((p) => p.id === draft.projectIds[0]) || {}).name || null,
+          });
+          if (!handoff) return;
+          const r = completeCurrentStage(draft.workflow, { userId: currentUserProfile && currentUserProfile.uid, handoff });
+          if (r) wfApply(r.workflow, false);
+        }
+        return;
+      }
       draft.isComplete = !draft.isComplete;
       completeBtn.classList.toggle("is-checked", draft.isComplete);
       completeBtn.textContent = draft.isComplete ? "✓" : "";
@@ -1110,8 +1266,8 @@ export function openTaskModal({
 
     overlay.querySelector("#t-add-project").addEventListener("click", (e) => openAddProjectPopover(e.currentTarget));
 
-    overlay.querySelector("#t-start").addEventListener("change", (e) => { draft.startDate = e.target.value || null; markDirty(); });
-    overlay.querySelector("#t-due").addEventListener("change", (e) => { draft.dueDate = e.target.value || null; markDirty(); updateScheduleWarning(); });
+    overlay.querySelector("#t-start").addEventListener("change", (e) => { draft.startDate = e.target.value || null; markDirty(); wfPushMainToStage({ startDate: draft.startDate }); });
+    overlay.querySelector("#t-due").addEventListener("change", (e) => { draft.dueDate = e.target.value || null; markDirty(); updateScheduleWarning(); wfPushMainToStage({ dueDate: draft.dueDate }); });
 
     const milestoneBtn = overlay.querySelector("#t-milestone");
     milestoneBtn.addEventListener("click", () => {
@@ -1135,6 +1291,16 @@ export function openTaskModal({
         chip.addEventListener("click", () => {
           const u = chip.dataset.uid;
           const set = new Set(draft.assigneeIds);
+          // v84: con una etapa activa, el responsable de la tarea ES el de esa etapa: un solo responsable a la vez.
+          if (wfActive()) {
+            const only = set.has(u) && set.size === 1;
+            draft.assigneeIds = only ? [] : [u];
+            wfRefreshAssigneeChips();
+            markDirty();
+            updateScheduleWarning();
+            wfPushMainToStage({ assigneeId: draft.assigneeIds[0] || null });
+            return;
+          }
           set.has(u) ? set.delete(u) : set.add(u);
           draft.assigneeIds = [...set];
           chip.classList.toggle("is-selected", set.has(u));
@@ -1468,12 +1634,19 @@ export function openTaskModal({
       // este modal (ver cabecera del archivo) — nunca se guardan tal
       // cual en Firestore, así que se excluyen explícitamente del resto
       // de campos del draft en vez de mandarlos con un "...draft" suelto.
-      const { projectIds, sectionByProject, ...restDraft } = draft;
+      const { projectIds, sectionByProject, workflow: draftWorkflow, ...restDraft } = draft;
+      // v84: el flujo de etapas y lo que depende de él (responsable y fechas de la etapa activa, etapas futuras). Una tarea
+      // de Ofertas o personal no lleva etapas, y una anterior que no las activó sigue sin campo `workflow`.
+      const wfFields = draftWorkflow && primaryId && !offers ? workflowTaskPatch(draftWorkflow) : {};
+      const finalAssignees = wfFields.assigneeIds || draft.assigneeIds;
+      const activeNow = wfFields.workflow ? currentStageKey(wfFields.workflow) : null;
+      const stageLabel = !isNew && activeNow && activeNow !== loadedStage ? STAGE_LABELS[activeNow] : undefined;
       const ownerId = computeOwnerIdOnSave(primaryId || null);
 
       if (isNew) {
         const newId = await createTask(primaryId || null, {
           ...restDraft,
+          ...wfFields,
           sectionId: primaryId ? (draft.sectionByProject[primaryId] || null) : null,
           extraProjectIds: extraIds,
           extraSections,
@@ -1491,7 +1664,7 @@ export function openTaskModal({
         // Tarea nueva: cualquier responsable puesto ya de entrada es
         // "nuevo" (no había nada antes que comparar).
         notifyNewAssignees({
-          newAssigneeUids: draft.assigneeIds,
+          newAssigneeUids: finalAssignees,
           taskId: newId,
           taskTitle: draft.title,
           projectId: primaryId || null,
@@ -1502,6 +1675,7 @@ export function openTaskModal({
       } else {
         await updateTask(taskId, {
           ...restDraft,
+          ...wfFields,
           projectId: primaryId || null,
           sectionId: primaryId ? (draft.sectionByProject[primaryId] || null) : null,
           extraProjectIds: extraIds,
@@ -1523,7 +1697,7 @@ export function openTaskModal({
         // NO estuviera ya antes de abrir el modal (loadedAssigneeIds) —
         // quien ya era responsable no recibe un aviso de "asignación" por
         // simplemente guardar la tarea de nuevo sin haber cambiado nada.
-        const newlyAdded = draft.assigneeIds.filter((uid) => !loadedAssigneeIds.includes(uid));
+        const newlyAdded = finalAssignees.filter((uid) => !loadedAssigneeIds.includes(uid));
         notifyNewAssignees({
           newAssigneeUids: newlyAdded,
           taskId,
@@ -1532,6 +1706,7 @@ export function openTaskModal({
           projectName: primaryId ? (projects.find((p) => p.id === primaryId)?.name || null) : null,
           fromUser: currentUserProfile,
           teamMembers,
+          stageLabel, // v84: si el relevo de etapa es lo que le asigna, el aviso dice la etapa
         }).catch((err) => console.error("notifyNewAssignees:", err));
       }
       dirty = false;

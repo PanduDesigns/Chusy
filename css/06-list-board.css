@@ -234,3 +234,28 @@ body.is-col-resizing * { cursor: col-resize !important; }
   50% { box-shadow: 0 0 0 4px rgba(255, 92, 108, 0); }
 }
 
+
+/* ===== v84 · Flujo multietapa: insignias de etapa (Lista, Tablero, Mis tareas) ===== */
+:root {
+  --wf-design: #3b82f6;      /* Diseño */
+  --wf-purchase: #d98a0b;    /* Compra/Pedido */
+  --wf-production: #14a37f;  /* Recepción/Fabricación */
+}
+.wf-badge {
+  display: inline-flex; align-items: center; flex: none; margin-left: 6px; padding: 1px 7px;
+  border-radius: 999px; border: 1px solid currentColor; font-size: 10.5px; font-weight: 600; line-height: 1.5;
+  white-space: nowrap; letter-spacing: 0.01em; cursor: default;
+}
+.wf-badge--design { color: var(--wf-design); background: color-mix(in srgb, var(--wf-design) 12%, transparent); }
+.wf-badge--purchase { color: var(--wf-purchase); background: color-mix(in srgb, var(--wf-purchase) 14%, transparent); }
+.wf-badge--production { color: var(--wf-production); background: color-mix(in srgb, var(--wf-production) 13%, transparent); }
+.wf-badge--waiting { color: var(--color-text-lo); background: var(--color-panel-raised); border-style: dashed; }
+.list-row__title-cell .wf-badge { margin-left: 8px; }
+.task-card__stage { margin: 2px 0 4px; }
+.task-card__stage .wf-badge { margin-left: 0; }
+.task-row__check.is-waiting { opacity: 0.35; cursor: not-allowed; border-style: dashed; }
+/* Mis tareas: sección plegable «Próximas etapas asignadas a mí» */
+.wf-upcoming { margin-top: 14px; }
+.wf-upcoming__toggle { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.wf-upcoming__toggle:focus-visible { outline: 2px solid var(--color-signal); outline-offset: 2px; }
+.wf-upcoming .list-row { opacity: 0.85; }

@@ -6,7 +6,8 @@ import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { auth } from "./firebase-init.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
 import { migrateLegacyCodesToYYXXX } from "./data/project-codes.js";
-import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, isProjectVisibleToUser, ensureExclusiveProjectsSeeded } from "./data/projects.js";
+import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, isProjectVisibleToUser, ensureExclusiveProjectsSeeded, getOffersProject } from "./data/projects.js";
+import { isUpcomingForUser } from "./workflow-stages.js";
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
 import { convertOfferToProject, conversionMessage } from "./data/offer-conversion.js";
 import { getTask, subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
@@ -864,7 +865,7 @@ function renderShell() {
     isTimelineActive: mode === "timeline",
     isArchiveActive: mode === "archive",
     isTrashActive: mode === "trash",
-    myTasksCount: myTasks.filter((t) => !t.isComplete).length,
+    myTasksCount: myTasks.filter((t) => !t.isComplete && !isUpcomingForUser(t, currentUser.uid, (getOffersProject() || {}).id)).length, // v84: lo que aún no me toca no cuenta
     userProfile: currentUser,
     isCollapsed: sidebarCollapsed,
     onToggleCollapse: toggleSidebarCollapse,
@@ -885,7 +886,7 @@ function renderShell() {
     onOpenOutlookBridge: () => openOutlookBridgeModal({ currentUser }),
     onOpenDriveStorage: () => openDriveStorageModal({ currentUser }),
     onOpenAsanaImport: () => openAsanaImportModal({ teamMembers, currentUser }),
-    onOpenQuickCreateAdmin: () => openQuickCreateAdminModal({ currentUser, quickCreateEnabled }),
+    onOpenQuickCreateAdmin: () => openQuickCreateAdminModal({ currentUser, quickCreateEnabled, teamMembers }),
     onOpenProjectProperties: (project) => openProjectProperties(project),
     onCreateProject: () =>
       openProjectModal({

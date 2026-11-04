@@ -25,6 +25,19 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 84,
+    date: "2026-11-04",
+    title: "Flujo por etapas: Diseño → Compra/Pedido → Recepción/Fabricación",
+    items: [
+      "Las tareas de proyectos pueden llevar tres etapas (Diseño, Compra/Pedido y Recepción/Fabricación), cada una con su responsable y sus fechas. Las tareas nuevas las traen todas marcadas y puedes quitar las que no necesites; las tareas de siempre no cambian hasta que actives etapas en ellas.",
+      "Al completar una etapa con el círculo de la tarea se abre un relevo rápido: eliges quién sigue y las fechas (Compra/Pedido llega con 5 días laborables ya calculados con festivos y ausencias), y esa persona recibe un aviso. La tarea solo se da por completada al terminar la última etapa, y puedes devolverla a la etapa anterior.",
+      "Verás la etapa en curso con una insignia de color (Diseño 1/3, Compra/Pedido 2/3…) en Lista, Tablero y Mis tareas, que además tiene una sección plegable con las próximas etapas que te tocarán.",
+      "En la línea de tiempo cada etapa se dibuja como un tramo de color, y la carga por persona cuenta a cada uno solo durante los días de su etapa.",
+      "Las plantillas de Creación Rápida permiten elegir las etapas de cada tarea, su responsable y su duración, y las fechas salen encadenadas en días laborables.",
+      "El botón «Importar histórico de ofertas» de Métricas se ha ocultado por ahora.",
+    ],
+  },
+  {
     id: 83,
     date: "2026-10-30",
     title: "Embudo de ofertas con filtros, efectividad por comercial e importar históricos",

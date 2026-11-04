@@ -19,7 +19,8 @@
 // taskId, taskTitle (copiado tal cual estaba al crear el aviso, no se
 // actualiza si la tarea cambia de nombre después — en un
 // `tasks_assigned_bulk`, la primera tarea asignada, solo como respaldo),
-// count (solo en `tasks_assigned_bulk`: cuántas tareas), projectId y
+// count (solo en `tasks_assigned_bulk`: cuántas tareas), stageLabel (v84, solo en
+// el relevo de una etapa del flujo multietapa: «Compra/Pedido»…), projectId y
 // projectName (ambos null si es una tarea personal — projectName
 // también copiado tal cual al crear el aviso, mismo motivo que
 // taskTitle), fromUserId, fromName, read, createdAt.
@@ -176,7 +177,7 @@ async function enforceNotificationLimits(list) {
  * bulk-toolbar.js), nunca antes: si el guardado falla, no debe salir
  * ningún aviso de algo que no ha llegado a pasar de verdad.
  */
-export async function notifyNewAssignees({ newAssigneeUids, taskId, taskTitle, projectId, projectName, fromUser, teamMembers }) {
+export async function notifyNewAssignees({ newAssigneeUids, taskId, taskTitle, projectId, projectName, fromUser, teamMembers, stageLabel }) {
   const importedUids = new Set((teamMembers || []).filter((m) => m.isImported).map((m) => m.uid));
   const targets = [...new Set(newAssigneeUids || [])].filter((uid) => uid && uid !== fromUser.uid && !importedUids.has(uid));
   if (!targets.length) return;
@@ -190,6 +191,8 @@ export async function notifyNewAssignees({ newAssigneeUids, taskId, taskTitle, p
       taskTitle,
       projectId: projectId || null,
       projectName: projectName || null,
+      // v84: el relevo de una etapa del flujo multietapa (Diseño → Compra/Pedido…) manda también la etapa que le toca.
+      ...(stageLabel ? { stageLabel } : {}),
       fromUserId: fromUser.uid,
       fromName: fromUser.name,
       read: false,

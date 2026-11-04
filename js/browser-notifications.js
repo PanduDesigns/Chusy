@@ -155,7 +155,7 @@ export function showAssignmentSystemNotification(uid, items, { onClick } = {}) {
       body = `${from} te ha asignado ${total} tareas nuevas${where}`;
     } else {
       title = "Te han asignado una tarea";
-      body = `${from} te ha asignado «${plainTitleText(n.taskTitle || "una tarea")}»${where}`;
+      body = `${from} te ha asignado «${plainTitleText(n.taskTitle || "una tarea")}»${n.stageLabel ? ` · Etapa ${n.stageLabel}` : ""}${where}`;
     }
   } else {
     title = `Tienes ${total} tareas nuevas`;

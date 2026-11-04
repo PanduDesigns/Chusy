@@ -290,3 +290,45 @@ textarea.modal__title-input {
 .offer-import__block--error { border-color: var(--color-danger); }
 .offer-import__block ul { margin: 6px 0 0 18px; padding: 0; }
 .offer-import__progress { font-size: 12.5px; color: var(--color-text-lo); }
+
+/* ===== v84 · Flujo de etapas: sección del modal de tarea, ventana de relevo y plantillas ===== */
+.wf-section { gap: 8px; padding: 10px 12px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-panel-raised); }
+.wf-section[hidden] { display: none; }
+.wf-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.wf-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.wf-check input { accent-color: var(--wf-design); }
+.wf-check--purchase input { accent-color: var(--wf-purchase); }
+.wf-check--production input { accent-color: var(--wf-production); }
+.wf-rows { display: flex; flex-direction: column; gap: 8px; }
+.wf-row {
+  display: grid; grid-template-columns: minmax(96px, 1fr) 96px minmax(110px, 1.3fr) 126px 126px auto; gap: 6px 8px; align-items: center;
+  padding: 6px 0; border-top: 1px dashed var(--color-line); font-size: 12.5px;
+}
+.wf-row:first-child { border-top: 0; }
+.wf-row__name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.wf-row__note { grid-column: 1 / -1; font-size: 12px; }
+.wf-row .field__select, .wf-row .field__input { min-width: 0; padding-top: 4px; padding-bottom: 4px; font-size: 12.5px; }
+.wf-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.wf-dot--design { background: var(--wf-design); }
+.wf-dot--purchase { background: var(--wf-purchase); }
+.wf-dot--production { background: var(--wf-production); }
+.wf-state--done { color: var(--color-success, #14a37f); font-weight: 600; }
+.wf-state--current { color: var(--color-signal); font-weight: 600; }
+.wf-state--pending { color: var(--color-text-faint); }
+.wf-row--done .wf-row__name { opacity: 0.7; }
+.wf-return { width: fit-content; }
+@media (max-width: 720px) { .wf-row { grid-template-columns: 1fr 1fr; } .wf-row__who { grid-column: 1 / -1; } }
+/* Ventana de relevo */
+.stage-handoff .modal__body { display: flex; flex-direction: column; gap: 10px; }
+.stage-handoff__task { margin: 0; font-weight: 600; }
+.stage-handoff__project { font-weight: 400; color: var(--color-text-lo); }
+.stage-handoff__error { margin: 0; color: var(--color-danger); font-size: 12.5px; }
+.stage-handoff__error[hidden], .stage-handoff .sched-warn[hidden] { display: none; }
+/* Creación Rápida: etapas por tarea de plantilla (editor) y en «Fechas resultantes» */
+.qc-task-stages { display: flex; flex-wrap: wrap; gap: 6px 12px; padding-top: 2px; }
+.qc-stage-cfg { display: flex; align-items: center; gap: 6px; flex: 1 1 250px; min-width: 0; }
+.qc-stage-cfg .wf-check { flex: none; min-width: 108px; font-size: 12px; }
+.qc-stage-cfg .qc-stage-who { flex: 1; min-width: 0; font-size: 12px; padding: 3px 6px; }
+.qc-stage-cfg .qc-stage-days { width: 58px; flex: none; font-size: 12px; padding: 3px 6px; }
+.qc-dates__stages { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 2px 0 4px 8px; font-size: 11.5px; color: var(--color-text-lo); }
+.qc-dates__chain { color: var(--color-text-faint); }

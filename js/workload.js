@@ -28,7 +28,11 @@
 //    persona está de vacaciones/ausente (taskCalendarIssues, v78).
 //  · Los totales de la cabecera de cada persona (`stats`) miran de HOY en
 //    adelante: lo pasado ya no se puede mover.
+//  · v84: con el flujo multietapa, cada persona computa solo el tramo de SU etapa
+//    (el diseñador los días de Diseño, el comprador los de Compra/Pedido, el taller los de
+//    Recepción/Fabricación); ver loadSlices en workflow-stages.js.
 // ============================================================================
+import { loadSlices } from "./workflow-stages.js";
 import { metricsScopeFor, memberMatchesDepartmentFilter, canViewWorkload } from "./departments.js";
 import { dateKey, parseDateKey, isWeekend, isWorkingDay, getHoliday, getAbsence, taskCalendarIssues, formatDayMonth, ABSENCE_TYPES } from "./work-calendar.js";
 
@@ -98,8 +102,19 @@ export function taskDayRange(task) {
  *   days     Map 'YYYY-MM-DD' → { active, ids[], due[] }  (solo días laborables para `active`)
  *   stats    { peak, overloadDays, clashDays, absenceClashes, activeTasks, status: 'ok'|'warn'|'alert' }
  */
-export function personWorkload({ uid, tasks, cfg, from, to, today = new Date() }) {
-  const mine = (tasks || []).filter((t) => t && !t.isComplete && Array.isArray(t.assigneeIds) && t.assigneeIds.includes(uid));
+export function personWorkload({ uid, tasks, cfg, from, to, today = new Date(), offersProjectId }) {
+  // v84: una tarea con etapas (Diseño → Compra/Pedido → Recepción/Fab.) ocupa a cada persona SOLO durante el tramo de la
+  // etapa que tiene asignada (loadSlices, js/workflow-stages.js): se le presta una copia de la tarea con las fechas de esa
+  // etapa y `workflowStage`. Sin etapas, la tarea tal cual y todos sus responsables, como siempre.
+  const mine = [];
+  for (const t of tasks || []) {
+    if (!t || t.isComplete) continue;
+    for (const sl of loadSlices(t, offersProjectId)) {
+      if (sl.uid !== uid) continue;
+      if (!sl.stage) { if (!mine.includes(t)) mine.push(t); continue; }
+      mine.push({ ...t, startDate: sl.startDate, dueDate: sl.dueDate, workflowStage: sl.stage });
+    }
+  }
   const undated = mine.filter((t) => !taskDayRange(t)).length;
   const dated = mine.filter((t) => taskDayRange(t));
   const days = new Map();
@@ -117,6 +132,7 @@ export function personWorkload({ uid, tasks, cfg, from, to, today = new Date() }
       if (to && k > to) break;
       if (!isWorkingDay(d, cfg, uid)) continue;
       const v = slot(k);
+      if (v.ids.includes(t.id)) continue; // v84: dos etapas de la misma tarea para la misma persona no suman doble el mismo día
       v.active++;
       v.ids.push(t.id);
     }

@@ -6,6 +6,7 @@ import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColor
 import { isOffersProject } from "../offers.js";
 import { moveTask } from "../data/tasks.js";
 import { openTaskContextMenu } from "./list-view.js";
+import { stageBadgeHtml } from "../components/stage-badge.js";
 
 function tagPill(name, tagsRegistry) {
   const found = (tagsRegistry || []).find((t) => t.name.toLowerCase() === name.toLowerCase());
@@ -69,7 +70,7 @@ export function renderBoardView(container, { project, tasks, teamMembers, tagsRe
     card.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const task = tasks.find((t) => t.id === card.dataset.taskId);
-      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser);
+      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser, teamMembers);
     });
     card.addEventListener("dragstart", (e) => {
       card.classList.add("is-dragging");
@@ -135,6 +136,7 @@ function cardHtml(task, teamMembers, tagsRegistry) {
   return `
     <div class="task-card" draggable="true" data-task-id="${task.id}" style="border-left-color:${PRIORITY_COLORS[task.priority] || "var(--color-line-bright)"}">
       <div class="task-card__title" style="${task.isComplete ? "text-decoration:line-through;color:var(--color-text-faint);" : ""}">${task.isMilestone ? "🚩 " : ""}${renderTitleHtml(task.title)}</div>
+      ${stageBadgeHtml(task) ? `<div class="task-card__stage">${stageBadgeHtml(task)}</div>` : ""}
       ${task.tags.length ? `<div class="task-card__tags">${task.tags.slice(0, 3).map((t) => tagPill(t, tagsRegistry)).join("")}</div>` : ""}
       <div class="task-card__footer">
         ${task.dueDate ? `<span class="task-card__due${overdue ? " is-overdue" : ""}">${formatDate(task.dueDate)}</span>` : ""}

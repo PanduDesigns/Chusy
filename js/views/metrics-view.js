@@ -39,6 +39,10 @@
 // secciones, evolución mensual, efectividad por comercial y correlación revisiones ↔ cierre— sin repintar el
 // resto de Métricas, y un botón (solo admin) para importar históricos desde Excel/CSV
 // (components/offer-import-modal.js). Los filtros elegidos se recuerdan mientras la página siga abierta.
+//
+// v84 — El botón «Importar histórico» está OCULTO TEMPORALMENTE (interruptor `OFFER_IMPORT_BUTTON_VISIBLE`,
+// más abajo): js/offer-import.js, js/data/offer-import.js y components/offer-import-modal.js se conservan
+// intactos para cuando vuelva; para reactivarlo basta poner el interruptor en `true`.
 // ============================================================================
 import { escapeHtml, toDate, initials, colorFromString, textColorFor, projectIcon, isOverdue, renderTitleHtml } from "../utils.js";
 import {
@@ -57,6 +61,9 @@ import {
 } from "../flow-metrics.js";
 import { isOffersProject } from "../offers.js";
 import { openOfferImportModal } from "../components/offer-import-modal.js";
+
+/** v84: ¿se enseña el botón «Importar histórico» (solo admin) en el Embudo de ofertas? Oculto de momento. */
+export const OFFER_IMPORT_BUTTON_VISIBLE = false;
 import { metricsScopeFor, metricsDepartmentOptions, memberMatchesDepartmentFilter, metricsFilterLabel } from "../departments.js";
 
 /**
@@ -453,7 +460,7 @@ export function renderMetricsView(container, options) {
     mountOfferAnalytics(funnelEl, {
       records: offerRecords,
       offersProject,
-      canImport: isAdmin,
+      canImport: isAdmin && OFFER_IMPORT_BUTTON_VISIBLE,
       currentUser,
       existing: allTasks.filter((t) => t.projectId === offersProject.id || (t.extraProjectIds || []).includes(offersProject.id)),
     });

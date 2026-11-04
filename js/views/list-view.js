@@ -10,7 +10,9 @@
 // el resto de proyectos (ver components/table-columns.js).
 // ============================================================================
 import { escapeHtml, formatDate, isOverdue, initials, colorFromString, textColorFor, showToast, setListHtml, getTaskSectionForProject, renderTitleHtml, plainTitleText } from "../utils.js";
-import { toggleTaskComplete, duplicateTask, updateTask } from "../data/tasks.js";
+import { duplicateTask, updateTask } from "../data/tasks.js";
+import { toggleTaskWithWorkflow } from "../components/stage-handoff.js";
+import { stageBadgeHtml } from "../components/stage-badge.js";
 import { trashTasks } from "../data/trash.js";
 import { offerUndoForTrash, trashFailureMessage } from "../components/undo-toast.js";
 import { celebrateTask } from "../components/celebration.js";
@@ -108,6 +110,7 @@ export function renderListView(container, opts) {
                 <span class="task-row__priority priority-${task.priority}${task.priority === "urgente" && !task.isComplete ? " is-pulse" : ""}"></span>
                 <button class="task-row__check${task.isComplete ? " is-checked" : ""}" data-check="${task.id}">${task.isComplete ? "✓" : ""}</button>
                 <span class="task-row__title" data-open="${task.id}">${task.isMilestone ? "🚩 " : ""}${renderTitleHtml(task.title)}</span>
+                ${stageBadgeHtml(task)}
               </span>`;
             }
             if (col.key === "dueDate") {
@@ -189,9 +192,9 @@ export function renderListView(container, opts) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const task = tasks.find((t) => t.id === btn.dataset.check);
-      const willComplete = !task.isComplete;
-      toggleTaskComplete(task, willComplete);
-      if (willComplete) celebrateTask(btn); // pequeña recompensa — solo al completar, no al desmarcar
+      // v84: con etapas (Diseño → Compra → Recepción/Fab.) el círculo hace el relevo a la siguiente; sin etapas, como siempre.
+      // La recompensa solo sale al completar la tarea entera, no al pasar de etapa ni al desmarcar.
+      toggleTaskWithWorkflow(task, { currentUser, teamMembers, projects, onFinish: () => celebrateTask(btn) });
     });
   });
   container.querySelectorAll("[data-open]").forEach((elx) => {
@@ -209,7 +212,7 @@ export function renderListView(container, opts) {
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const task = tasks.find((t) => t.id === row.dataset.taskId);
-      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser);
+      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser, teamMembers, projects);
     });
     // Selección múltiple al estilo Asana: Ctrl/Cmd+clic añade o quita esa
     // tarea sola; Shift+clic selecciona todo el tramo desde la última
@@ -250,7 +253,7 @@ function priorityLabel(p) { return PRIORITY_LABELS[p] || p; }
 // v64: `currentUser` (el perfil de quien tiene la sesión) decide si se ofrece
 // «Convertir en oferta» — solo a quien tiene acceso a Ofertas — y qué Sector
 // se les pone. Sin él (una vista que no lo pase) la opción simplemente no sale.
-export function openTaskContextMenu(x, y, task, onOpenTask, currentUser) {
+export function openTaskContextMenu(x, y, task, onOpenTask, currentUser, teamMembers, projects) {
   // v61: una oferta con la Ubicación rellena ofrece «Abrir Ubicación» (el
   // mismo botón que la ficha de la oferta). Este menú lo comparten Lista,
   // Tablero, Mis tareas y la línea de tiempo, así que sale en todas.
@@ -258,7 +261,7 @@ export function openTaskContextMenu(x, y, task, onOpenTask, currentUser) {
   openContextMenu({
     x, y,
     items: [
-      { label: task.isComplete ? "Marcar como pendiente" : "Marcar como completada", icon: "✓", onClick: () => toggleTaskComplete(task, !task.isComplete) },
+      { label: task.isComplete ? "Marcar como pendiente" : "Marcar como completada", icon: "✓", onClick: () => toggleTaskWithWorkflow(task, { currentUser, teamMembers, projects }) },
       { label: "Duplicar tarea", icon: "⧉", onClick: async () => { await duplicateTask(task); showToast("Tarea duplicada."); } },
       { label: task.isMilestone ? "Quitar de hitos" : "Convertir en hito", icon: "🚩", onClick: () => updateTask(task.id, { isMilestone: !task.isMilestone }) },
       ...(convertibleToOffers([task], currentUser).length ? [{ label: "Convertir en oferta", icon: "💼", onClick: () => convertToOffers([task], currentUser) }] : []),

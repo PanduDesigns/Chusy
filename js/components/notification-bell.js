@@ -55,6 +55,11 @@ function projectBit(n) {
   return n.projectName ? ` <span class="notif-row__project">· ${escapeHtml(n.projectName)}</span>` : "";
 }
 
+/** v84: «· Etapa Compra/Pedido» cuando el aviso es el relevo de una etapa del flujo multietapa (`stageLabel`). */
+function stageBit(n) {
+  return n.stageLabel ? ` <span class="notif-row__stage">· Etapa ${escapeHtml(n.stageLabel)}</span>` : "";
+}
+
 // El aviso grande que hay ahora mismo en pantalla, o null. Solo puede haber
 // uno: si llegan más tareas con él ya abierto, se añaden a este mismo
 // (cuenta y lista actualizadas) en vez de apilar otro encima — pasa
@@ -123,7 +128,7 @@ function renderNewAssignmentsPopup() {
     title = "Te han asignado una tarea";
     primaryLabel = "Abrir tarea";
     bodyHtml = `
-      <p class="notif-alert__who"><b>${escapeHtml(single.fromName || "Alguien")}</b> te ha asignado:</p>
+      <p class="notif-alert__who"><b>${escapeHtml(single.fromName || "Alguien")}</b> te ha asignado${single.stageLabel ? ` la etapa <b>${escapeHtml(single.stageLabel)}</b> de` : ""}:</p>
       <p class="notif-alert__task">«${renderTitleHtml(single.taskTitle || "una tarea")}»</p>
       ${single.projectName ? `<p class="notif-alert__project">${escapeHtml(single.projectName)}</p>` : ""}`;
   } else if (single) {
@@ -139,7 +144,7 @@ function renderNewAssignmentsPopup() {
     const lines = items.slice(0, MAX_LINES).map((n) =>
       isBulk(n)
         ? `<li><b>${escapeHtml(n.fromName || "Alguien")}</b> · ${notificationTaskCount(n)} tareas${projectBit(n)}</li>`
-        : `<li><b>${escapeHtml(n.fromName || "Alguien")}</b> · «${renderTitleHtml(n.taskTitle || "una tarea")}»${projectBit(n)}</li>`
+        : `<li><b>${escapeHtml(n.fromName || "Alguien")}</b> · «${renderTitleHtml(n.taskTitle || "una tarea")}»${stageBit(n)}${projectBit(n)}</li>`
     );
     const rest = items.length - MAX_LINES;
     if (rest > 0) lines.push(`<li class="notif-alert__more">… y ${rest} aviso${rest === 1 ? "" : "s"} más</li>`);
@@ -250,7 +255,7 @@ export function openNotifPanel(anchorBtn, { notifications, onOpenTask, onOpenPro
       ? `🆕 <b>Novedades de Chusy</b> · ${escapeHtml(n.taskTitle || "")}`
       : isBulk(n)
       ? `<b>${escapeHtml(n.fromName || "Alguien")}</b> te asignó ${notificationTaskCount(n)} tareas${projectBit(n)}`
-      : `<b>${escapeHtml(n.fromName || "Alguien")}</b> te asignó «${renderTitleHtml(n.taskTitle || "una tarea")}»${projectBit(n)}`;
+      : `<b>${escapeHtml(n.fromName || "Alguien")}</b> te asignó «${renderTitleHtml(n.taskTitle || "una tarea")}»${stageBit(n)}${projectBit(n)}`;
     return `
       <button type="button" class="notif-row ${n.read ? "notif-row--read" : "notif-row--unread"}" data-id="${n.id}">
         <span class="notif-row__unread-dot${n.read ? " notif-row__unread-dot--hidden" : ""}"></span>

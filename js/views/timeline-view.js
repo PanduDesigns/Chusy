@@ -149,6 +149,8 @@ import { escapeHtml, toDate, toDateInputValue, addDays, daysBetween, isoWeekNumb
 import { openTaskContextMenu } from "./list-view.js";
 import { exportTimelineToExcel, exportTimelineToPdf } from "../components/gantt-export.js";
 import { updateTask } from "../data/tasks.js";
+import { getOffersProject } from "../data/projects.js";
+import { stageSegments, taskWorkflow, currentStageKey, syncActiveStageDates, STAGE_SHORT, STAGE_LABELS, describeStageDates } from "../workflow-stages.js";
 import { saveProjectSections, updateProject } from "../data/projects.js";
 import { projectKeyDates } from "../project-properties.js";
 import { openSectionsModal } from "../components/sections-modal.js";
@@ -420,6 +422,7 @@ export function renderTimelineView(container, {
   const todayIdx = columns.findIndex((c) => today >= c.start && today <= c.end);
   const canShowHolidays = HOLIDAY_CAPABLE_ZOOMS.has(unit);
   const canDrag = DRAGGABLE_ZOOMS.has(unit);
+  const offersId = (getOffersProject() || {}).id; // v84: las tareas de Ofertas no llevan etapas
 
   // Agregada una sola vez aquí — la misma `displayGroups` alimenta tanto
   // las filas de abajo (con lo expandido añadido después) como el botón
@@ -630,9 +633,24 @@ export function renderTimelineView(container, {
     cells += `<div class="tl-task-label" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}${row.code ? `\n${escapeHtml(row.code)}${row.projectLabel ? ` · ${escapeHtml(row.projectLabel)}` : ""}` : ""}${warn ? `\n⚠️ ${escapeHtml(warn)}` : ""}" style="grid-column:1;grid-row:${gridRow};${indentPad}${t.isComplete ? "color:var(--color-text-faint);text-decoration:line-through;" : ""}">${t.isMilestone ? "🚩 " : ""}${row.code ? `<span class="tl-code">${escapeHtml(row.code)}</span>` : ""}${renderTitleHtml(t.title)}${warnBadge}</div>`;
     cells += `<div class="tl-row-band" style="grid-column:2 / ${columns.length + 2};grid-row:${gridRow};"></div>`;
 
+    // v84: una tarea con VARIAS etapas con fechas se dibuja como una cadena de tramos (Diseño · Compra/Pedido · Recepción/Fab.),
+    // cada uno con su color; el de la etapa activa va marcado y los ya hechos atenuados. Los tramos no se arrastran (se editan
+    // en el modal, cada etapa tiene sus fechas). Con una sola etapa con fechas, la barra de siempre, teñida con el color de la etapa activa.
+    const segs = t.isMilestone || t.isComplete || t.workflowStage ? [] : stageSegments(t, offersId); // (con `workflowStage` es la copia de Carga por persona: una sola barra, la de SU etapa)
+    if (segs.length >= 2) {
+      segs.forEach((seg) => {
+        const sp = taskSpan({ startDate: seg.startDate, dueDate: seg.dueDate }, columns);
+        if (!sp) return;
+        const label = describeStageDates(seg.short, seg.startDate, seg.dueDate);
+        cells += `<div class="tl-bar tl-bar--seg tl-seg--${seg.key} is-${seg.status}${row.hot && seg.status === "current" ? " tl-bar--hot" : ""}" data-open="${t.id}" data-task-id="${t.id}" title="${plainTitleText(t.title)}\n${escapeHtml(label)}${seg.status === "done" ? " · completada" : seg.status === "current" ? " · en curso" : " · pendiente"}" style="grid-column:${sp.s + 2} / ${sp.e + 3};grid-row:${gridRow};"><span class="tl-bar__code">${seg.status === "done" ? "✓ " : ""}${escapeHtml(seg.short)}</span></div>`;
+      });
+      return;
+    }
     const span = taskSpan(t, columns);
     if (!span) return;
-    const dragAttr = canDrag ? ` data-drag-task="${t.id}"` : "";
+    // En «Carga por persona» una tarea con etapas llega como una copia con las fechas de LA etapa de esa persona
+    // (`workflowStage`, ver personWorkload): esa barra no se arrastra, porque movería las fechas de la tarea entera.
+    const dragAttr = canDrag && !t.workflowStage ? ` data-drag-task="${t.id}"` : "";
     if (t.isMilestone) {
       cells += `<div class="tl-milestone" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}" style="grid-column:${span.e + 2};grid-row:${gridRow};"><span class="tl-milestone__diamond"></span></div>`;
     } else {
@@ -644,8 +662,11 @@ export function renderTimelineView(container, {
       // que falta la crea, el de la que ya tiene la redimensiona o la
       // mueve según haya o no ancla al otro lado, pero visualmente los dos
       // se agarran igual desde el principio).
-      const resizable = canDrag && (t.startDate || t.dueDate) ? " tl-bar--resizable" : "";
-      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}${resizable}${row.hot ? " tl-bar--hot" : ""}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}${row.code ? ` · ${escapeHtml(row.code)}` : ""}${row.hot ? "\n🔥 Día saturado: otras tareas coinciden con esta" : ""}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}">${row.code ? `<span class="tl-bar__code">${escapeHtml(row.code)}</span>` : ""}</div>`;
+      const resizable = canDrag && !t.workflowStage && (t.startDate || t.dueDate) ? " tl-bar--resizable" : "";
+      const stageKey = t.workflowStage || (t.isComplete ? null : currentStageKey(taskWorkflow(t, offersId)));
+      const stageCls = stageKey ? ` tl-bar--stage tl-seg--${stageKey}` : "";
+      const stageTip = stageKey ? `\nEtapa: ${STAGE_LABELS[stageKey]}` : "";
+      cells += `<div class="tl-bar${t.isComplete ? " is-complete" : ""}${stageCls}${resizable}${row.hot ? " tl-bar--hot" : ""}" data-open="${t.id}" data-task-id="${t.id}"${dragAttr} title="${plainTitleText(t.title)}${row.code ? ` · ${escapeHtml(row.code)}` : ""}${stageTip}${row.hot ? "\n🔥 Día saturado: otras tareas coinciden con esta" : ""}" style="grid-column:${span.s + 2} / ${span.e + 3};grid-row:${gridRow};border-color:${color};background:${color};${accentShadow}">${stageKey ? `<span class="tl-bar__code">${escapeHtml(STAGE_SHORT[stageKey])}</span>` : row.code ? `<span class="tl-bar__code">${escapeHtml(row.code)}</span>` : ""}</div>`;
     }
   });
 
@@ -742,7 +763,7 @@ export function renderTimelineView(container, {
     elx.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const task = allTasksById.get(elx.dataset.taskId);
-      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser);
+      if (task) openTaskContextMenu(e.clientX, e.clientY, task, onOpenTask, currentUser, teamMembers);
     });
   });
 }
@@ -1027,7 +1048,7 @@ function wireBarDragging(container, { unit, colWidth, allTasksById, dragState })
           : mode === "extend-due" ? "Fecha límite añadida."
           : createdRange ? "Rango de fechas creado."
           : "Fecha actualizada.";
-        updateTask(taskId, patch)
+        updateTask(taskId, { ...patch, ...syncActiveStageDates(task, patch, (getOffersProject() || {}).id) }) // v84: la etapa activa se mueve con la barra
           .then(() => showToast(toastMsg))
           .catch((err) => {
             console.error(err);

@@ -54,6 +54,9 @@ import { offerCompletionFields, planTaskToOffer } from "../offers.js";
 import { getOffersProject } from "./projects.js";
 import { allocateProjectCode } from "./project-codes.js";
 import { trashTasks } from "./trash.js";
+// v84: flujo multietapa (Diseño → Compra/Pedido → Recepción/Fabricación). Todo el cálculo es puro (workflow-stages.js);
+// aquí solo se escribe en Firestore lo que decide. No aplica a las tareas de Ofertas ni a las personales.
+import { taskWorkflow, workflowTaskPatch, resetWorkflow, advanceTaskPatch, returnTaskPatch, bulkCompleteExtras } from "../workflow-stages.js";
 // v81: `withSectionEnteredAt` (pura) anota cuándo entra una tarea en su sección actual, para medir el flujo sin imputar horas.
 import { withSectionEnteredAt } from "../flow-metrics.js";
 // v73 (Etapa 1 del Store): las tareas de un proyecto se escuchan a través del
@@ -97,6 +100,8 @@ export async function createTask(projectId, data) {
     subtasks: data.subtasks || [],
     attachments: data.attachments || [],
     customFields: data.customFields || {},
+    // v84: el flujo multietapa (solo si la tarea lo trae) y los responsables de sus etapas futuras (ver workflow-stages.js).
+    ...(data.workflow ? { workflow: data.workflow, upcomingAssigneeIds: data.upcomingAssigneeIds || [] } : {}),
     // v57: solo una oferta lo manda (nace con su fila A1 «Versión original»,
     // ver task-modal.js); una tarea normal no gana un `revisions` vacío.
     ...(Array.isArray(data.revisions) ? { revisions: data.revisions } : {}),
@@ -124,6 +129,10 @@ export async function createTask(projectId, data) {
  */
 export async function duplicateTask(task) {
   const { attachments, skipped } = await copyAttachmentsForDuplicate(task.attachments || []);
+  // v84: la copia de una tarea con flujo vuelve a empezar por su primera etapa (mismas etapas, responsables y fechas, sin completar).
+  const offers = getOffersProject();
+  const wf = taskWorkflow(task, offers && offers.id);
+  const wfPatch = wf ? workflowTaskPatch(resetWorkflow(wf)) : null;
   const newId = await createTask(task.projectId, {
     ownerId: task.ownerId,
     sectionId: task.sectionId,
@@ -131,9 +140,10 @@ export async function duplicateTask(task) {
     extraSections: task.extraSections,
     title: `${task.title} (copia)`,
     description: task.description,
-    assigneeIds: task.assigneeIds,
-    dueDate: task.dueDate,
-    startDate: task.startDate,
+    assigneeIds: (wfPatch && wfPatch.assigneeIds) || task.assigneeIds,
+    dueDate: (wfPatch && wfPatch.dueDate) || task.dueDate,
+    startDate: (wfPatch && wfPatch.startDate) || task.startDate,
+    ...(wfPatch ? { workflow: wfPatch.workflow, upcomingAssigneeIds: wfPatch.upcomingAssigneeIds } : {}),
     priority: task.priority,
     tags: task.tags,
     dependsOn: [],
@@ -172,6 +182,32 @@ export function toggleTaskComplete(task, isComplete) {
     ...withSectionEnteredAt(offerCompletionFields(getOffersProject(), task, isComplete), task, serverTimestamp()),
     updatedAt: serverTimestamp(),
   });
+}
+
+/**
+ * v84 — Completa la etapa activa de una tarea con flujo y hace el relevo a la siguiente (`handoff`:
+ * { assigneeId, startDate, dueDate, note? }). Si era la última etapa, la tarea entera queda completada. Los campos
+ * principales (responsable, fechas) pasan a ser los de la etapa que se activa. Devuelve el resultado
+ * ({ finished, completedKey, activatedKey }) o null si la tarea no tiene etapa que completar.
+ */
+export async function advanceTaskStage(task, { userId, handoff } = {}) {
+  const offers = getOffersProject();
+  const res = advanceTaskPatch(task, { userId, handoff, offersProjectId: offers && offers.id });
+  if (!res) return null;
+  await updateTask(task.id, { ...res.patch, completedAt: res.finished ? serverTimestamp() : null }, task);
+  return { finished: res.finished, completedKey: res.completedKey, activatedKey: res.activatedKey, patch: res.patch };
+}
+
+/**
+ * v84 — «Devolver a etapa anterior»: reabre la última etapa completada (la tarea deja de estar completada) y le
+ * devuelve la asignación y las fechas de esa etapa. Devuelve { reopenedKey, patch } o null si no hay nada que devolver.
+ */
+export async function returnTaskStage(task) {
+  const offers = getOffersProject();
+  const res = returnTaskPatch(task, offers && offers.id);
+  if (!res) return null;
+  await updateTask(task.id, { ...res.patch, completedAt: null }, task);
+  return { reopenedKey: res.reopenedKey, patch: res.patch };
 }
 
 /**
@@ -359,6 +395,10 @@ function subscribeToTaskQueries(specs, callback) {
 export function subscribeToMyTasks(uid, callback) {
   const qAssigned = query(collection(db, "tasks"), where("assigneeIds", "array-contains", uid));
   const qOwned = query(collection(db, "tasks"), where("ownerId", "==", uid));
+  // v84: tareas con flujo multietapa en las que quien llama es responsable de una etapa FUTURA (aún no le toca):
+  // `upcomingAssigneeIds` (workflow-stages.js). Es lo que alimenta «Próximas etapas asignadas a mí» de Mis tareas.
+  // Esta consulta puede fallar sin más (reglas aún sin republicar): se enseña lo de las otras dos, como siempre.
+  const qUpcoming = query(collection(db, "tasks"), where("upcomingAssigneeIds", "array-contains", uid));
   // v74: por el store, como las tareas de un proyecto (claves `tasks:mine:<uid>:assigned` /
   // `:owned`; la misma colección `tasks` del store, así que una tarea que sea a la vez de un
   // proyecto abierto y tuya existe una sola vez y `getTask` la encuentra por cualquiera de las dos).
@@ -367,6 +407,7 @@ export function subscribeToMyTasks(uid, callback) {
     [
       { key: `tasks:mine:${uid}:assigned`, query: qAssigned },
       { key: `tasks:mine:${uid}:owned`, query: qOwned },
+      { key: `tasks:mine:${uid}:upcoming`, query: qUpcoming },
     ],
     callback
   );
@@ -427,10 +468,12 @@ export function bulkMoveToSectionInProject(tasks, projectId, sectionId) {
  * una según su propio estado (una ya convertida en proyecto se queda en
  * «Cerradas»), por eso el campo de sección se calcula tarea a tarea.
  */
-export function bulkSetComplete(tasks, isComplete) {
+export function bulkSetComplete(tasks, isComplete, { userId } = {}) {
   const offersProject = getOffersProject();
   const byId = new Map(tasks.map((t) => [t.id, t]));
+  // v84: una tarea con flujo multietapa se completa con TODAS sus etapas hechas (sin relevos) y al reabrirla vuelve a su última etapa.
   return runBatchedUpdate(tasks.map((t) => t.id), (id) => ({
+    ...bulkCompleteExtras(byId.get(id), isComplete, { userId, offersProjectId: offersProject && offersProject.id }),
     isComplete,
     completedAt: isComplete ? serverTimestamp() : null,
     ...withSectionEnteredAt(offerCompletionFields(offersProject, byId.get(id), isComplete), byId.get(id), serverTimestamp()), // v81

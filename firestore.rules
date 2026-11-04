@@ -403,10 +403,15 @@ service cloud.firestore {
       // (de proyecto y personal a la vez) — antes hacía falta acotar esa
       // consulta también por projectId porque esta rama todavía no
       // existía, ver el comentario de esa función.
+      // v84: la tercera rama es la consulta de «Próximas etapas asignadas a mí» (tasks.js, subscribeToMyTasks): una tarea con
+      // flujo multietapa lista en `upcomingAssigneeIds` a quienes tienen una etapa FUTURA. Va con .get(…, []) porque la
+      // mayoría de las tareas no traen ese campo. Una consulta SIN esta rama no la necesita: si estas reglas aún no están
+      // republicadas, esa consulta falla sola y Mis tareas sigue enseñando lo de siempre (solo falta esa sección).
       allow read: if isActiveUser() &&
         (resource.data.projectId != null ||
          resource.data.ownerId == request.auth.uid ||
          (request.auth.uid in resource.data.assigneeIds) ||
+         (request.auth.uid in resource.data.get('upcomingAssigneeIds', [])) ||
          isAdmin());
       // Sin cambios respecto a antes: quien CREA una tarea siempre lo hace
       // o bien con projectId relleno (tarea de proyecto, ya abierta a todo

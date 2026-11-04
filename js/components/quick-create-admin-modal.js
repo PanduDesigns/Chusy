@@ -48,6 +48,7 @@
 // ============================================================================
 import { el, uid, escapeHtml, badgeHtml, showToast, PRIORITY_LABELS } from "../utils.js";
 import { mountAppearancePicker } from "./project-appearance-picker.js";
+import { normalizeTemplateStages, STAGE_KEYS, STAGE_SHORT, STAGE_LABELS, PURCHASE_DEFAULT_DAYS } from "../workflow-stages.js";
 import {
   getQuickCreateProducts,
   createQuickCreateProduct,
@@ -60,7 +61,7 @@ import {
 const PRIORITIES = ["urgente", "alta", "media", "baja"];
 
 function blankTask() {
-  return { id: uid(), title: "", description: "", durationDays: null, priority: "media" };
+  return { id: uid(), title: "", description: "", durationDays: null, priority: "media", stages: normalizeTemplateStages(null) };
 }
 function blankOption() {
   return { id: uid(), name: "", tasks: [] };
@@ -191,8 +192,10 @@ function cloneProductWithFreshIds(product) {
   };
 }
 
-export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
+export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled, teamMembers }) {
   const root = document.getElementById("modal-root");
+  // v84: personas a las que se puede preasignar cada etapa de una tarea de plantilla.
+  const stageMembers = [...(teamMembers || [])].filter((m) => m && m.uid && !m.isImported && !m.deleted).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
   const state = {
     loading: true,
@@ -334,6 +337,38 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
     return PRIORITIES.map((p) => `<option value="${p}" ${p === (current || "media") ? "selected" : ""}>${PRIORITY_LABELS[p]}</option>`).join("");
   }
 
+  /** v84: qué etapas lleva la tarea (por defecto las 3), con responsable opcional y duración en días laborables de cada una. */
+  function stagesCfgHtml(t) {
+    const st = normalizeTemplateStages(t.stages);
+    return `
+        <div class="qc-task-stages" title="Etapas del flujo de la tarea al crearla (Diseño › Compra/Pedido › Recepción/Fab.)">
+          ${STAGE_KEYS.map((k) => `
+          <div class="qc-stage-cfg">
+            <label class="wf-check wf-check--${k}"><input type="checkbox" class="qc-stage-on" data-stage="${k}"${st[k].enabled ? " checked" : ""}> ${escapeHtml(STAGE_SHORT[k])}</label>
+            <select class="field__select qc-stage-who" data-stage="${k}" title="Responsable preasignado de ${escapeHtml(STAGE_LABELS[k])} (opcional)">
+              <option value="">Sin responsable</option>
+              ${stageMembers.map((m) => `<option value="${escapeHtml(m.uid)}"${m.uid === st[k].assigneeId ? " selected" : ""}>${escapeHtml(m.name || "Sin nombre")}</option>`).join("")}
+            </select>
+            <input class="field__input qc-stage-days" type="number" min="0" step="1" data-stage="${k}" value="${(t.stages && t.stages[k] && t.stages[k].days !== null && t.stages[k].days !== undefined) ? t.stages[k].days : ""}" placeholder="${k === "purchase" ? PURCHASE_DEFAULT_DAYS : "Días"}" title="Días LABORABLES de ${escapeHtml(STAGE_LABELS[k])}${k === "purchase" ? ` (por defecto ${PURCHASE_DEFAULT_DAYS})` : " (opcional)"}">
+          </div>`).join("")}
+        </div>`;
+  }
+
+  /** v84: cablea las casillas, responsables y días de etapa de una fila de tarea de plantilla. */
+  function wireStagesCfg(row, task) {
+    const set = (key, patch) => {
+      const st = normalizeTemplateStages(task.stages);
+      st[key] = { ...st[key], ...patch };
+      task.stages = st;
+    };
+    row.querySelectorAll(".qc-stage-on").forEach((cb) => cb.addEventListener("change", () => set(cb.dataset.stage, { enabled: cb.checked })));
+    row.querySelectorAll(".qc-stage-who").forEach((sel) => sel.addEventListener("change", () => set(sel.dataset.stage, { assigneeId: sel.value || null })));
+    row.querySelectorAll(".qc-stage-days").forEach((inp) => inp.addEventListener("input", () => {
+      const k = inp.dataset.stage;
+      set(k, { days: inp.value === "" ? (k === "purchase" ? PURCHASE_DEFAULT_DAYS : null) : Math.max(0, parseInt(inp.value, 10) || 0) });
+    }));
+  }
+
   function taskRowHtml(t, { kind, groupId, optionId }) {
     const dataAttrs = kind === "base" ? `data-base-task="${t.id}"` : `data-group="${groupId}" data-option="${optionId}" data-opt-task="${t.id}"`;
     const days = t.durationDays === null || t.durationDays === undefined ? "" : t.durationDays;
@@ -348,6 +383,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
           <input class="field__input qc-task-days" type="number" min="0" step="1" value="${days}" placeholder="Días" title="Días LABORABLES necesarios para completarla, contados desde que se inserta el producto en un proyecto (sin fines de semana, festivos ni ausencias de quien la tenga asignada). 0 = el mismo día." style="width:56px;flex:none;">
           <select class="field__select qc-task-priority" title="Prioridad con la que se crea esta tarea" style="width:84px;flex:none;">${priorityOptionsHtml(t.priority)}</select>
         </div>
+        ${stagesCfgHtml(t)}
       </div>`;
   }
 
@@ -544,6 +580,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
       row.querySelector(".qc-task-desc").addEventListener("input", (e) => { task.description = e.target.value; });
       row.querySelector(".qc-task-days").addEventListener("input", (e) => { task.durationDays = e.target.value === "" ? null : Math.max(0, parseInt(e.target.value, 10) || 0); });
       row.querySelector(".qc-task-priority").addEventListener("change", (e) => { task.priority = e.target.value; });
+      wireStagesCfg(row, task);
       row.querySelector(".qc-remove-task").addEventListener("click", () => {
         state.editingProduct.baseTasks = state.editingProduct.baseTasks.filter((t) => t.id !== taskId);
         render();
@@ -599,6 +636,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
           row.querySelector(".qc-task-desc").addEventListener("input", (e) => { task.description = e.target.value; });
           row.querySelector(".qc-task-days").addEventListener("input", (e) => { task.durationDays = e.target.value === "" ? null : Math.max(0, parseInt(e.target.value, 10) || 0); });
           row.querySelector(".qc-task-priority").addEventListener("change", (e) => { task.priority = e.target.value; });
+          wireStagesCfg(row, task);
           row.querySelector(".qc-remove-task").addEventListener("click", () => {
             option.tasks = option.tasks.filter((t) => t.id !== taskId);
             render();
@@ -638,7 +676,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
       icon: p.icon,
       color: p.color,
       baseTasks: p.baseTasks
-        .map((t) => ({ id: t.id, title: t.title.trim(), description: (t.description || "").trim(), durationDays: t.durationDays ?? null, priority: t.priority || "media" }))
+        .map((t) => ({ id: t.id, title: t.title.trim(), description: (t.description || "").trim(), durationDays: t.durationDays ?? null, priority: t.priority || "media", stages: normalizeTemplateStages(t.stages) }))
         .filter((t) => t.title),
       groups: p.groups
         .map((g) => ({
@@ -650,7 +688,7 @@ export function openQuickCreateAdminModal({ currentUser, quickCreateEnabled }) {
               id: o.id,
               name: o.name.trim(),
               tasks: (o.tasks || [])
-                .map((t) => ({ id: t.id, title: t.title.trim(), description: (t.description || "").trim(), durationDays: t.durationDays ?? null, priority: t.priority || "media" }))
+                .map((t) => ({ id: t.id, title: t.title.trim(), description: (t.description || "").trim(), durationDays: t.durationDays ?? null, priority: t.priority || "media", stages: normalizeTemplateStages(t.stages) }))
                 .filter((t) => t.title),
             }))
             .filter((o) => o.name),
