@@ -235,3 +235,85 @@ export function projectKeyDates(project) {
   const props = (project && project.properties) || {};
   return PROPERTY_DATE_FIELDS.map((f) => ({ key: f.key, label: f.label, short: f.short, date: toDate(dateOrNull(props[f.key])) })).filter((k) => k.date);
 }
+
+// ============================================================================
+// Filtro rápido por SECTOR (v85) — «Todos | Industria | Automoción»
+//
+// NO hay ningún campo nuevo: el Sector es el que ya existe en las propiedades
+// del proyecto (`project.properties.sector`, que además se hereda de la oferta
+// al convertirla, ver propertiesFromOffer). Este bloque solo lee ese campo,
+// normalizando mayúsculas y tildes ('Industria', 'industria', 'AUTOMOCIÓN',
+// 'automocion'…), y recuerda en este navegador qué opción está activa
+// (`chusy_sidebar_sector_filter` en localStorage). Lo usan la barra lateral
+// (sidebar.js) y la línea de tiempo global (timeline-view.js): es UN solo
+// filtro compartido, así que lo que se elige en una se ve en la otra.
+// Con el filtro activo, un proyecto SIN sector definido no sale (no es de
+// ninguno de los dos); en «Todos» salen todos, también esos.
+// ============================================================================
+export const SECTOR_FILTER_KEY = "chusy_sidebar_sector_filter";
+export const SECTOR_FILTER_ALL = "todos";
+/** Las tres píldoras, en orden. `key` es lo que se guarda; `sector` la opción real de SECTOR_OPTIONS ('' = sin filtrar). */
+export const SECTOR_FILTER_OPTIONS = Object.freeze([
+  Object.freeze({ key: "todos", label: "Todos", sector: "" }),
+  Object.freeze({ key: "industria", label: "Industria", sector: "Industria" }),
+  Object.freeze({ key: "automocion", label: "Automoción", sector: "Automoción" }),
+]);
+
+/** 'Automoción ' / 'AUTOMOCION' / 'automoción' → 'automocion' (minúsculas, sin tildes ni espacios sobrantes). */
+export function normalizeSectorKey(value) {
+  return String(value == null ? "" : value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+/** Cualquier valor → una clave válida de SECTOR_FILTER_OPTIONS ('todos' si no es ninguna conocida). */
+export function normalizeSectorFilter(value) {
+  const key = normalizeSectorKey(value);
+  const found = SECTOR_FILTER_OPTIONS.find((o) => o.key === key);
+  return found ? found.key : SECTOR_FILTER_ALL;
+}
+
+/** El sector de un proyecto como clave ('industria' | 'automocion'), o '' si no tiene (o no es uno de los dos). */
+export function projectSectorKey(project) {
+  const raw = project && project.properties ? project.properties.sector : "";
+  const key = normalizeSectorKey(raw);
+  return SECTOR_FILTER_OPTIONS.some((o) => o.sector && o.key === key) ? key : "";
+}
+
+/** ¿Pasa este proyecto el filtro? 'todos' (o cualquier valor desconocido) deja pasar a todos. */
+export function projectMatchesSectorFilter(project, filter) {
+  const f = normalizeSectorFilter(filter);
+  return f === SECTOR_FILTER_ALL || projectSectorKey(project) === f;
+}
+
+/** Los proyectos que pasan el filtro, en el mismo orden. No toca el array original. */
+export function filterProjectsBySector(projects, filter) {
+  const list = Array.isArray(projects) ? projects : [];
+  return normalizeSectorFilter(filter) === SECTOR_FILTER_ALL ? list.slice() : list.filter((p) => projectMatchesSectorFilter(p, filter));
+}
+
+/** La opción guardada en este navegador ('todos' si no hay nada o localStorage no está disponible). */
+export function loadSectorFilter(storage) {
+  try {
+    const st = storage || (typeof localStorage !== "undefined" ? localStorage : null);
+    return st ? normalizeSectorFilter(st.getItem(SECTOR_FILTER_KEY)) : SECTOR_FILTER_ALL;
+  } catch (e) {
+    return SECTOR_FILTER_ALL;
+  }
+}
+
+/** Guarda la opción (ya normalizada) y la devuelve; si localStorage falla, la devuelve igual (vale para esta sesión). */
+export function saveSectorFilter(value, storage) {
+  const normalized = normalizeSectorFilter(value);
+  try {
+    const st = storage || (typeof localStorage !== "undefined" ? localStorage : null);
+    if (st) st.setItem(SECTOR_FILTER_KEY, normalized);
+  } catch (e) { /* localStorage no disponible */ }
+  return normalized;
+}
+
+/** El HTML de las tres píldoras (compartido por la barra lateral y la línea de tiempo). `extraClass` cambia solo el contenedor. */
+export function sectorFilterPillsHtml(active, { extraClass = "", idPrefix = "sector" } = {}) {
+  const cur = normalizeSectorFilter(active);
+  return `<div class="sector-filter${extraClass ? ` ${extraClass}` : ""}" role="group" aria-label="Filtrar por sector">${SECTOR_FILTER_OPTIONS
+    .map((o) => `<button type="button" class="sector-filter__pill${o.key === cur ? " is-active" : ""}" data-sector-filter="${o.key}" aria-pressed="${o.key === cur ? "true" : "false"}" id="${idPrefix}-${o.key}">${o.label}</button>`)
+    .join("")}</div>`;
+}

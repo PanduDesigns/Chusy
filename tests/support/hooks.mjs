@@ -29,13 +29,13 @@ export const writeBatch = () => ({ set: (ref, data) => store().sets.push({ ref, 
 export const serverTimestamp = () => "TS";
 // v82: también getDoc / getDocs / setDoc, y writeBatch().update se anota en globalThis.__fb.updates = [{ ref, fields }].
 // Ganchos opcionales para pruebas que necesitan controlar Firestore (v80: buzón de Outlook): una prueba pone
-// globalThis.__fb.hooks = { onSnapshot, runTransaction, updateDoc, deleteDoc }. Sin gancho, todo se comporta como siempre.
+// globalThis.__fb.hooks = { onSnapshot, runTransaction, updateDoc, deleteDoc, addDoc }. Sin gancho, todo se comporta como siempre.
 const hook = (name) => (store().hooks || {})[name];
 export const onSnapshot = (...a) => { const h = hook("onSnapshot"); return h ? h(...a) : () => {}; };
 export const runTransaction = (...a) => { const h = hook("runTransaction"); return h ? h(...a) : f(...a); };
 export const updateDoc = (...a) => { const h = hook("updateDoc"); return h ? h(...a) : f(...a); };
 export const deleteDoc = (...a) => { const h = hook("deleteDoc"); return h ? h(...a) : f(...a); };
-export const addDoc = async () => ({ id: "auto" + ++autoId });
+export const addDoc = async (...a) => { const h = hook("addDoc"); return h ? h(...a) : { id: "auto" + ++autoId }; }; // v85: gancho para capturar lo que crea createProject
 export const setDoc = async (...a) => { const h = hook("setDoc"); return h ? h(...a) : undefined; };
 `;
 const OVERRIDDEN = new Set(["collection", "doc", "getDocs", "writeBatch", "serverTimestamp", "onSnapshot", "addDoc", "setDoc", "getDoc", "runTransaction", "updateDoc", "deleteDoc"]);

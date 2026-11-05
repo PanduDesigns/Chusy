@@ -303,15 +303,37 @@ body.tl-dragging-bar { user-select: none; }
 .tl-bar__code { display: block; padding: 0 5px; overflow: hidden; text-overflow: clip; white-space: nowrap; font-size: 10px; font-weight: 700; line-height: 1.9; color: #fff; text-shadow: 0 0 2px rgba(0, 0, 0, .65); pointer-events: none; }
 .tl-bar--hot { outline: 2px solid var(--color-danger); outline-offset: 1px; }
 
-/* ===== v84 · Flujo multietapa en la línea de tiempo: tramos por etapa y barra teñida ===== */
-.tl-bar--seg { height: 16px; border-radius: 3px; border: 1px solid transparent; opacity: 0.55; overflow: hidden; }
-.tl-bar--seg .tl-bar__code { display: block; padding: 0 5px; font-size: 10px; font-weight: 700; line-height: 14px; color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,0.35); }
-.tl-bar--seg.is-current { opacity: 1; box-shadow: 0 0 0 2px var(--color-signal); z-index: 2; }
-.tl-bar--seg.is-done { opacity: 0.4; }
-.tl-bar--seg.is-pending { opacity: 0.75; border-style: dashed; border-color: rgba(255,255,255,0.55); }
-.tl-seg--design { background: var(--wf-design) !important; }
-.tl-seg--purchase { background: var(--wf-purchase) !important; }
-.tl-seg--production { background: var(--wf-production) !important; }
-/* barra única (una sola etapa con fechas): conserva el borde de prioridad y se tiñe con el color de la etapa activa */
+/* ===== v84/v85 · Flujo multietapa en la línea de tiempo: TODAS las etapas habilitadas, cada una con su color y su estado ===== */
+:root {
+  --tl-stage-design: #3b82f6;      /* Diseño → azul */
+  --tl-stage-purchase: #f59e0b;    /* Compra/Pedido → ámbar */
+  --tl-stage-production: #10b981;  /* Recepción/Fab. → esmeralda */
+}
+.tl-seg--design { --seg: var(--tl-stage-design); }
+.tl-seg--purchase { --seg: var(--tl-stage-purchase); }
+.tl-seg--production { --seg: var(--tl-stage-production); }
+.tl-seg--design, .tl-seg--purchase, .tl-seg--production { background: var(--seg) !important; border-color: var(--seg) !important; }
+.tl-bar--seg { height: 18px; border-radius: 4px; border-width: 1px; border-style: solid; opacity: 1; overflow: hidden; position: relative; }
+.tl-bar--seg .tl-bar__code { display: block; padding: 0 6px; font-size: 10.5px; font-weight: 700; line-height: 16px; color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.45); }
+/* Completada: tono sólido y atenuado (cerrada) con ✓ */
+.tl-bar--seg.is-done { opacity: 0.55; filter: saturate(0.8); }
+/* En curso: destacada, con anillo y sombra activa */
+.tl-bar--seg.is-current { opacity: 1; z-index: 3; box-shadow: 0 0 0 2px var(--color-panel, #fff), 0 0 0 4px var(--seg), 0 3px 8px rgba(0, 0, 0, 0.3); }
+/* Pendiente (futura): borde discontinuo y trama suave sobre el color de la etapa */
+.tl-bar--seg.is-pending {
+  opacity: 0.9; border-style: dashed !important; border-width: 2px; line-height: 14px;
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 5px, transparent 5px 10px) !important;
+}
+/* Proyectada (sin fechas propias todavía): aún más ligera, para no confundirla con una fecha ya decidida */
+.tl-bar--seg.is-projected { opacity: 0.7; }
+.tl-bar--seg.is-projected .tl-bar__code { font-style: italic; }
+.tl-bar--seg:hover { transform: none; opacity: 1; }
+/* barra única (una sola etapa dibujable): conserva el borde de prioridad y se tiñe con el color de la etapa activa */
 .tl-bar--stage .tl-bar__code { color: #fff; font-weight: 700; text-shadow: 0 1px 1px rgba(0,0,0,0.35); }
-.tl-bar--seg:hover { transform: none; }
+
+/* v85: leyenda de colores de las etapas, y conmutador de sector de la barra de la línea de tiempo */
+.tl-stage-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; padding: 0 2px 6px; font-size: 11px; color: var(--color-text-faint); }
+.tl-stage-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.tl-stage-swatch { display: inline-block; width: 14px; height: 8px; border-radius: 2px; background: var(--seg); }
+.tl-sector { padding: 0; }
+.tl-sector .sector-filter__pill { flex: none; padding: 3px 10px; font-size: 12px; }

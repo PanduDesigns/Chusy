@@ -301,10 +301,10 @@ check("… y los tres archivos del importador siguen en el proyecto", ["js/offer
 
 // Entrega
 const idx = read("index.html");
-check("package.json y el ?v= de index.html son 84", JSON.parse(read("package.json")).version === "84.0.0" && (idx.match(/\?v=84/g) || []).length === 14 && !/\?v=83/.test(idx));
+check("package.json y el ?v= de index.html van a la par (≥ 84, 14 enlaces CSS iguales)", (() => { const major = parseInt(JSON.parse(read("package.json")).version, 10); return major >= 84 && (idx.match(new RegExp(`\\?v=${major}\\b`, "g")) || []).length === 14 && !/\?v=83/.test(idx); })());
 check("CSS: insignias (list-board), ventana y sección (modals), tramos del Gantt (calendar-timeline)", /\.wf-badge--design/.test(read("css/06-list-board.css")) && /\.wf-row\b/.test(read("css/07-modals.css")) && /\.stage-handoff/.test(read("css/07-modals.css")) && /\.tl-seg--purchase/.test(read("css/08-calendar-timeline.css")));
 const wn = await import("../js/whats-new.js");
-check("Novedades: la v84 es la más reciente y habla de etapas, relevo y carga", wn.RELEASES[0].id === 84 && /etapas/i.test(JSON.stringify(wn.RELEASES[0])) && /relevo/i.test(JSON.stringify(wn.RELEASES[0])) && /carga/i.test(JSON.stringify(wn.RELEASES[0])));
+check("Novedades: la v84 consta y habla de etapas, relevo y carga", (() => { const r = wn.RELEASES.find((x) => x.id === 84); return !!r && wn.RELEASES[0].id >= 84 && /etapas/i.test(JSON.stringify(r)) && /relevo/i.test(JSON.stringify(r)) && /carga/i.test(JSON.stringify(r)); })());
 check("README documenta la v84", /v84/.test(read("README.md")) && /Chusy-84/.test(read("README.md")) && /workflow-stages/.test(read("README.md")));
 check("Reglas de Firestore: la consulta de próximas etapas puede leer", /upcomingAssigneeIds/.test(read("firestore.rules")) && /upcomingAssigneeIds/.test(read("js/data/tasks.js")));
 

@@ -39,6 +39,16 @@ export const STAGE_LABELS = Object.freeze({ design: "Diseño", purchase: "Compra
 export const STAGE_SHORT = Object.freeze({ design: "Diseño", purchase: "Compra/Pedido", production: "Recepción/Fab." });
 /** Días laborables que se dan por defecto a Compra/Pedido cuando se activa. */
 export const PURCHASE_DEFAULT_DAYS = 5;
+/**
+ * v85 · Duración ESTIMADA que se dibuja en la Línea de Tiempo para Recepción/Fabricación cuando todavía no tiene
+ * fechas (días laborables tras su inicio, igual que Compra/Pedido). Solo sirve para que la cadena
+ * [Diseño] → [Compra] → [Recepción/Fab.] se vea entera; no se guarda en la tarea.
+ */
+export const PRODUCTION_PROJECTED_DAYS = 5;
+/** Colores y etiquetas propios de cada etapa en la Línea de Tiempo (v85). */
+export const STAGE_TIMELINE_COLORS = Object.freeze({ design: "#3b82f6", purchase: "#f59e0b", production: "#10b981" });
+export const STAGE_TIMELINE_LABELS = Object.freeze({ design: "Diseño", purchase: "Compra", production: "Recepción/Fab." });
+const PROJECTED_DAYS = Object.freeze({ design: null, purchase: PURCHASE_DEFAULT_DAYS, production: PRODUCTION_PROJECTED_DAYS });
 
 const isKey = (k) => STAGE_KEYS.includes(k);
 const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
@@ -387,6 +397,72 @@ export function stageSegments(task, offersProjectId) {
     out.push({ key: k, short: STAGE_SHORT[k], startDate: startDate || dueDate, dueDate: dueDate || startDate, status: stageStatus(wf, k) });
   }
   return out;
+}
+
+/**
+ * v85 · TODOS los tramos de la Línea de Tiempo de una tarea con flujo: una entrada por etapa HABILITADA, en orden,
+ * con fechas reales cuando las tiene y una PROYECCIÓN encadenada cuando todavía no:
+ *   [{ key, label (Diseño|Compra|Recepción/Fab.), full (nombre completo), status ('done'|'current'|'pending'),
+ *      startDate, dueDate ('YYYY-MM-DD'), projected (bool), assigneeId, note }]
+ * Reglas:
+ *  · Etapa con startDate y/o dueDate propios → sus fechas exactas (si solo tiene una, el tramo dura ese día).
+ *  · Etapa ACTIVA sin fechas propias → las fechas principales de la tarea (como stageSegments).
+ *  · Etapa posterior sin fechas → tramo PROYECTADO consecutivo: empieza en el primer día laborable de su responsable
+ *    a partir del día siguiente al fin de la etapa anterior y dura PURCHASE_DEFAULT_DAYS (Compra/Pedido) o
+ *    PRODUCTION_PROJECTED_DAYS (Recepción/Fab.) días laborables tras ese inicio, mismo cómputo que planPurchaseHandoff.
+ *    Sin una etapa anterior dibujada de la que colgar (p. ej. Diseño ya hecho y sin fechas) no se proyecta nada.
+ *  · Tarea completada (`isComplete`) → todas sus etapas salen como 'done'.
+ *  · El cursor de encadenado es el fin MÁS TARDÍO ya dibujado, así una proyección nunca se mete debajo de una etapa anterior.
+ * Sin flujo (antigua, de Ofertas, personal o sin etapas habilitadas) → [].
+ */
+export function timelineStages(task, { offersProjectId, cfg } = {}) {
+  const wf = taskWorkflow(task, offersProjectId);
+  if (!wf) return [];
+  const cur = currentStageKey(wf);
+  const out = [];
+  let cursor = null; // 'YYYY-MM-DD': el fin más tardío dibujado hasta ahora
+  for (const k of enabledStageKeys(wf)) {
+    const s = wf[k];
+    const status = task.isComplete || s.completed ? "done" : cur === k ? "current" : "pending";
+    let startDate = s.startDate, dueDate = s.dueDate, projected = false;
+    if (!startDate && !dueDate && k === cur) { startDate = dateKey(task.startDate); dueDate = dateKey(task.dueDate); }
+    if (startDate || dueDate) {
+      startDate = startDate || dueDate;
+      dueDate = dueDate || startDate;
+    } else if (cursor && PROJECTED_DAYS[k] !== null) {
+      const who = s.assigneeId || undefined;
+      const start = nextWorkingDay(dayAfter(cursor), cfg, who);
+      const startKey = start ? dateKey(start) : null;
+      if (!startKey) continue;
+      const end = addWorkingDays(startKey, PROJECTED_DAYS[k], cfg, who);
+      startDate = startKey;
+      dueDate = (end ? dateKey(end) : null) || startKey;
+      projected = true;
+    } else {
+      continue; // sin fechas y sin nada de lo que colgarla: no se puede situar
+    }
+    const last = startDate > dueDate ? startDate : dueDate;
+    if (!cursor || last > cursor) cursor = last;
+    out.push({ key: k, label: STAGE_TIMELINE_LABELS[k], full: STAGE_LABELS[k], status, startDate, dueDate, projected, assigneeId: s.assigneeId || null, note: s.note || "" });
+  }
+  return out;
+}
+
+const SEG_STATUS_TEXT = Object.freeze({ done: "Completada", current: "En curso", pending: "Pendiente" });
+
+/**
+ * v85 · El tooltip de un tramo de la Línea de Tiempo, varias líneas: etapa y estado, responsable y fechas.
+ *   «Compra/Pedido · En curso» / «Responsable: Ana» / «Fechas: 03/11–10/11 (proyectadas)»
+ * `nameOf(uid)` → nombre (o '' si no se conoce).
+ */
+export function describeTimelineSegment(seg, nameOf) {
+  if (!seg) return "";
+  const who = seg.assigneeId ? (typeof nameOf === "function" ? nameOf(seg.assigneeId) : "") || "Responsable sin nombre" : "Sin responsable";
+  const a = formatDayMonth(seg.startDate), b = formatDayMonth(seg.dueDate);
+  const range = a && b && a !== b ? `${a}–${b}` : a || b || "sin fechas";
+  const lines = [`${seg.full} · ${SEG_STATUS_TEXT[seg.status] || seg.status}`, `Responsable: ${who}`, `Fechas: ${range}${seg.projected ? " (proyectadas: aún sin fechas propias)" : ""}`];
+  if (seg.note) lines.push(`Nota: ${seg.note}`);
+  return lines.join("\n");
 }
 
 /**

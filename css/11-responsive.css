@@ -17,6 +17,7 @@
   .sidebar.is-collapsed .sidebar__brand-logo--full { opacity: 1; }
   .sidebar.is-collapsed .sidebar__brand-logo--icon { opacity: 0; }
   .sidebar__collapse-toggle { display: none; }
+  .sidebar.is-collapsed .sidebar__sector { display: flex; } /* v85: en móvil la barra siempre se ve «expandida» */
   /* v77: en móvil la barra siempre se ve «expandida», aunque en escritorio esté minimizada: el bloque de navegación también (tira de iconos si está plegado). */
   .sidebar.is-collapsed .sidebar__nav-head { justify-content: space-between; padding: 0 2px 0 8px; }
   .sidebar.is-collapsed .sidebar__nav.is-folded { height: 34px; }

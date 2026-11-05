@@ -102,6 +102,16 @@
   padding: 10px 8px 6px;
   text-transform: uppercase;
 }
+/* v85: conmutador de sector («Todos | Industria | Automoción») sobre la lista de proyectos: píldoras compactas, una sola línea. */
+.sector-filter { display: flex; gap: 4px; padding: 0 4px 6px; box-sizing: border-box; max-width: 100%; min-width: 0; }
+.sector-filter__pill {
+  flex: 1 1 auto; min-width: 0; padding: 3px 6px; border-radius: 999px; font-size: 11px; line-height: 1.5; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; text-align: center; cursor: pointer;
+  background: transparent; border: 1px solid var(--color-line); color: var(--color-text-lo); transition: var(--transition-fast);
+}
+.sector-filter__pill:hover { border-color: var(--color-line-bright); color: var(--color-text-hi); }
+.sector-filter__pill.is-active { background: var(--color-signal-soft); border-color: var(--color-signal-dim); color: var(--color-signal); font-weight: 600; }
+.sidebar.is-collapsed .sidebar__sector { display: none; } /* con la barra minimizada (68 px) no caben las tres píldoras; el filtro sigue aplicado */
 .sidebar__list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; } /* scroll propio: "Nuevo proyecto", tu usuario y "Cerrar sesión" quedan siempre visibles debajo, sin bajar del todo */
 .sidebar__item {
   display: flex; align-items: center; gap: 10px;

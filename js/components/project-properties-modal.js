@@ -20,12 +20,18 @@
 // v60: junto a la etiqueta de «Ubicación» hay un botón «Abrir Ubicación»
 // (ver components/open-location.js).
 //
+// v85: al CONVERTIR una oferta, justo debajo del nombre se incrusta el selector reutilizable de Icono y Color
+// (project-appearance-picker.js, el mismo de crear/editar proyecto), y `onConfirm` recibe también `icon` y `color`
+// para que el proyecto nazca ya con esa apariencia, sin tener que entrar aparte a editarlo. En «Propiedades» de un
+// proyecto ya creado no aparece (eso se cambia con «Editar proyecto»).
+//
 // v70: arriba del todo se ve el ID del proyecto (solo lectura, se copia con un
 // clic; ver project-codes.js). Al convertir una oferta se enseña el ID que el
 // proyecto va a HEREDAR de ella.
 // ============================================================================
 import { el, escapeHtml, uid, showToast, toDateInputValue } from "../utils.js";
 import { attachTextSuggest } from "./text-suggest.js";
+import { mountAppearancePicker, CURATED_ICONS, PROJECT_COLORS } from "./project-appearance-picker.js";
 import { createOpenLocationButton, createSuggestLocationControls } from "./open-location.js";
 import { localFolderName } from "../location.js";
 import { idChipHtml, idPendingHtml, wireIdChips } from "./id-chip.js";
@@ -62,7 +68,7 @@ function dateFieldHtml(key, value) {
  * `onSubmit({ name, properties })` hace el guardado de verdad; si lanza
  * un error el formulario se queda abierto y avisa.
  */
-function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, getCommercialOptions, onSubmit, idInfo, folderName = "" }) {
+function openPropertiesForm({ title, intro, nameField, appearanceField, confirmLabel, initial, getCommercialOptions, onSubmit, idInfo, folderName = "" }) {
   const root = document.getElementById("modal-root");
   const state = normalizeProperties(initial);
   let dirty = false;
@@ -84,6 +90,11 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
             <span class="field__label">Nombre del proyecto</span>
             <input class="field__input" id="pp-name" type="text" value="${escapeHtml(nameField.value)}" placeholder="Nombre del proyecto">
           </label>` : ""}
+          ${appearanceField ? `
+          <div class="field" id="pp-appearance-field">
+            <span class="field__label">Icono y color del proyecto</span>
+            <div id="pp-appearance"></div>
+          </div>` : ""}
           <div class="props-row props-row--with-action">
             <label class="field">
               <span class="field__label">Comercial</span>
@@ -183,6 +194,19 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
   });
   if (nameField) overlay.querySelector("#pp-name").addEventListener("input", markDirty);
 
+  // v85: Icono y Color (solo al convertir una oferta). El selector avisa una vez nada más montarse con los valores de
+  // partida: eso no cuenta como un cambio del usuario (no ensucia el formulario).
+  let appearance = appearanceField ? { icon: appearanceField.icon || CURATED_ICONS[0], color: appearanceField.color || PROJECT_COLORS[0] } : null;
+  if (appearanceField) {
+    let pickerReady = false;
+    mountAppearancePicker(overlay.querySelector("#pp-appearance"), {
+      icon: appearance.icon,
+      color: appearance.color,
+      onChange: (v) => { appearance = { icon: v.icon, color: v.color }; if (pickerReady) markDirty(); },
+    });
+    pickerReady = true;
+  }
+
   // --- Histórico del proyecto ---------------------------------------------------
   // Se vuelve a pintar al añadir/quitar una fila, pero NO al escribir en una
   // casilla (perdería el foco a mitad de frase) — igual que en task-modal.js.
@@ -259,7 +283,7 @@ function openPropertiesForm({ title, intro, nameField, confirmLabel, initial, ge
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Guardando…";
     try {
-      await onSubmit({ name, properties: propertiesForSave(state) });
+      await onSubmit({ name, properties: propertiesForSave(state), ...(appearance ? { icon: appearance.icon, color: appearance.color } : {}) });
       dirty = false;
       close();
     } catch (e) {
@@ -298,7 +322,7 @@ export function openProjectPropertiesModal({ project, onSave, getCommercialOptio
  * que la oferta tenía (ver propertiesFromOffer) y con el nombre del futuro
  * proyecto. `offer` es la tarea tal como está en Firestore (con su `id`);
  * `today` es "YYYY-MM-DD" (la fecha de aprobación propuesta).
- * `onConfirm({ name, properties })` crea el proyecto de verdad.
+ * `onConfirm({ name, properties, icon, color })` crea el proyecto de verdad (v85: con el icono y el color elegidos aquí).
  */
 export function openOfferConversionModal({ offer, offersProject, today, onConfirm, getCommercialOptions }) {
   const { name, properties } = propertiesFromOffer({ offer, offersProject, today });
@@ -307,10 +331,11 @@ export function openOfferConversionModal({ offer, offersProject, today, onConfir
     intro:
       "Se creará un proyecto nuevo con los datos de la oferta. Revisa las propiedades antes de crearlo — podrás cambiarlas más tarde con «Propiedades» (clic derecho sobre el proyecto). La oferta se marcará como completada y quedará enlazada al proyecto.",
     nameField: { value: name },
+    appearanceField: { icon: CURATED_ICONS[0], color: PROJECT_COLORS[0] },
     initial: properties,
     idInfo: { label: "ID (lo hereda de la oferta)", code: offer.offerCode || "", what: "oferta", pendingText: "Se asignará al crear el proyecto" },
     confirmLabel: "Crear proyecto",
     getCommercialOptions,
-    onSubmit: ({ name: finalName, properties: finalProperties }) => onConfirm({ name: finalName, properties: finalProperties }),
+    onSubmit: ({ name: finalName, properties: finalProperties, icon, color }) => onConfirm({ name: finalName, properties: finalProperties, icon, color }),
   });
 }

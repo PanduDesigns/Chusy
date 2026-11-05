@@ -1166,17 +1166,25 @@ export function openTaskModal({
       const s = wf[k];
       const known = members.some((m) => m.uid === s.assigneeId);
       const extra = s.assigneeId && !known ? `<option value="${escapeHtml(s.assigneeId)}" selected>${escapeHtml(((teamMembers || []).find((m) => m.uid === s.assigneeId) || {}).name || "Responsable")}</option>` : "";
+      // v85: cada etapa en TRES sub-filas que nunca desbordan la tarjeta gris (ver .wf-row en css/07-modals.css):
+      //   1) cabecera: punto + nombre · estado a la derecha (+ «Reabrir» si está completada)
+      //   2) controles: responsable + inicio + fin, en una rejilla de 3 columnas (1fr 1fr en pantallas estrechas)
+      //   3) nota de relevo, a todo el ancho
       return `
         <div class="wf-row wf-row--${st}" data-stage="${k}">
-          <span class="wf-row__name"><span class="wf-dot wf-dot--${k}"></span>${escapeHtml(STAGE_SHORT[k])}</span>
-          <span class="wf-row__state wf-state--${st}">${STATE_TEXT[st]}</span>
-          <select class="field__select wf-row__who" data-wf-who="${k}" aria-label="Responsable de ${escapeHtml(STAGE_LABELS[k])}">
-            <option value="">Sin responsable</option>
-            ${members.map((m) => `<option value="${escapeHtml(m.uid)}"${m.uid === s.assigneeId ? " selected" : ""}>${escapeHtml(m.name || "Sin nombre")}</option>`).join("")}${extra}
-          </select>
-          <input class="field__input wf-row__date" type="date" data-wf-start="${k}" value="${toDateInputValue(s.startDate)}" aria-label="Inicio de ${escapeHtml(STAGE_SHORT[k])}">
-          <input class="field__input wf-row__date" type="date" data-wf-due="${k}" value="${toDateInputValue(s.dueDate)}" aria-label="Fin de ${escapeHtml(STAGE_SHORT[k])}">
-          ${st === "done" ? `<button type="button" class="btn btn--ghost btn--sm wf-row__reopen" data-wf-reopen="${k}" title="Desmarcar esta etapa y las posteriores">Reabrir</button>` : `<span></span>`}
+          <div class="wf-row__head">
+            <span class="wf-row__name"><span class="wf-dot wf-dot--${k}"></span>${escapeHtml(STAGE_SHORT[k])}</span>
+            <span class="wf-row__state wf-state--${st}">${STATE_TEXT[st]}</span>
+            ${st === "done" ? `<button type="button" class="btn btn--ghost btn--sm wf-row__reopen" data-wf-reopen="${k}" title="Desmarcar esta etapa y las posteriores">Reabrir</button>` : ""}
+          </div>
+          <div class="wf-row__controls">
+            <select class="field__select wf-row__who" data-wf-who="${k}" aria-label="Responsable de ${escapeHtml(STAGE_LABELS[k])}">
+              <option value="">Sin responsable</option>
+              ${members.map((m) => `<option value="${escapeHtml(m.uid)}"${m.uid === s.assigneeId ? " selected" : ""}>${escapeHtml(m.name || "Sin nombre")}</option>`).join("")}${extra}
+            </select>
+            <input class="field__input wf-row__date" type="date" data-wf-start="${k}" value="${toDateInputValue(s.startDate)}" aria-label="Inicio de ${escapeHtml(STAGE_SHORT[k])}" title="Inicio">
+            <input class="field__input wf-row__date" type="date" data-wf-due="${k}" value="${toDateInputValue(s.dueDate)}" aria-label="Fin de ${escapeHtml(STAGE_SHORT[k])}" title="Fin">
+          </div>
           <input class="field__input wf-row__note" type="text" maxlength="500" data-wf-note="${k}" placeholder="Nota de relevo (opcional)" value="${escapeHtml(s.note || "")}">
         </div>`;
     }).join("");

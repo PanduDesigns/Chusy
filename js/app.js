@@ -33,6 +33,7 @@ import {
 } from "./components/notification-bell.js";
 import { showAssignmentSystemNotification } from "./browser-notifications.js";
 import { renderSidebar } from "./components/sidebar.js";
+import { loadSectorFilter, saveSectorFilter, normalizeSectorFilter, filterProjectsBySector } from "./project-properties.js";
 import { renderTopbar } from "./components/topbar.js";
 import { renderListView } from "./views/list-view.js";
 import { renderBoardView } from "./views/board-view.js";
@@ -172,6 +173,17 @@ try { sidebarNavCollapsed = localStorage.getItem(SIDEBAR_NAV_KEY) === "1"; } cat
 function setSidebarNavCollapsed(collapsed) {
   sidebarNavCollapsed = !!collapsed;
   try { localStorage.setItem(SIDEBAR_NAV_KEY, sidebarNavCollapsed ? "1" : "0"); } catch (e) { /* localStorage no disponible */ }
+}
+
+// v85: filtro rápido por Sector («Todos | Industria | Automoción») de la barra lateral y de la línea de tiempo global.
+// Es UNO solo para las dos, y se recuerda en este navegador (`chusy_sidebar_sector_filter`, ver project-properties.js).
+// Cambiarlo repinta solo la barra lateral (así no se mueve el scroll de la vista abierta) y, si se está en la línea de
+// tiempo, también esta, que es la que filtra sus filas.
+let sectorFilter = loadSectorFilter();
+function setSectorFilter(value) {
+  sectorFilter = saveSectorFilter(normalizeSectorFilter(value));
+  if (mode === "timeline") renderShell();
+  else renderSidebarOnly();
 }
 
 // v77: departamento que un admin tiene elegido en Métricas ("" = todos). Solo
@@ -849,15 +861,9 @@ function handleSortChange(column) {
   else renderShell();
 }
 
-function renderShell() {
+/** v85: solo la barra lateral (sin tocar la topbar ni el contenido): la usa renderShell() y el cambio del filtro por sector. */
+function renderSidebarOnly() {
   if (!currentUser) return;
-
-  // La vuelven a poblar la vista de Lista y Mis tareas (cada una al final
-  // de su propio render); si el destino es otro modo/vista, queda limpia.
-  // Es barato: si sí toca mostrarla, se reconstruye igualmente unas
-  // líneas más abajo.
-  removeBulkToolbar();
-
   renderSidebar(sidebarEl, {
     projects,
     currentProjectId: mode === "project" ? currentProjectId : null,
@@ -871,6 +877,7 @@ function renderShell() {
     onToggleCollapse: toggleSidebarCollapse,
     isNavCollapsed: sidebarNavCollapsed,
     onToggleNav: setSidebarNavCollapsed,
+    sectorFilter, onSectorFilterChange: setSectorFilter, // v85
     onSelectProject: (id) => { selectProject(id); sidebarEl.classList.remove("is-open"); },
     onSelectMyTasks: () => { selectMyTasks(); sidebarEl.classList.remove("is-open"); },
     onSelectTimeline: () => { selectTimeline(); sidebarEl.classList.remove("is-open"); },
@@ -898,6 +905,18 @@ function renderShell() {
       }),
     onLogout: () => logOut(),
   });
+}
+
+function renderShell() {
+  if (!currentUser) return;
+
+  // La vuelven a poblar la vista de Lista y Mis tareas (cada una al final
+  // de su propio render); si el destino es otro modo/vista, queda limpia.
+  // Es barato: si sí toca mostrarla, se reconstruye igualmente unas
+  // líneas más abajo.
+  removeBulkToolbar();
+
+  renderSidebarOnly();
 
   if (mode === "archive") {
     if (!archivedProjectsLoaded) {
@@ -1020,7 +1039,8 @@ function renderMyTasksContent() {
 function renderTimelineContent() {
   // v66: hasta que llegan las tareas de TODOS los proyectos, los grupos saldrían vacíos o a medias.
   if (!taskLoader.isAllLoaded()) { mainContentEl.innerHTML = loadingStateHtml("Cargando las tareas de todos los proyectos…"); return; }
-  const groups = projects.map((p) => ({
+  // v85: el filtro por sector (el mismo de la barra lateral) deja en la global solo los proyectos del sector elegido.
+  const groups = filterProjectsBySector(projects, sectorFilter).map((p) => ({
     id: p.id,
     label: p.name,
     color: p.color,
@@ -1043,6 +1063,7 @@ function renderTimelineContent() {
     workCalendar: getWorkCalendar(), // v78
     groupBy: resolveTimelineGroupBy(currentUser, timelineGroupBy), onGroupByChange: setTimelineGroupBy, // v79 (v81: se fuerza «project» a quien no pueda ver la carga)
     departmentFilter: timelineDepartmentFilter, onDepartmentFilterChange: setTimelineDepartmentFilter,
+    sectorFilter, onSectorFilterChange: setSectorFilter, // v85
   });
 }
 
@@ -1257,8 +1278,9 @@ async function openOfferConversion(taskId) {
     offersProject,
     today: toDateInputValue(new Date()),
     getCommercialOptions,
-    onConfirm: async ({ name, properties }) => {
-      const { projectId, linked, folder } = await convertOfferToProject({ offer, name, properties, creatorUid: currentUser.uid, offersProject });
+    onConfirm: async ({ name, properties, icon, color }) => {
+      // v85: el icono y el color elegidos en la ventana de conversión pasan tal cual al proyecto nuevo.
+      const { projectId, linked, folder } = await convertOfferToProject({ offer, name, properties, creatorUid: currentUser.uid, offersProject, icon, color });
       // v75: además de si se enlazó la oferta, se cuenta qué pasó con su carpeta de Drive (pasó a «Proyectos» o no).
       const message = conversionMessage({ linked, folder });
       showToast(message.text, message.kind);

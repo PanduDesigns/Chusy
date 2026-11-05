@@ -292,22 +292,34 @@ textarea.modal__title-input {
 .offer-import__progress { font-size: 12.5px; color: var(--color-text-lo); }
 
 /* ===== v84 · Flujo de etapas: sección del modal de tarea, ventana de relevo y plantillas ===== */
-.wf-section { gap: 8px; padding: 10px 12px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-panel-raised); }
+/* v85: el bloque y cada etapa nunca se salen de la tarjeta gris (antes, una sola línea con 6 columnas desbordaba el margen derecho). */
+.wf-section { gap: 8px; padding: 10px 12px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-panel-raised); box-sizing: border-box; max-width: 100%; overflow: hidden; min-width: 0; }
 .wf-section[hidden] { display: none; }
 .wf-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .wf-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .wf-check input { accent-color: var(--wf-design); }
 .wf-check--purchase input { accent-color: var(--wf-purchase); }
 .wf-check--production input { accent-color: var(--wf-production); }
-.wf-rows { display: flex; flex-direction: column; gap: 8px; }
+.wf-rows { display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; max-width: 100%; min-width: 0; }
 .wf-row {
-  display: grid; grid-template-columns: minmax(96px, 1fr) 96px minmax(110px, 1.3fr) 126px 126px auto; gap: 6px 8px; align-items: center;
-  padding: 6px 0; border-top: 1px dashed var(--color-line); font-size: 12.5px;
+  display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; overflow: hidden;
+  padding: 8px 0; border-top: 1px dashed var(--color-line); font-size: 12.5px;
 }
 .wf-row:first-child { border-top: 0; }
-.wf-row__name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
-.wf-row__note { grid-column: 1 / -1; font-size: 12px; }
+/* Sub-fila 1 · cabecera: punto + nombre, y el estado a la derecha con aire suficiente para no pisar «Compra/Pedido» ni «Recepción/Fab.» */
+.wf-row__head { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; box-sizing: border-box; }
+.wf-row__name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-row__state { margin-left: auto; flex: none; white-space: nowrap; }
+.wf-row__reopen { flex: none; }
+/* Sub-fila 2 · controles: responsable + fecha de inicio + fecha de fin */
+.wf-row__controls {
+  display: grid; grid-template-columns: minmax(140px, 1.3fr) minmax(115px, 1fr) minmax(115px, 1fr); gap: 8px;
+  width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box;
+}
+.wf-row__controls .field__select, .wf-row__controls .field__input { min-width: 0; width: 100%; box-sizing: border-box; }
 .wf-row .field__select, .wf-row .field__input { min-width: 0; padding-top: 4px; padding-bottom: 4px; font-size: 12.5px; }
+/* Sub-fila 3 · nota de relevo: a todo el ancho, sin sobresalir ni un píxel */
+.wf-row__note { display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; font-size: 12px; }
 .wf-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .wf-dot--design { background: var(--wf-design); }
 .wf-dot--purchase { background: var(--wf-purchase); }
@@ -317,7 +329,8 @@ textarea.modal__title-input {
 .wf-state--pending { color: var(--color-text-faint); }
 .wf-row--done .wf-row__name { opacity: 0.7; }
 .wf-return { width: fit-content; }
-@media (max-width: 720px) { .wf-row { grid-template-columns: 1fr 1fr; } .wf-row__who { grid-column: 1 / -1; } }
+/* En pantallas estrechas, el responsable ocupa la primera línea y las dos fechas pasan a 1fr 1fr debajo */
+@media (max-width: 560px) { .wf-row__controls { grid-template-columns: 1fr 1fr; } .wf-row__who { grid-column: 1 / -1; } }
 /* Ventana de relevo */
 .stage-handoff .modal__body { display: flex; flex-direction: column; gap: 10px; }
 .stage-handoff__task { margin: 0; font-weight: 600; }

@@ -25,6 +25,18 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 85,
+    date: "2026-11-04",
+    title: "Etapas visibles en la línea de tiempo, filtro por sector y arreglos de la barra lateral",
+    items: [
+      "En la línea de tiempo, cada tarea con etapas muestra ahora TODAS sus etapas encadenadas: Diseño en azul, Compra en ámbar y Recepción/Fab. en verde. La completada sale con ✓ y más tenue, la que está en curso destacada y las pendientes con borde discontinuo; las que aún no tienen fechas se calculan a continuación de la anterior (5 días laborables) y se marcan como proyectadas. Al pasar el ratón ves etapa, estado, responsable y fechas.",
+      "El bloque «Flujo de Etapas» del modal de tarea ya no se sale de la tarjeta: cada etapa se ordena en tres líneas (nombre y estado, responsable y fechas, nota de relevo) y los textos ya no se pisan.",
+      "La barra lateral ya no salta arriba del todo al abrir un proyecto: la lista se queda donde estabas.",
+      "Nuevo filtro «Todos | Industria | Automoción» sobre la lista de proyectos de la barra lateral, que también filtra la línea de tiempo global. Usa el Sector que ya tiene cada proyecto y se acuerda de tu elección.",
+      "Al convertir una oferta en proyecto puedes elegir su icono y su color en la misma ventana.",
+    ],
+  },
+  {
     id: 84,
     date: "2026-11-04",
     title: "Flujo por etapas: Diseño → Compra/Pedido → Recepción/Fabricación",

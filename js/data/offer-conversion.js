@@ -30,6 +30,10 @@
 // tarda, la conversión sigue (el proyecto ya está creado) y se devuelve `folder.status: "failed"`; la
 // carpeta se quedará en `Ofertas` hasta que alguien suba un archivo al proyecto, que la pasa a `Proyectos`.
 //
+// v85 — apariencia: `convertOfferToProject` acepta `icon` y `color` (los que se eligen en la propia ventana de
+// conversión con el selector de Icono y Color) y se los pasa a createProject, así el proyecto nace ya con su
+// aspecto. Sin ellos (o vacíos) vale el de siempre (📁 y el dorado de createProject).
+//
 // No son una única operación atómica (son dos documentos y el proyecto tiene
 // que existir antes de poder enlazarlo). Si la segunda falla —sin conexión
 // justo en ese momento, por ejemplo— el proyecto queda creado igualmente y
@@ -48,7 +52,7 @@ import { moveDriveFolderToProjects } from "../drive-service.js";
 export const FOLDER_MOVE_TIMEOUT_MS = 10000;
 
 /**
- * @param {{ offer: object, name: string, properties: object, creatorUid: string, offersProject?: object, moveFolder?: Function }} args
+ * @param {{ offer: object, name: string, properties: object, creatorUid: string, offersProject?: object, icon?: string, color?: string, moveFolder?: Function }} args
  *   `offer` es la tarea de Ofertas tal como está en Firestore (con su `id`);
  *   `properties` ya viene limpio (propertiesForSave); `offersProject` (v58,
  *   el proyecto Ofertas) sirve para llevar la oferta a «Cerradas» — sin él,
@@ -58,10 +62,10 @@ export const FOLDER_MOVE_TIMEOUT_MS = 10000;
  * @returns {Promise<{ projectId: string, linked: boolean, folder: { status: string, folderId: string|null } }>}
  *   `folder.status`: "moved" | "renamed" | "unchanged" | "none" | "disabled" | "failed" (ver drive-service.js).
  */
-export async function convertOfferToProject({ offer, name, properties, creatorUid, offersProject, moveFolder = moveDriveFolderToProjects }) {
+export async function convertOfferToProject({ offer, name, properties, creatorUid, offersProject, icon, color, moveFolder = moveDriveFolderToProjects }) {
   const code = offer.offerCode || (await allocateProjectCode());
   const knownFolderId = offer.driveFolderId || null;
-  const projectId = await createProject({ name, creatorUid, properties, code, driveFolderId: knownFolderId });
+  const projectId = await createProject({ name, creatorUid, properties, code, driveFolderId: knownFolderId, ...(icon ? { icon } : {}), ...(color ? { color } : {}) });
 
   // v75: la carpeta de Drive de la oferta pasa a Proyectos con el nombre del proyecto. Nunca lanza.
   let folder = { status: "none", folderId: null };

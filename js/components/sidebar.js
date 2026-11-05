@@ -47,6 +47,21 @@
 // sus metadatos (project-properties-modal.js). El menú solo avisa con
 // `onOpenProjectProperties(project)`: la ventana y el guardado los monta
 // app.js, igual que el resto de acciones que necesitan datos de fuera.
+//
+// Scroll que se conserva (v85): renderSidebar() reconstruye TODO el contenido de la
+// barra con innerHTML, y un contenedor nuevo nace con scrollTop = 0: por eso, al clicar
+// un proyecto de la parte baja de la lista, la barra saltaba arriba del todo. Ahora, antes
+// de repintar se captura el scrollTop de todos los contenedores desplazables (la propia
+// barra, `#projectList`/`.sidebar__list` y el bloque de navegación) y se restaura de forma
+// SÍNCRONA justo tras actualizar el DOM, antes de que el navegador pinte (ver
+// captureSidebarScroll / restoreSidebarScroll, exportadas para las pruebas).
+//
+// Filtro por sector (v85): encima de la lista de Proyectos, píldoras «Todos | Industria |
+// Automoción» sobre el campo Sector que YA tienen los proyectos (ver el final de
+// project-properties.js; no es un campo nuevo). Solo filtra la lista de proyectos normales:
+// los botones fijos de arriba (Mis tareas, Ofertas…) no cambian. La opción activa y su
+// guardado en localStorage los lleva app.js; aquí solo se pinta y se avisa con
+// `onSectorFilterChange(key)`.
 // ============================================================================
 import { initials, colorFromString, escapeHtml, projectBadgeHtml, projectIcon, showToast } from "../utils.js";
 import { findDepartment, canViewMetrics } from "../departments.js";
@@ -58,11 +73,42 @@ import { openCustomFieldsModal } from "./custom-fields-modal.js";
 import { openEditProjectModal } from "./edit-project-modal.js";
 import { openLocation } from "./open-location.js";
 import { hasLocation, projectLocation, OPEN_LOCATION_TEXT, OPEN_LOCATION_ICON } from "../location.js";
+import { filterProjectsBySector, normalizeSectorFilter, sectorFilterPillsHtml, SECTOR_FILTER_ALL, SECTOR_FILTER_OPTIONS } from "../project-properties.js";
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenWorkCalendar, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+/** Contenedores de la barra que pueden tener scroll propio (además de la propia barra). */
+const SIDEBAR_SCROLL_SELECTORS = ["#projectList", ".sidebar__nav", ".sidebar__nav-items"];
+
+/** Foto del scrollTop de la barra y de cada contenedor desplazable que tenga ahora mismo. */
+export function captureSidebarScroll(container) {
+  return {
+    self: container ? container.scrollTop || 0 : 0,
+    nodes: SIDEBAR_SCROLL_SELECTORS.map((sel) => {
+      const node = container ? container.querySelector(sel) : null;
+      return [sel, node ? node.scrollTop || 0 : 0];
+    }),
+  };
+}
+
+/** Devuelve cada scrollTop capturado a su contenedor (el nuevo, ya repintado). Síncrono, sin esperar a un frame. */
+export function restoreSidebarScroll(container, snapshot) {
+  if (!container || !snapshot) return;
+  if (snapshot.self) container.scrollTop = snapshot.self;
+  snapshot.nodes.forEach(([sel, top]) => {
+    if (!top) return;
+    const node = container.querySelector(sel);
+    if (node) node.scrollTop = top;
+  });
+}
+
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, sectorFilter, onSectorFilterChange, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenWorkCalendar, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+  // v85: ANTES de tocar el DOM se guarda dónde estaba el scroll de cada contenedor (se restaura al final de esta función).
+  const scrollSnapshot = captureSidebarScroll(container);
   container.classList.toggle("is-collapsed", !!isCollapsed);
 
-  const regularProjects = projects.filter((p) => !p.exclusive);
+  // v85: filtro por sector sobre los proyectos normales (los botones fijos como Ofertas no se filtran).
+  const activeSector = normalizeSectorFilter(sectorFilter);
+  const allRegularProjects = projects.filter((p) => !p.exclusive);
+  const regularProjects = filterProjectsBySector(allRegularProjects, activeSector);
   const exclusiveProjects = projects.filter((p) => p.exclusive);
 
   // `plainIcon` (v56): el emoji suelto, igual que el de "Mis tareas"/
@@ -138,8 +184,9 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     </div>
 
     <span class="sidebar__section-label sidebar__label">Proyectos</span>
-    <div class="sidebar__list">
-      ${items || `<p class="sidebar__label" style="color:var(--color-text-faint);font-size:12.5px;padding:8px;">Todavía no hay proyectos.</p>`}
+    ${sectorFilterPillsHtml(activeSector, { extraClass: "sidebar__sector", idPrefix: "sidebar-sector" })}
+    <div class="sidebar__list" id="projectList">
+      ${items || `<p class="sidebar__label" style="color:var(--color-text-faint);font-size:12.5px;padding:8px;">${allRegularProjects.length && activeSector !== SECTOR_FILTER_ALL ? `Ningún proyecto de ${escapeHtml((SECTOR_FILTER_OPTIONS.find((o) => o.key === activeSector) || {}).label || "")}.` : "Todavía no hay proyectos."}</p>`}
     </div>
     <button class="sidebar__new-project" id="btn-new-project" title="Nuevo proyecto">
       <span class="sidebar__new-project-icon">+</span><span class="sidebar__label">Nuevo proyecto</span>
@@ -205,6 +252,9 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       });
     });
   });
+  container.querySelectorAll(".sidebar__sector [data-sector-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (onSectorFilterChange) onSectorFilterChange(btn.dataset.sectorFilter); });
+  });
   container.querySelector("#btn-search").addEventListener("click", onOpenSearch);
   container.querySelector("#btn-my-tasks").addEventListener("click", onSelectMyTasks);
   container.querySelector("#btn-timeline").addEventListener("click", onSelectTimeline);
@@ -262,4 +312,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     items.push({ label: "Cerrar sesión", icon: "⏻", danger: true, onClick: onLogout });
     openContextMenu({ x: rect.right + 6, y: rect.top, items });
   });
+
+  // v85: el DOM ya está completo → cada contenedor vuelve a donde estaba el scroll, sin esperar a un frame.
+  restoreSidebarScroll(container, scrollSnapshot);
 }
