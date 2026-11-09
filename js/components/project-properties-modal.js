@@ -31,7 +31,7 @@
 // ============================================================================
 import { el, escapeHtml, uid, showToast, toDateInputValue } from "../utils.js";
 import { attachTextSuggest } from "./text-suggest.js";
-import { mountAppearancePicker, CURATED_ICONS, PROJECT_COLORS } from "./project-appearance-picker.js";
+import { mountAppearancePicker, CURATED_ICONS, PROJECT_COLORS, defaultIconForSector } from "./project-appearance-picker.js";
 import { createOpenLocationButton, createSuggestLocationControls } from "./open-location.js";
 import { localFolderName } from "../location.js";
 import { idChipHtml, idPendingHtml, wireIdChips } from "./id-chip.js";
@@ -187,7 +187,8 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
   ubicacionInput.insertAdjacentElement("afterend", suggestLocation.el);
   if (nameInputEl) nameInputEl.addEventListener("input", suggestLocation.refresh);
   ubicacionInput.addEventListener("input", (e) => { state.ubicacion = e.target.value; markDirty(); openLocationButton.refresh(); });
-  overlay.querySelector("#pp-sector").addEventListener("change", (e) => { state.sector = e.target.value; markDirty(); });
+  let appearancePicker = null; // v87: el selector de icono (solo al convertir una oferta), para avisarle del cambio de Sector
+  overlay.querySelector("#pp-sector").addEventListener("change", (e) => { state.sector = e.target.value; markDirty(); if (appearancePicker) appearancePicker.applySector(state.sector); });
   overlay.querySelector("#pp-approvedVersion").addEventListener("input", (e) => { state.approvedVersion = e.target.value; markDirty(); });
   PROPERTY_DATE_FIELDS.forEach(({ key }) => {
     overlay.querySelector(`#pp-${key}`).addEventListener("change", (e) => { state[key] = e.target.value || null; markDirty(); });
@@ -199,7 +200,7 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
   let appearance = appearanceField ? { icon: appearanceField.icon || CURATED_ICONS[0], color: appearanceField.color || PROJECT_COLORS[0] } : null;
   if (appearanceField) {
     let pickerReady = false;
-    mountAppearancePicker(overlay.querySelector("#pp-appearance"), {
+    appearancePicker = mountAppearancePicker(overlay.querySelector("#pp-appearance"), {
       icon: appearance.icon,
       color: appearance.color,
       onChange: (v) => { appearance = { icon: v.icon, color: v.color }; if (pickerReady) markDirty(); },
@@ -331,7 +332,8 @@ export function openOfferConversionModal({ offer, offersProject, today, onConfir
     intro:
       "Se creará un proyecto nuevo con los datos de la oferta. Revisa las propiedades antes de crearlo — podrás cambiarlas más tarde con «Propiedades» (clic derecho sobre el proyecto). La oferta se marcará como completada y quedará enlazada al proyecto.",
     nameField: { value: name },
-    appearanceField: { icon: CURATED_ICONS[0], color: PROJECT_COLORS[0] },
+    // v87: si la oferta es de Automoción, el icono de partida es el coche (no la carpeta).
+    appearanceField: { icon: defaultIconForSector(properties.sector), color: PROJECT_COLORS[0] },
     initial: properties,
     idInfo: { label: "ID (lo hereda de la oferta)", code: offer.offerCode || "", what: "oferta", pendingText: "Se asignará al crear el proyecto" },
     confirmLabel: "Crear proyecto",

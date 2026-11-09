@@ -3,7 +3,7 @@
 // de un proyecto o de "mis tareas" ya están cargadas enteras. Los campos
 // personalizados usan la clave "cf:<id>" tanto en filtros como en orden.
 // ============================================================================
-import { getTaskProjectIds, normalizeForSearch, stripHtmlToText, plainTitleText } from "./utils.js";
+import { getTaskProjectIds, normalizeForSearch, stripHtmlToText, plainTitleText, effectiveProjectIcon } from "./utils.js";
 
 /**
  * `searchText` (opcional): cuadro de texto de la barra de filtros — filtra
@@ -138,7 +138,7 @@ export function buildFilterDefs({ teamMembers, tagsRegistry, projects, project, 
     defs.push({
       key: "project",
       label: "Proyecto",
-      options: projects.map((p) => ({ value: p.id, label: p.name, color: p.color, icon: p.icon })),
+      options: projects.map((p) => ({ value: p.id, label: p.name, color: p.color, icon: effectiveProjectIcon(p) })),
     });
   }
   const cfDefs = customFieldDefs || (project && project.customFieldDefs) || [];

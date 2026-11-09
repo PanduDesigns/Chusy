@@ -4,8 +4,14 @@
 import { el, uid, escapeHtml } from "../utils.js";
 import { mountAppearancePicker } from "./project-appearance-picker.js";
 import { isIdError } from "../project-codes.js";
+import { SECTOR_OPTIONS, matchSector } from "../offers.js";
 
-export function openProjectModal({ onCreate }) {
+/**
+ * v87: `defaultSector` es el Sector con el que arranca el formulario (el del filtro activo de la barra lateral: con
+ * «Automoción» marcado, el proyecto nuevo nace de Automoción y con el icono del coche). Cambiar el Sector mueve el
+ * icono por defecto (carpeta ↔ coche) mientras la persona no haya elegido uno a mano (ver mountAppearancePicker).
+ */
+export function openProjectModal({ onCreate, defaultSector = "" }) {
   const root = document.getElementById("modal-root");
 
   let sections = [
@@ -14,6 +20,7 @@ export function openProjectModal({ onCreate }) {
     { id: "hecho", name: "Hecho", order: 2 },
   ];
   let appearance = {};
+  let sector = matchSector(defaultSector);
 
   const overlay = el(`
     <div class="modal-overlay">
@@ -30,6 +37,13 @@ export function openProjectModal({ onCreate }) {
           <label class="field">
             <span class="field__label">Descripción (opcional)</span>
             <textarea class="field__textarea" id="p-desc" placeholder="De qué trata este proyecto"></textarea>
+          </label>
+          <label class="field">
+            <span class="field__label">Sector</span>
+            <select class="field__select" id="p-sector">
+              <option value="">— Sin definir —</option>
+              ${SECTOR_OPTIONS.map((o) => `<option value="${escapeHtml(o)}"${o === sector ? " selected" : ""}>${escapeHtml(o)}</option>`).join("")}
+            </select>
           </label>
           <div class="field">
             <span class="field__label">Icono y color</span>
@@ -53,8 +67,13 @@ export function openProjectModal({ onCreate }) {
   `);
   root.appendChild(overlay);
 
-  mountAppearancePicker(overlay.querySelector("#p-appearance"), {
+  const picker = mountAppearancePicker(overlay.querySelector("#p-appearance"), {
+    sector,
     onChange: (a) => { appearance = a; },
+  });
+  overlay.querySelector("#p-sector").addEventListener("change", (e) => {
+    sector = matchSector(e.target.value);
+    picker.applySector(sector);
   });
 
   function renderSections() {
@@ -112,7 +131,7 @@ export function openProjectModal({ onCreate }) {
     createBtn.disabled = true;
     createBtn.textContent = "Creando…";
     try {
-      await onCreate({ name, description, color: appearance.color, icon: appearance.icon, sections: sections.map((s, i) => ({ ...s, order: i })) });
+      await onCreate({ name, description, color: appearance.color, icon: appearance.icon, ...(sector ? { properties: { sector } } : {}), sections: sections.map((s, i) => ({ ...s, order: i })) });
       close();
     } catch (e) {
       console.error(e);

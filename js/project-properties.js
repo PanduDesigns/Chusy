@@ -46,7 +46,11 @@ import {
   matchSector,
   cleanSuggestionText,
 } from "./offers.js";
-import { uid, toDate, toDateInputValue, plainTitleText } from "./utils.js";
+import { uid, toDate, toDateInputValue, plainTitleText, FOLDER_ICON, CAR_ICON, isAutomotiveProject, effectiveProjectIcon, defaultIconForSector } from "./utils.js";
+
+// v87: el icono «efectivo» de un proyecto (coche si es de Automoción y no tiene otro icono que la carpeta) vive en utils.js
+// —lo usa todo lo que pinta un proyecto— y se re-exporta aquí junto al resto de lógica de propiedades del proyecto.
+export { FOLDER_ICON, CAR_ICON, isAutomotiveProject, effectiveProjectIcon, defaultIconForSector };
 
 /**
  * Las tres fechas de las propiedades, en el orden en el que se enseñan —
@@ -316,4 +320,23 @@ export function sectorFilterPillsHtml(active, { extraClass = "", idPrefix = "sec
   return `<div class="sector-filter${extraClass ? ` ${extraClass}` : ""}" role="group" aria-label="Filtrar por sector">${SECTOR_FILTER_OPTIONS
     .map((o) => `<button type="button" class="sector-filter__pill${o.key === cur ? " is-active" : ""}" data-sector-filter="${o.key}" aria-pressed="${o.key === cur ? "true" : "false"}" id="${idPrefix}-${o.key}">${o.label}</button>`)
     .join("")}</div>`;
+}
+
+// ============================================================================
+// Migración del icono de los proyectos de AUTOMOCIÓN (v87)
+//
+// Los proyectos de Automoción que ya existían tienen la carpeta (o ningún icono). Este planificador PURO decide cuáles
+// hay que pasar al coche: los de sector Automoción cuyo icono es la carpeta o está vacío/sin definir. Los que ya tienen
+// cualquier OTRO icono (un coche, un camión, un emoji propio…) no se tocan. Las secciones exclusivas (Ofertas) quedan
+// fuera. Es idempotente: tras migrar, el icono ya es el coche y el proyecto no vuelve a salir. La escritura en Firestore
+// la hace migrateAutomotiveProjectIcons (data/projects.js).
+// ============================================================================
+export function planAutomotiveIconMigration(projects) {
+  return (Array.isArray(projects) ? projects : [])
+    .filter((p) => p && p.id && !p.exclusive && isAutomotiveProject(p))
+    .filter((p) => {
+      const icon = typeof p.icon === "string" ? p.icon.trim() : "";
+      return !icon || icon === FOLDER_ICON;
+    })
+    .map((p) => p.id);
 }

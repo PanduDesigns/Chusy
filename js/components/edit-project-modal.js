@@ -4,12 +4,12 @@
 // para mantenerlo rápido de usar; se pueden seguir tocando desde sus propios
 // sitios (campos personalizados, tablero, etc.).
 // ============================================================================
-import { el, escapeHtml } from "../utils.js";
+import { el, escapeHtml, effectiveProjectIcon } from "../utils.js";
 import { mountAppearancePicker } from "./project-appearance-picker.js";
 
 export function openEditProjectModal({ project, onSave }) {
   const root = document.getElementById("modal-root");
-  let appearance = { icon: project.icon, color: project.color };
+  let appearance = { icon: effectiveProjectIcon(project) || project.icon, color: project.color }; // v87: un proyecto de Automoción sin icono propio parte del coche
 
   const overlay = el(`
     <div class="modal-overlay">
@@ -38,7 +38,7 @@ export function openEditProjectModal({ project, onSave }) {
   root.appendChild(overlay);
 
   mountAppearancePicker(overlay.querySelector("#p-appearance"), {
-    icon: project.icon,
+    icon: effectiveProjectIcon(project) || project.icon,
     color: project.color,
     onChange: (a) => { appearance = a; },
   });

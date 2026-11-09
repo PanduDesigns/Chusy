@@ -114,9 +114,39 @@ export function textColorFor(bgHex) {
   return luminance > 0.42 ? "#0B0D0E" : "#F5F6F6";
 }
 
-/** Icono de un proyecto: si todavía no tiene uno elegido, uno neutro por defecto. */
+// v87: los iconos de proyecto son emojis (el valor guardado en `project.icon`). La carpeta es el icono neutro por defecto; el coche,
+// el de los proyectos del sector Automoción. ESTE es el único sitio que decide el icono «efectivo» de un proyecto.
+export const FOLDER_ICON = "📁";
+export const CAR_ICON = "🚗";
+
+/** ¿Es este valor de Sector el de Automoción? Sin distinguir mayúsculas, tildes ni espacios sobrantes. */
+export function isAutomotiveSector(value) {
+  return String(value == null ? "" : value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() === "automocion";
+}
+
+/** ¿Es un proyecto del sector Automoción (`project.properties.sector`)? */
+export function isAutomotiveProject(project) {
+  return !!(project && project.properties && isAutomotiveSector(project.properties.sector));
+}
+
+/** El icono que lleva POR DEFECTO un proyecto nuevo de este sector: el coche para Automoción, la carpeta para el resto. */
+export function defaultIconForSector(sector) {
+  return isAutomotiveSector(sector) ? CAR_ICON : FOLDER_ICON;
+}
+
+/**
+ * El icono real de un proyecto, o "" si no tiene ninguno. Un proyecto de Automoción sin icono o con el de carpeta (el de
+ * por defecto) enseña el coche; con cualquier otro icono se respeta el suyo.
+ */
+export function effectiveProjectIcon(project) {
+  const icon = project && typeof project.icon === "string" ? project.icon.trim() : "";
+  if ((!icon || icon === FOLDER_ICON) && isAutomotiveProject(project)) return CAR_ICON;
+  return icon;
+}
+
+/** Icono de un proyecto para pintarlo: si todavía no tiene uno elegido, uno neutro por defecto (el coche en Automoción). */
 export function projectIcon(project) {
-  return (project && project.icon) || "📁";
+  return effectiveProjectIcon(project) || FOLDER_ICON;
 }
 
 /** "rgba(...)" a partir de un color hex, para sombrear el fondo de un icono según su color. */

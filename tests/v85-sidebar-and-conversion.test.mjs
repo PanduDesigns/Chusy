@@ -38,9 +38,9 @@ const cfg = wc.normalizeWorkCalendar({
 {
   const css = read("css/07-modals.css");
   const section = cssRule(css, ".wf-section");
-  check("CSS: .wf-section → box-sizing border-box + max-width 100% + overflow hidden", has(section, "box-sizing: border-box") && has(section, "max-width: 100%") && has(section, "overflow: hidden"), section);
+  check("CSS: .wf-section → box-sizing border-box + max-width 100% (v87: overflow visible; el overflow hidden de la v85 lo aplastaba, ver v87-automotive-icons.test.mjs)", has(section, "box-sizing: border-box") && has(section, "max-width: 100%") && has(section, "overflow: visible"), section);
   const row = cssRule(css, ".wf-row");
-  check("CSS: .wf-row (cada etapa) → box-sizing border-box + max-width 100% + overflow hidden + min-width 0", has(row, "box-sizing: border-box") && has(row, "max-width: 100%") && has(row, "overflow: hidden") && has(row, "min-width: 0"), row);
+  check("CSS: .wf-row (cada etapa) → box-sizing border-box + max-width 100% + min-width 0 (v87: overflow visible)", has(row, "box-sizing: border-box") && has(row, "max-width: 100%") && has(row, "overflow: visible") && has(row, "min-width: 0"), row);
   const head = cssRule(css, ".wf-row__head");
   check("CSS: sub-fila 1 (cabecera) → flex con gap 10px", has(head, "display: flex") && has(head, "gap: 10px"), head);
   check("CSS: … el nombre va en negrita 600 y el estado a la derecha (margin-left: auto), sin pisarse", has(cssRule(css, ".wf-row__name"), "font-weight: 600") && has(cssRule(css, ".wf-row__state"), "margin-left: auto"));

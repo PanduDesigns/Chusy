@@ -13,6 +13,8 @@ import {
   planOfferRepositioning,
 } from "../offers.js";
 import { PROJECT_CODE_SEED } from "../project-codes.js";
+import { defaultIconForSector, CAR_ICON } from "../utils.js";
+import { planAutomotiveIconMigration } from "../project-properties.js";
 // v74 (Etapa 2 del Store): proyectos, archivados, proyecto abierto y personas se
 // escuchan a través del store (js/store.js) — ver store-subscriptions.js.
 import { store } from "../store.js";
@@ -81,7 +83,8 @@ export async function createProject({ name, description, color, icon, creatorUid
     name,
     description: description || "",
     color: color || "#FCD000",
-    icon: icon || "📁",
+    // v87: sin icono elegido, la carpeta — o el coche si el proyecto es del sector Automoción.
+    icon: icon || defaultIconForSector(properties && properties.sector),
     // Array.isArray() a propósito, no "sections && sections.length": con
     // sections.length===0 (el usuario quitó las 3 sugeridas de serie a
     // mano en el modal, a propósito) ese && daba falsy y esto caía igual
@@ -411,6 +414,22 @@ export async function ensureExclusiveProjectsSeeded(currentProjects, creatorUid)
   if (!numbered) {
     try { await healProjectCodes(currentProjects); } catch (e) { console.error("healProjectCodes:", e); }
   }
+}
+
+/**
+ * v87 · Migración (la lanza un admin al iniciar sesión, ver app.js): los proyectos de Automoción cuyo icono es la
+ * carpeta, o no tienen ninguno, pasan al coche en Firestore. Idempotente (planAutomotiveIconMigration solo selecciona
+ * los que aún lo necesitan) y respeta cualquier otro icono. Recibe los proyectos activos que ya tiene la app cargados:
+ * no hace lecturas nuevas. Devuelve cuántos actualizó.
+ */
+export async function migrateAutomotiveProjectIcons(projects) {
+  const ids = planAutomotiveIconMigration(projects);
+  for (let i = 0; i < ids.length; i += 450) {
+    const batch = writeBatch(db);
+    ids.slice(i, i + 450).forEach((id) => batch.update(doc(db, "projects", id), { icon: CAR_ICON }));
+    await batch.commit();
+  }
+  return ids.length;
 }
 
 const byName = (a, b) => (a.name || "").localeCompare(b.name || "");

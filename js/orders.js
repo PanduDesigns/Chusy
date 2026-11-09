@@ -26,7 +26,7 @@
 import { taskWorkflow, purchaseTrace, PURCHASE_TRACE_MAX } from "./workflow-stages.js";
 import { collectSuggestions, cleanSuggestionText, suggestionKey } from "./offers.js";
 import { projectSectorKey, normalizeSectorFilter, SECTOR_FILTER_ALL } from "./project-properties.js";
-import { normalizeForSearch, plainTitleText } from "./utils.js";
+import { normalizeForSearch, plainTitleText, effectiveProjectIcon } from "./utils.js";
 
 /** Los tres bloques de la vista, en orden. `label` es el texto de la pestaña. */
 export const ORDER_TABS = Object.freeze([
@@ -98,7 +98,7 @@ export function orderRow(task, { offersProjectId, projectsById, nameOf } = {}) {
     projectName: project.name || "",
     projectCode: project.code || "",
     projectColor: project.color || "",
-    projectIcon: project.icon || "",
+    projectIcon: effectiveProjectIcon(project), // v87: el coche en un proyecto de Automoción con la carpeta por defecto
     sector: sectorOwner ? projectSectorKey(sectorOwner) : "",
     title: plainTitleText(task.title || ""),
     commercial,

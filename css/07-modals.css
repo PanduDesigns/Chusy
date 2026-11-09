@@ -48,7 +48,9 @@ textarea.modal__title-input {
 }
 .modal__title-preview.is-visible { display: block; }
 .modal__title-preview b { color: var(--color-text-hi); font-weight: 700; }
-.modal__body { padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; max-height: 66vh; overflow-y: auto; }
+.modal__body { padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; max-height: 66vh; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+/* v87: ningún hijo directo del cuerpo del modal se encoge. Con `overflow` distinto de `visible`, un hijo de una columna flex tiene `min-height: 0` y `flex-shrink: 1`: si el modal lleva mucho contenido, lo comprime en vez de dejar que crezca el scroll de `.modal__body` (así se aplastaba el «Flujo de Etapas» a ~30px). */
+.modal__body > * { flex-shrink: 0; }
 .modal__footer { display: flex; align-items: center; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--color-line); }
 
 .modal-row { display: flex; gap: 14px; }
@@ -91,6 +93,9 @@ textarea.modal__title-input {
 }
 .appearance-picker__more:hover { color: var(--color-text-lo); }
 .appearance-picker__custom { margin-top: 8px; max-width: 160px; }
+/* v87: grupo de iconos de coches y vehículos (Automoción), bajo la rejilla general. */
+.appearance-picker__group { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.appearance-picker__group-label { font-size: 11px; color: var(--color-text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
 
 .subtask-list { display: flex; flex-direction: column; gap: 6px; }
 .subtask-row { display: flex; align-items: center; gap: 8px; }
@@ -293,16 +298,17 @@ textarea.modal__title-input {
 
 /* ===== v84 · Flujo de etapas: sección del modal de tarea, ventana de relevo y plantillas ===== */
 /* v85: el bloque y cada etapa nunca se salen de la tarjeta gris (antes, una sola línea con 6 columnas desbordaba el margen derecho). */
-.wf-section { gap: 8px; padding: 10px 12px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-panel-raised); box-sizing: border-box; max-width: 100%; overflow: hidden; min-width: 0; }
+/* v87: BUG de la v85 — `overflow: hidden` aquí (hijo flex de `.modal__body`) lo dejaba aplastado a ~30px y recortaba el desplegable de sugerencias de Proveedor. Ahora `overflow: visible`, `flex-shrink: 0` y `min-height: min-content`: crece a su altura natural y es `.modal__body` quien hace scroll. Los desbordes por los lados los evitan `box-sizing`, `width: 100%` y `min-width: 0` de la rejilla y los campos de dentro. */
+.wf-section { gap: 8px; padding: 10px 12px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-panel-raised); box-sizing: border-box; max-width: 100%; overflow: visible; min-width: 0; flex-shrink: 0; min-height: min-content; height: auto; max-height: none; }
 .wf-section[hidden] { display: none; }
 .wf-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .wf-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .wf-check input { accent-color: var(--wf-design); }
 .wf-check--purchase input { accent-color: var(--wf-purchase); }
 .wf-check--production input { accent-color: var(--wf-production); }
-.wf-rows { display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; max-width: 100%; min-width: 0; }
+.wf-rows { display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; max-width: 100%; min-width: 0; flex-shrink: 0; min-height: min-content; }
 .wf-row {
-  display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; overflow: hidden;
+  display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; overflow: visible; flex-shrink: 0; min-height: min-content;
   padding: 8px 0; border-top: 1px dashed var(--color-line); font-size: 12.5px;
 }
 .wf-row:first-child { border-top: 0; }

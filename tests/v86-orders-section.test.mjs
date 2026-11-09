@@ -419,11 +419,12 @@ function task(id, projectId, title, { design = true, stage = "purchase", purchas
   check("CSS: cada campo de la sub-fila no desborda (min-width 0, width 100%)", has(rule(".wf-trace__cell .field__input"), "min-width: 0") && has(rule(".wf-trace__cell .field__input"), "width: 100%"));
   check("CSS: «Pedidos» tiene cabecera, búsqueda, pestañas y tabla", ["orders-view", "orders-search", "orders-select", "orders-tab", "orders-input", "orders-project"].every((c) => css.includes(`.${c}`)));
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=86", (idx.match(/css\/[\w-]+\.css\?v=86/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en una versión anterior", !/\.css\?v=(?!86)\d+/.test(idx));
-  check("package.json: 86.0.0", JSON.parse(read("package.json")).version === "86.0.0");
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 86; la entrega actual lo fija en v87-automotive-icons.test.mjs)", new Set([...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => m[1])).size + ":" + (idx.match(/css\/[\w-]+\.css\?v=\d+/g) || []).length, "1:14");
+  check("index.html: ningún <link> se ha quedado en una versión anterior a la 86", [...idx.matchAll(/\.css\?v=(\d+)/g)].every((m) => Number(m[1]) >= 86));
+  check("package.json: versión ≥ 86", parseInt(JSON.parse(read("package.json")).version, 10) >= 86);
   const { RELEASES } = await import("../js/whats-new.js");
-  check("Novedades: entrada 86 la primera y con «Pedidos»", RELEASES[0].id === 86 && /Pedidos/.test(RELEASES[0].title) && RELEASES[0].items.length >= 3 && RELEASES[0].id > RELEASES[1].id);
+  const r86 = RELEASES.findIndex((r) => r.id === 86);
+  check("Novedades: entrada 86 con «Pedidos»", r86 >= 0 && /Pedidos/.test(RELEASES[r86].title) && RELEASES[r86].items.length >= 3 && RELEASES[r86].id > RELEASES[r86 + 1].id);
   const readme = read("README.md");
   check("README: apartado 3.19, historial v85 → v86 y el índice de Firestore", /### 3\.19 Pedidos/.test(readme) && /v85 → v86 \(Chusy-86\.zip\)/.test(readme) && /workflow\.purchase\.enabled/.test(readme) && /orders\.js/.test(readme));
   const rules = read("firestore.rules");

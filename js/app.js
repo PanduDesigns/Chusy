@@ -6,7 +6,7 @@ import { onAuthChange, signUp, logIn, logOut } from "./auth.js";
 import { auth } from "./firebase-init.js";
 import { applyTheme, getCachedTheme } from "./theme.js";
 import { migrateLegacyCodesToYYXXX } from "./data/project-codes.js";
-import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, isProjectVisibleToUser, ensureExclusiveProjectsSeeded, getOffersProject } from "./data/projects.js";
+import { createProject, updateProject, subscribeToAllProjects, subscribeToArchivedProjects, subscribeToProject, subscribeToAllUsers, archiveProject, isProjectVisibleToUser, ensureExclusiveProjectsSeeded, getOffersProject, migrateAutomotiveProjectIcons } from "./data/projects.js";
 import { isUpcomingForUser } from "./workflow-stages.js";
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
 import { convertOfferToProject, conversionMessage } from "./data/offer-conversion.js";
@@ -33,7 +33,7 @@ import {
 } from "./components/notification-bell.js";
 import { showAssignmentSystemNotification } from "./browser-notifications.js";
 import { renderSidebar } from "./components/sidebar.js";
-import { loadSectorFilter, saveSectorFilter, normalizeSectorFilter, filterProjectsBySector } from "./project-properties.js";
+import { loadSectorFilter, saveSectorFilter, normalizeSectorFilter, filterProjectsBySector, SECTOR_FILTER_OPTIONS } from "./project-properties.js";
 import { renderTopbar } from "./components/topbar.js";
 import { renderListView } from "./views/list-view.js";
 import { renderBoardView } from "./views/board-view.js";
@@ -69,7 +69,7 @@ import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal
 import { openQuickCreateModal } from "./components/quick-create-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { removeBulkToolbar } from "./components/bulk-toolbar.js";
-import { showToast, getTaskSectionForProject, debounce, toDateInputValue, escapeHtml } from "./utils.js";
+import { showToast, getTaskSectionForProject, debounce, toDateInputValue, escapeHtml, effectiveProjectIcon } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
 const authScreen = document.getElementById("auth-screen");
@@ -356,6 +356,19 @@ async function runCodeMigration(allProjects) {
   }
 }
 
+// v87: los proyectos de Automoción que seguían con la carpeta pasan al coche en Firestore. Como mucho una vez por sesión,
+// solo un admin, idempotente (ver migrateAutomotiveProjectIcons). Si falla, no pasa nada: projectIcon() ya enseña el coche.
+let hasMigratedAutomotiveIcons = false;
+async function runAutomotiveIconMigration(allProjects) {
+  if (hasMigratedAutomotiveIcons || !currentUser || currentUser.role !== "admin") return;
+  hasMigratedAutomotiveIcons = true;
+  try {
+    await migrateAutomotiveProjectIcons(allProjects);
+  } catch (e) {
+    console.error("migrateAutomotiveProjectIcons:", e);
+  }
+}
+
 function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
 function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.add("hidden"); authScreen.classList.remove("hidden"); }
 
@@ -608,7 +621,8 @@ function handleProjectsList(allProjects) {
     hasSeededExclusiveProjects = true;
     ensureExclusiveProjectsSeeded(allProjects, currentUser.uid)
       .catch((e) => console.error("ensureExclusiveProjectsSeeded:", e))
-      .then(() => runCodeMigration(allProjects));
+      .then(() => runCodeMigration(allProjects))
+      .then(() => runAutomotiveIconMigration(allProjects));
   }
   renderShell();
 }
@@ -972,6 +986,7 @@ function renderSidebarOnly() {
     onOpenProjectProperties: (project) => openProjectProperties(project),
     onCreateProject: () =>
       openProjectModal({
+        defaultSector: (SECTOR_FILTER_OPTIONS.find((o) => o.key === sectorFilter) || {}).sector || "", // v87: con un filtro de sector activo, el proyecto nuevo nace de ese sector
         onCreate: async (data) => {
           const id = await createProject({ ...data, creatorUid: currentUser.uid });
           showToast("Proyecto creado.");
@@ -1139,7 +1154,7 @@ function renderTimelineContent() {
     id: p.id,
     label: p.name,
     color: p.color,
-    icon: p.icon,
+    icon: effectiveProjectIcon(p), // v87
     // `sections` (además de `tasks`) para que en modo Secciones
     // timeline-view.js pueda repartir las tareas de este proyecto entre
     // sus propias secciones, en vez de agregar el proyecto entero de

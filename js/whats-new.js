@@ -25,6 +25,17 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 87,
+    date: "2026-11-09",
+    title: "Iconos de coches para Automoción y arreglo del «Flujo de Etapas»",
+    items: [
+      "Arreglado: en el modal de una tarea, el bloque «Flujo de Etapas» ya no se queda aplastado. Se ve entero —con sus tres etapas, el Proveedor, el Nº de pedido y el Código Proveedor— y, si hay mucho contenido, es el propio modal el que hace scroll. Además, la lista de sugerencias de Proveedor ya no se corta.",
+      "Seis iconos nuevos de coches y vehículos en el selector de icono de proyecto, en un grupo «Automoción»: coche turismo / sedán, deportivo / coupé, SUV / todoterreno / 4x4, furgoneta / vehículo comercial, camión / vehículo industrial y chasis / carrocería / taller.",
+      "Un proyecto nuevo de Automoción nace con el coche (🚗) en lugar de la carpeta: «Nuevo proyecto» tiene ahora un desplegable de Sector (ya sale marcado si tienes activo el filtro «Automoción» de la barra lateral), y al convertir una oferta de Automoción en proyecto el icono de partida también es el coche. Si cambias el Sector sin haber tocado el icono, este lo sigue; si ya habías elegido uno, se respeta el tuyo.",
+      "Los proyectos de Automoción que ya existían con la carpeta pasan solos al coche (se ven así al instante y se guardan la próxima vez que entre un administrador). Los que ya tenían otro icono no se tocan.",
+    ],
+  },
+  {
     id: 86,
     date: "2026-11-06",
     title: "Nueva sección «Pedidos» y datos de compra en las tareas",
