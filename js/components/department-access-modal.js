@@ -9,20 +9,34 @@
 // de secciones exclusivas de partida no merece la pena acumular cambios sin
 // guardar.
 //
+// v86: además de las secciones exclusivas (que son proyectos), la ventana lleva una tarjeta «Pedidos» con las MISMAS
+// casillas y el mismo guardado al momento: «Pedidos» no es un proyecto sino una vista transversal, así que su permiso
+// no cuelga de un `allowedDepartments` de proyecto sino de `meta/ordersAccess` (data/orders-access.js, lógica en
+// departments.js). Sin configurar, solo los Técnicos (y los admins, que entran siempre).
+//
 // v63: las casillas son GRUPOS de acceso (Diseño, Técnicos, Producción — ver
 // DEPARTMENT_GROUPS en departments.js), no departamentos sueltos: «Diseño»
 // abre la sección a Diseño - Industria y a Diseño - Automoción a la vez.
 // ============================================================================
 import { el, escapeHtml, showToast, projectBadgeHtml } from "../utils.js";
 import { updateProject } from "../data/projects.js";
-import { DEPARTMENT_GROUPS } from "../departments.js";
+import { setOrdersAccess } from "../data/orders-access.js";
+import { DEPARTMENT_GROUPS, normalizeOrdersAllowed } from "../departments.js";
 
-export function openDepartmentAccessModal({ exclusiveProjects }) {
+/**
+ * `exclusiveProjects`: las secciones exclusivas (Ofertas…). `ordersAccess` (v86): los grupos que ven «Pedidos» ahora
+ * mismo (lista ya normalizada, ver normalizeOrdersAllowed); sin ella, la ventana no pinta la tarjeta de «Pedidos».
+ * `currentUser`: para anotar quién cambió el permiso (opcional).
+ */
+export function openDepartmentAccessModal({ exclusiveProjects, ordersAccess, currentUser }) {
   const root = document.getElementById("modal-root");
   // Copia local mutable, mismo criterio que team-admin-modal.js: reflejamos
   // aquí mismo el resultado de cada guardado sin esperar a que este panel
   // se vuelva a abrir.
   const projectsList = exclusiveProjects.map((p) => ({ ...p, allowedDepartments: [...(p.allowedDepartments || [])] }));
+  // v86: «Pedidos» como una tarjeta más, con la misma forma que una sección exclusiva (id, nombre y grupos permitidos).
+  const ORDERS_CARD_ID = "__orders";
+  const ordersCard = Array.isArray(ordersAccess) ? { id: ORDERS_CARD_ID, name: "Pedidos", icon: "📦", allowedDepartments: [...normalizeOrdersAllowed({ allowedDepartments: ordersAccess })] } : null;
 
   const overlay = el(`
     <div class="modal-overlay">
@@ -32,7 +46,7 @@ export function openDepartmentAccessModal({ exclusiveProjects }) {
           <button class="modal__close" id="close">✕</button>
         </div>
         <div class="modal__body">
-          <p class="field__hint">Qué departamentos pueden ver y usar cada sección exclusiva. «Diseño» incluye a Diseño - Industria y a Diseño - Automoción. Quien sea admin accede siempre a todas, estén marcadas aquí o no.</p>
+          <p class="field__hint">Qué departamentos pueden ver y usar cada sección exclusiva (Ofertas) y la sección «Pedidos». «Diseño» incluye a Diseño - Industria y a Diseño - Automoción. Quien sea admin accede siempre a todas, estén marcadas aquí o no.</p>
           <div id="da-list" style="display:flex;flex-direction:column;gap:14px;"></div>
         </div>
         <div class="modal__footer">
@@ -45,16 +59,17 @@ export function openDepartmentAccessModal({ exclusiveProjects }) {
 
   function renderList() {
     const list = overlay.querySelector("#da-list");
-    if (!projectsList.length) {
+    const cards = ordersCard ? [...projectsList, ordersCard] : projectsList;
+    if (!cards.length) {
       list.innerHTML = `<p style="color:var(--color-text-faint);font-size:12.5px;">Todavía no hay ninguna sección exclusiva.</p>`;
       return;
     }
-    list.innerHTML = projectsList
+    list.innerHTML = cards
       .map(
         (p) => `
-      <div style="border:1px solid var(--color-line);border-radius:var(--radius-sm);padding:12px;">
+      <div style="border:1px solid var(--color-line);border-radius:var(--radius-sm);padding:12px;"${p.id === ORDERS_CARD_ID ? ` data-da-card="orders"` : ""}>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-          ${projectBadgeHtml(p, "project-badge--sm")}
+          ${p.id === ORDERS_CARD_ID ? `<span class="sidebar__item-icon" aria-hidden="true">📦</span>` : projectBadgeHtml(p, "project-badge--sm")}
           <span style="font-size:13.5px;font-weight:600;color:var(--color-text-hi);">${escapeHtml(p.name)}</span>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px 18px;">
@@ -72,7 +87,7 @@ export function openDepartmentAccessModal({ exclusiveProjects }) {
 
     list.querySelectorAll("input[type=checkbox][data-project]").forEach((cb) => {
       cb.addEventListener("change", async () => {
-        const project = projectsList.find((p) => p.id === cb.dataset.project);
+        const project = cb.dataset.project === ORDERS_CARD_ID ? ordersCard : projectsList.find((p) => p.id === cb.dataset.project);
         if (!project) return;
         const dept = cb.dataset.dept;
         const wasChecked = !cb.checked; // ya cambió antes de este handler
@@ -80,7 +95,8 @@ export function openDepartmentAccessModal({ exclusiveProjects }) {
         if (cb.checked) next.add(dept); else next.delete(dept);
         cb.disabled = true;
         try {
-          await updateProject(project.id, { allowedDepartments: [...next] });
+          if (project === ordersCard) await setOrdersAccess([...next], currentUser && currentUser.uid);
+          else await updateProject(project.id, { allowedDepartments: [...next] });
           project.allowedDepartments = [...next];
           showToast("Acceso actualizado.");
         } catch (e) {

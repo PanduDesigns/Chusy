@@ -53,7 +53,9 @@ export function applyTaskFilters(tasks, activeFilters, searchText) {
       const title = normalizeForSearch(plainTitleText(t.title || ""));
       if (title.includes(q)) return true;
       const description = normalizeForSearch(stripHtmlToText(t.description || ""));
-      return description.includes(q);
+      if (description.includes(q)) return true;
+      // v86: también por los datos de la compra (Proveedor, Nº de pedido, Código Proveedor), que son lo que se busca en un albarán
+      return [t.supplier, t.orderNumber, t.supplierCode].some((v) => typeof v === "string" && normalizeForSearch(v).includes(q));
     });
   }
 
@@ -200,6 +202,10 @@ export function sortTasks(tasks, sort, { teamMembers = [], projects = [] } = {})
       }
       case "tags":
         return t.tags && t.tags.length ? [...t.tags].map((s) => s.toLowerCase()).sort()[0] : null;
+      case "supplier":
+      case "orderNumber":
+      case "supplierCode": // v86: columnas de compras de la Lista
+        return typeof t[sort.column] === "string" && t[sort.column] ? t[sort.column].toLowerCase() : null;
       default:
         if (sort.column.startsWith("cf:")) {
           const fieldId = sort.column.slice(3);

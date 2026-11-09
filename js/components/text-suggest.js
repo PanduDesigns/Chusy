@@ -35,6 +35,39 @@
 import { escapeHtml } from "../utils.js";
 import { suggestionKey, cleanSuggestionText } from "../offers.js";
 
+// ----------------------------------------------------------------------------
+// v86 · Registro de fuentes de sugerencias. El campo Comercial recibe su lista por parámetro (task-modal.js la
+// pide a app.js), pero «Proveedor» se escribe en TRES sitios (modal de tarea, diálogo de relevo de Compra/Pedido y
+// la vista «Pedidos») y ninguno tiene acceso al estado de app.js: app.js registra aquí UNA función por nombre
+// (`setSuggestProvider("supplier", fn)`) y cada campo la pide con `attachSupplierSuggest(input)`. Un nombre sin
+// registrar (o una función que falla) da una lista vacía: el campo funciona igual, solo sin sugerencias.
+// ----------------------------------------------------------------------------
+const providers = new Map();
+
+/** Registra (o, con `null`, quita) la función que devuelve las sugerencias de `name`: `() => string[]`. */
+export function setSuggestProvider(name, fn) {
+  if (typeof fn === "function") providers.set(name, fn);
+  else providers.delete(name);
+}
+
+/** Las sugerencias de `name` ahora mismo (siempre un array; vacío si no hay fuente registrada o falla). */
+export function getSuggestOptions(name) {
+  const fn = providers.get(name);
+  if (!fn) return [];
+  try {
+    const list = fn();
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    console.error("text-suggest:", e);
+    return [];
+  }
+}
+
+/** El campo «Proveedor» con memoria: engancha `attachTextSuggest` a la fuente `supplier` (ver app.js, getSupplierOptions). */
+export function attachSupplierSuggest(input) {
+  return attachTextSuggest(input, { getOptions: () => getSuggestOptions("supplier") });
+}
+
 /**
  * @param {HTMLInputElement} input
  * @param {{ getOptions: () => string[] }} opts  `getOptions` se llama cada vez que hace falta (así ve siempre lo más reciente).

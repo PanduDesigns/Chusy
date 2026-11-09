@@ -11,6 +11,11 @@
 //    asignación a su responsable de antes).
 // Una tarea sin etapas se completa/reabre exactamente como siempre (toggleTaskComplete).
 //
+// v86: al completar Compra/Pedido (relevo hacia Recepción/Fabricación) la ventana incluye además los tres datos de la
+// compra —«Proveedor» (con las sugerencias de los ya usados), «Nº de pedido» y «Código Proveedor», precargados si ya estaban
+// escritos— para rellenarlos o confirmarlos justo cuando se indica la fecha prevista de recepción. Salen en
+// `handoff.purchase` y los guarda completeCurrentStage (workflow-stages.js) en la etapa de Compra/Pedido.
+//
 // Toda la decisión (qué toca hacer, qué fechas, qué parche) es pura y vive en js/workflow-stages.js; aquí solo hay
 // ventana, escritura (data/tasks.js) y aviso (data/notifications.js).
 // El modal de tarea (task-modal.js) usa solo `openStageHandoffDialog`: trabaja sobre su borrador y guarda con «Aceptar».
@@ -21,7 +26,8 @@ import { notifyNewAssignees } from "../data/notifications.js";
 import { getOffersProject } from "../data/projects.js";
 import { getWorkCalendar } from "../data/work-calendar.js";
 import { describeDay, formatDayMonth, dateKey } from "../work-calendar.js";
-import { planTaskCheck, taskWorkflow, planStageHandoff, updateStage, STAGE_LABELS, STAGE_SHORT, PURCHASE_DEFAULT_DAYS } from "../workflow-stages.js";
+import { planTaskCheck, taskWorkflow, planStageHandoff, updateStage, purchaseTrace, STAGE_LABELS, STAGE_SHORT, PURCHASE_DEFAULT_DAYS, PURCHASE_TRACE_MAX } from "../workflow-stages.js";
+import { attachSupplierSuggest } from "./text-suggest.js";
 
 const activeMembers = (members, keepUid) =>
   [...(members || [])]
@@ -40,6 +46,8 @@ export function openStageHandoffDialog({ workflow, from, to, taskTitle, teamMemb
   const state = { assigneeId: plan0.assigneeId, startDate: plan0.startDate, dueDate: plan0.dueDate, touched: false };
   const members = activeMembers(teamMembers, state.assigneeId);
   const needsDue = to === "production";
+  const showTrace = from === "purchase"; // v86: datos de la compra que se cierra
+  const trace = showTrace ? purchaseTrace(workflow) : null;
   const hint =
     to === "purchase"
       ? `Plazo por defecto: ${PURCHASE_DEFAULT_DAYS} días laborables desde el inicio, según el calendario laboral y las ausencias del responsable.`
@@ -65,6 +73,15 @@ export function openStageHandoffDialog({ workflow, from, to, taskTitle, teamMemb
           </div>
           <div class="sched-warn" id="sh-warn" role="status" aria-live="polite" hidden></div>
           <p class="field__hint" style="margin:0;">${escapeHtml(hint)}</p>
+          ${showTrace ? `
+          <div class="field stage-handoff__trace" data-handoff-trace>
+            <span class="field__label">Datos del pedido</span>
+            <div class="trace-grid">
+              <label class="trace-grid__cell"><span class="trace-grid__label">Proveedor</span><input class="field__input" type="text" id="sh-supplier" maxlength="${PURCHASE_TRACE_MAX.supplier}" autocomplete="off" placeholder="Proveedor" value="${escapeHtml(trace.supplier)}"></label>
+              <label class="trace-grid__cell"><span class="trace-grid__label">Nº de pedido</span><input class="field__input" type="text" id="sh-order" maxlength="${PURCHASE_TRACE_MAX.orderNumber}" autocomplete="off" placeholder="Nuestro nº de pedido" value="${escapeHtml(trace.orderNumber)}"></label>
+              <label class="trace-grid__cell"><span class="trace-grid__label">Código Proveedor</span><input class="field__input" type="text" id="sh-supcode" maxlength="${PURCHASE_TRACE_MAX.supplierCode}" autocomplete="off" placeholder="Ref. del proveedor" value="${escapeHtml(trace.supplierCode)}"></label>
+            </div>
+          </div>` : ""}
           <label class="field"><span class="field__label">Nota de relevo (opcional)</span><textarea class="field__textarea" id="sh-note" style="min-height:48px;" placeholder="Qué necesita saber quien lo recibe"></textarea></label>
           <p class="stage-handoff__error" id="sh-error" role="alert" hidden></p>
         </div>
@@ -79,9 +96,12 @@ export function openStageHandoffDialog({ workflow, from, to, taskTitle, teamMemb
 
   return new Promise((resolve) => {
     let closed = false;
+    // v86: «Proveedor» sugiere los ya usados (se engancha antes de cualquier otro listener del campo, ver text-suggest.js).
+    const supplierSuggest = showTrace && $("#sh-supplier") ? attachSupplierSuggest($("#sh-supplier")) : null;
     function finish(value) {
       if (closed) return;
       closed = true;
+      if (supplierSuggest) supplierSuggest.destroy();
       document.removeEventListener("keydown", onKey);
       overlay.remove();
       resolve(value);
@@ -124,7 +144,9 @@ export function openStageHandoffDialog({ workflow, from, to, taskTitle, teamMemb
       if (!state.assigneeId) return fail(`Elige quién se encarga de ${STAGE_LABELS[to]}.`);
       if (needsDue && !state.dueDate) return fail("Indica la fecha prevista de recepción o fin de fabricación.");
       if (state.startDate && state.dueDate && state.dueDate < state.startDate) return fail("La fecha fin no puede ser anterior al inicio.");
-      finish({ assigneeId: state.assigneeId, startDate: state.startDate || null, dueDate: state.dueDate || null, note: $("#sh-note").value.trim() });
+      const result = { assigneeId: state.assigneeId, startDate: state.startDate || null, dueDate: state.dueDate || null, note: $("#sh-note").value.trim() };
+      if (showTrace) result.purchase = { supplier: $("#sh-supplier").value, orderNumber: $("#sh-order").value, supplierCode: $("#sh-supcode").value };
+      finish(result);
     });
     // Con responsable ya preasignado y fechas listas, un clic en «Confirmar» basta; el foco empieza en el botón.
     setTimeout(() => ($("#sh-ok") || {}).focus?.(), 0);

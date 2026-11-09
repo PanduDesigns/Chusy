@@ -56,7 +56,7 @@ import { allocateProjectCode } from "./project-codes.js";
 import { trashTasks } from "./trash.js";
 // v84: flujo multietapa (Diseño → Compra/Pedido → Recepción/Fabricación). Todo el cálculo es puro (workflow-stages.js);
 // aquí solo se escribe en Firestore lo que decide. No aplica a las tareas de Ofertas ni a las personales.
-import { taskWorkflow, workflowTaskPatch, resetWorkflow, advanceTaskPatch, returnTaskPatch, bulkCompleteExtras } from "../workflow-stages.js";
+import { taskWorkflow, workflowTaskPatch, resetWorkflow, advanceTaskPatch, returnTaskPatch, bulkCompleteExtras, updateStage, purchaseTraceFields } from "../workflow-stages.js";
 // v81: `withSectionEnteredAt` (pura) anota cuándo entra una tarea en su sección actual, para medir el flujo sin imputar horas.
 import { withSectionEnteredAt } from "../flow-metrics.js";
 // v73 (Etapa 1 del Store): las tareas de un proyecto se escuchan a través del
@@ -102,6 +102,9 @@ export async function createTask(projectId, data) {
     customFields: data.customFields || {},
     // v84: el flujo multietapa (solo si la tarea lo trae) y los responsables de sus etapas futuras (ver workflow-stages.js).
     ...(data.workflow ? { workflow: data.workflow, upcomingAssigneeIds: data.upcomingAssigneeIds || [] } : {}),
+    // v86: la copia de la trazabilidad de compras (Proveedor, Nº de pedido, Código Proveedor) para tablas y búsquedas;
+    // la fuente de verdad es `workflow.purchase` (ver workflow-stages.js, purchaseTraceFields).
+    ...(data.workflow ? { supplier: data.supplier || "", orderNumber: data.orderNumber || "", supplierCode: data.supplierCode || "" } : {}),
     // v57: solo una oferta lo manda (nace con su fila A1 «Versión original»,
     // ver task-modal.js); una tarea normal no gana un `revisions` vacío.
     ...(Array.isArray(data.revisions) ? { revisions: data.revisions } : {}),
@@ -143,7 +146,7 @@ export async function duplicateTask(task) {
     assigneeIds: (wfPatch && wfPatch.assigneeIds) || task.assigneeIds,
     dueDate: (wfPatch && wfPatch.dueDate) || task.dueDate,
     startDate: (wfPatch && wfPatch.startDate) || task.startDate,
-    ...(wfPatch ? { workflow: wfPatch.workflow, upcomingAssigneeIds: wfPatch.upcomingAssigneeIds } : {}),
+    ...(wfPatch ? { workflow: wfPatch.workflow, upcomingAssigneeIds: wfPatch.upcomingAssigneeIds, supplier: wfPatch.supplier, orderNumber: wfPatch.orderNumber, supplierCode: wfPatch.supplierCode } : {}),
     priority: task.priority,
     tags: task.tags,
     dependsOn: [],
@@ -208,6 +211,22 @@ export async function returnTaskStage(task) {
   if (!res) return null;
   await updateTask(task.id, { ...res.patch, completedAt: null }, task);
   return { reopenedKey: res.reopenedKey, patch: res.patch };
+}
+
+/**
+ * v86 — Guarda los datos de compra (`supplier`, `orderNumber`, `supplierCode`) de una tarea con la etapa Compra/Pedido
+ * habilitada: los actualiza en la etapa (`workflow.purchase`, fuente de verdad) y en su copia de la tarea, sin tocar
+ * responsable ni fechas. Es lo que usa la edición en línea de «Pedidos». `patch` lleva solo los campos que cambian.
+ * Devuelve { patch } con lo escrito, o null si la tarea no tiene esa etapa.
+ */
+export async function updateOrderTrace(task, patch) {
+  const offers = getOffersProject();
+  const wf = taskWorkflow(task, offers && offers.id);
+  if (!wf || !wf.purchase.enabled) return null;
+  const next = updateStage(wf, "purchase", patch || {});
+  const fields = { workflow: next, ...purchaseTraceFields(next) };
+  await updateTask(task.id, fields, task);
+  return { patch: fields };
 }
 
 /**
@@ -411,6 +430,26 @@ export function subscribeToMyTasks(uid, callback) {
     ],
     callback
   );
+}
+
+/**
+ * v86 — Los pedidos PENDIENTES de tramitar (Compra/Pedido habilitada y sin completar), de todos los proyectos, para el
+ * contador de «Pedidos» de la barra lateral sin tener que cargar TODAS las tareas al iniciar sesión (v66). Una sola
+ * consulta con dos igualdades sobre campos anidados MÁS `projectId != null` (lo que demuestra a Firestore que cumple la regla
+ * de lectura, como en subscribeToProjectTasks): necesita un índice compuesto —`workflow.purchase.enabled` ↑,
+ * `workflow.purchase.completed` ↑, `projectId` ↑, ámbito Colección— que Firestore ofrece crear con el enlace de su aviso la
+ * primera vez. Si falla (índice sin crear), `callback` recibe lo que haya (vacío) y el contador usa las tareas ya cargadas.
+ * Pasa por el store como las demás (clave `tasks:orders:pending`): las mismas tareas que ya estén en otra escucha no se
+ * guardan dos veces.
+ */
+export function subscribeToOrdersPending(callback) {
+  const q = query(
+    collection(db, "tasks"),
+    where("workflow.purchase.enabled", "==", true),
+    where("workflow.purchase.completed", "==", false),
+    where("projectId", "!=", null)
+  );
+  return subscribeToTaskQueries([{ key: "tasks:orders:pending", query: q }], callback);
 }
 
 // ============================================================================

@@ -10,7 +10,7 @@ import { createProject, updateProject, subscribeToAllProjects, subscribeToArchiv
 import { isUpcomingForUser } from "./workflow-stages.js";
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
 import { convertOfferToProject, conversionMessage } from "./data/offer-conversion.js";
-import { getTask, subscribeToProjectTasks, subscribeToMyTasks } from "./data/tasks.js";
+import { getTask, subscribeToProjectTasks, subscribeToMyTasks, subscribeToOrdersPending } from "./data/tasks.js";
 import { createTaskLoader } from "./task-loader.js";
 import { store } from "./store.js";
 import { subscribeToAllTags } from "./data/tags.js";
@@ -43,7 +43,12 @@ import { renderMyTasksView } from "./views/my-tasks-view.js";
 import { renderTrashView, visibleTrashItems } from "./views/trash-view.js";
 import { renderArchiveView } from "./views/archive-view.js";
 import { renderMetricsView } from "./views/metrics-view.js";
-import { metricsScopeFor, metricsFilterLabel, canViewWorkload, canViewMetrics } from "./departments.js";
+import { metricsScopeFor, metricsFilterLabel, canViewWorkload, canViewMetrics, canViewOrders, DEFAULT_ORDERS_GROUPS } from "./departments.js";
+// v86: sección «Pedidos» (transversal, de Compras): lógica pura en orders.js, pantalla en views/orders-view.js, permiso por departamento en meta/ordersAccess
+import { renderOrdersView } from "./views/orders-view.js";
+import { subscribeToOrdersAccess } from "./data/orders-access.js";
+import { collectOrderRows, pendingOrdersCount, collectSupplierOptions, emptyOrdersState } from "./orders.js";
+import { setSuggestProvider } from "./components/text-suggest.js";
 import { resolveTimelineGroupBy } from "./workload.js"; // v81
 import { openProjectModal } from "./components/project-modal.js";
 import { openTaskModal } from "./components/task-modal.js";
@@ -88,7 +93,16 @@ let currentProjectId = null;
 let currentProject = null;
 let currentTasks = [];
 let currentView = "list";
-let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'trash' | 'metrics'
+let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'trash' | 'metrics' | 'orders'
+// v86 · «Pedidos»: qué grupos de departamento la ven (meta/ordersAccess; sin configurar, los Técnicos — ver departments.js),
+// el estado de la vista (pestaña, filtros, búsqueda y orden: solo de sesión, orders-view.js lo actualiza SIN repintar) y los
+// pedidos pendientes de tramitar que trae la consulta del contador (no hace falta cargar todas las tareas para saber cuántos son).
+let ordersAllowed = [...DEFAULT_ORDERS_GROUPS];
+let ordersViewState = emptyOrdersState();
+let ordersPendingTasks = [];
+let unsubOrdersAccess = null;
+let unsubOrdersPending = null;
+let ordersPendingSubscribed = false;
 let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
 let timelineShowHolidays = false;
@@ -118,7 +132,7 @@ const taskLoader = createTaskLoader({
   onChange: (projectId) => {
     const isCurrent = projectId === currentProjectId;
     if (isCurrent) syncCurrentTasks();
-    if (mode === "timeline" || mode === "metrics" || (mode === "project" && isCurrent)) renderShell();
+    if (mode === "timeline" || mode === "metrics" || mode === "orders" || (mode === "project" && isCurrent)) renderShell();
   },
 });
 // { [projectId]: tasks[] } — objeto VIVO del cargador (no se reasigna). Solo trae
@@ -294,6 +308,8 @@ function restoreLastLocation() {
     selectArchive();
   } else if (saved && saved.mode === "trash") {
     selectTrash();
+  } else if (saved && saved.mode === "orders") {
+    selectOrders(); // v86: comprueba el permiso; sin él cae a «Mis tareas»
   } else if (saved && saved.mode === "metrics") {
     // selectMetrics() ya comprueba el rol antes de aplicar el modo — por
     // si la cuenta dejó de ser admin desde la última vez que se guardó
@@ -409,10 +425,11 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig, unsubWorkCalendar].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig, unsubWorkCalendar, unsubOrdersAccess, unsubOrdersPending].forEach((fn) => fn && fn());
   taskLoader.stopAll();
   store.stopAll(); // v73: por si acaso, que no quede en memoria nada de la cuenta que sale
-  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = unsubWorkCalendar = null;
+  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = unsubWorkCalendar = unsubOrdersAccess = unsubOrdersPending = null;
+  ordersAllowed = [...DEFAULT_ORDERS_GROUPS]; ordersViewState = emptyOrdersState(); ordersPendingTasks = []; ordersPendingSubscribed = false; // v86
   resetDriveService(); // v68: fuera el permiso de Drive y las miniaturas de la cuenta que sale
   resetWorkCalendar(); // v78: y el calendario laboral de la cuenta que sale
   projects = []; rawProjects = []; prevActiveProjectIds = null; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
@@ -450,6 +467,7 @@ function bootstrap() {
   // (escuchas, store, listas) como al cerrar sesión: nada de la cuenta anterior se queda en memoria.
   if (sessionUid && sessionUid !== currentUser.uid) cleanup();
   if (sessionUid === currentUser.uid) {
+    syncOrdersPendingSubscription(); // v86: un cambio de rol o de departamento abre o cierra la consulta del contador de «Pedidos»
     if (projectsLoaded) handleProjectsList(rawProjects); // (ya repinta)
     else renderShell();
     return;
@@ -517,6 +535,11 @@ function bootstrap() {
   // porque el Calendario y la Línea de tiempo marcan festivos y avisos.
   if (unsubWorkCalendar) unsubWorkCalendar();
   unsubWorkCalendar = subscribeToWorkCalendar(() => renderShell());
+
+  // v86: quién ve «Pedidos» (meta/ordersAccess). Al llegar (o cambiar) se repinta, y se abre o se cierra la consulta del contador.
+  if (unsubOrdersAccess) unsubOrdersAccess();
+  unsubOrdersAccess = subscribeToOrdersAccess((groups) => { ordersAllowed = groups; syncOrdersPendingSubscription(); renderShell(); });
+  syncOrdersPendingSubscription();
 
   if (unsubMyTasks) unsubMyTasks();
   unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; renderShell(); });
@@ -656,6 +679,56 @@ function selectProject(projectId) {
     }
     renderShell();
   });
+  renderShell();
+}
+
+/** v86: ¿esta cuenta ve «Pedidos»? (admin siempre; el resto, según los grupos de meta/ordersAccess). */
+function canSeeOrders() {
+  return !!currentUser && canViewOrders(currentUser, ordersAllowed);
+}
+
+/**
+ * v86: la consulta de pedidos pendientes (alimenta el contador de la barra lateral sin cargar todas las tareas, ver
+ * subscribeToOrdersPending) solo está abierta mientras la cuenta puede ver «Pedidos»: se abre al ganar el permiso y se cierra al perderlo.
+ */
+function syncOrdersPendingSubscription() {
+  const should = canSeeOrders();
+  if (should && !ordersPendingSubscribed) {
+    ordersPendingSubscribed = true;
+    unsubOrdersPending = subscribeToOrdersPending((tasks) => { ordersPendingTasks = tasks; renderSidebarOnly(); if (mode === "orders") renderShell(); });
+  } else if (!should && ordersPendingSubscribed) {
+    if (unsubOrdersPending) unsubOrdersPending();
+    unsubOrdersPending = null; ordersPendingSubscribed = false; ordersPendingTasks = [];
+  }
+}
+
+/** v86: todas las tareas de proyecto que se conocen ahora (las ya cargadas + los pedidos pendientes de la consulta del contador), sin repetir. */
+function getKnownProjectTasks() {
+  const seen = new Map();
+  [...ordersPendingTasks, ...getAllProjectTasksDeduped()].forEach((t) => seen.set(t.id, t));
+  return [...seen.values()];
+}
+
+/** v86: lo que sugiere el campo «Proveedor» (modal de tarea, relevo de Compra/Pedido y vista «Pedidos»): los ya escritos en cualquier tarea cargada. */
+function getSupplierOptions() {
+  return collectSupplierOptions([...getKnownProjectTasks(), ...myTasks, ...currentTasks]);
+}
+setSuggestProvider("supplier", getSupplierOptions);
+
+/** v86: contador de la barra lateral = pedidos «Pendientes de pedir» de los proyectos activos. */
+function getOrdersPendingCount() {
+  if (!canSeeOrders()) return 0;
+  return pendingOrdersCount(getKnownProjectTasks(), { projects, offersProjectId: (getOffersProject() || {}).id });
+}
+
+/** Único punto de entrada al modo «Pedidos» (restoreLastLocation y la barra lateral): sin permiso cae a «Mis tareas». */
+function selectOrders() {
+  if (!canSeeOrders()) { selectMyTasks(); return; }
+  mode = "orders";
+  saveLastLocation({ mode: "orders" });
+  activeFilters = {};
+  searchText = "";
+  taskLoader.ensureAll(); // v66: «Pedidos» recoge tareas de todos los proyectos
   renderShell();
 }
 
@@ -871,6 +944,8 @@ function renderSidebarOnly() {
     isTimelineActive: mode === "timeline",
     isArchiveActive: mode === "archive",
     isTrashActive: mode === "trash",
+    showOrders: canSeeOrders(), isOrdersActive: mode === "orders", ordersPendingCount: getOrdersPendingCount(), // v86
+    onSelectOrders: () => { selectOrders(); sidebarEl.classList.remove("is-open"); },
     myTasksCount: myTasks.filter((t) => !t.isComplete && !isUpcomingForUser(t, currentUser.uid, (getOffersProject() || {}).id)).length, // v84: lo que aún no me toca no cuenta
     userProfile: currentUser,
     isCollapsed: sidebarCollapsed,
@@ -888,7 +963,7 @@ function renderSidebarOnly() {
     onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
     onOpenWhatsNew: () => openWhatsNewModal({ releases: RELEASES }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
-    onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive) }),
+    onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive), ordersAccess: ordersAllowed, currentUser }),
     onOpenWorkCalendar: () => openWorkCalendarModal({ currentUser, teamMembers }), // v78: todas las cuentas (solo un admin edita)
     onOpenOutlookBridge: () => openOutlookBridgeModal({ currentUser }),
     onOpenDriveStorage: () => openDriveStorageModal({ currentUser }),
@@ -970,6 +1045,26 @@ function renderShell() {
       workCalendar: getWorkCalendar(), // v81: días hábiles de «Salud del flujo»
       currentUser, departmentFilter: metricsDepartmentFilter,
       onChangeDepartmentFilter: (value) => { metricsDepartmentFilter = value; },
+    });
+    return;
+  }
+
+  if (mode === "orders") {
+    // v86: sección «Pedidos». Segunda comprobación del permiso (por si lo pierde en mitad de la sesión: el botón ya habría desaparecido).
+    if (!canSeeOrders()) { selectMyTasks(); return; }
+    filterbarEl.innerHTML = ""; // la barra de búsqueda y los filtros son de la propia vista
+    if (!taskLoader.isAllLoaded()) {
+      topbarEl.innerHTML = `<span class="topbar__title">Pedidos</span>`;
+      mainContentEl.innerHTML = loadingStateHtml("Cargando las tareas de todos los proyectos…");
+      return;
+    }
+    const orderRows = collectOrderRows(getKnownProjectTasks(), { projects, members: teamMembers, offersProjectId: (getOffersProject() || {}).id });
+    const pending = orderRows.filter((r) => r.status === "pending").length;
+    topbarEl.innerHTML = `<span class="topbar__title">Pedidos</span><span class="topbar__count">${pending} ${pending === 1 ? "pendiente de tramitar" : "pendientes de tramitar"}</span>`;
+    renderOrdersView(mainContentEl, {
+      rows: orderRows, state: ordersViewState,
+      onStateChange: (st) => { ordersViewState = st; }, // solo guarda: la vista repinta por su cuenta (no se pierde el foco al buscar)
+      onOpenTask: openTask, currentUser, teamMembers, projects,
     });
     return;
   }

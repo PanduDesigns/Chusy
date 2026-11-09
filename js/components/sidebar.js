@@ -42,6 +42,12 @@
 // minimizada (68 px) no cabe una tira horizontal: plegado deja solo el botón
 // de desplegar. (Métricas no está en este bloque: vive en el menú del nombre.)
 //
+// Pedidos (v86): junto a «Ofertas» (el bloque de navegación de arriba) sale «📦 Pedidos», con el contador de pedidos pendientes
+// de tramitar (los del bloque «Pendientes de pedir», ver orders.js), SOLO para quien tiene permiso (`showOrders`: admin o un
+// departamento marcado en «Accesos por departamento», ver canViewOrders en departments.js). Quien no lo tiene no ve ni el
+// botón ni su contador. Lleva las mismas clases que «Mis tareas», así que se pliega a icono con el resto del bloque y su
+// contador sale como insignia pequeña (css/05-layout.css). app.js decide a dónde va (selectOrders) y calcula el contador.
+//
 // Propiedades (v57): el menú de clic derecho de un proyecto normal (no de
 // las secciones exclusivas) incluye «Propiedades», que abre la ventana con
 // sus metadatos (project-properties-modal.js). El menú solo avisa con
@@ -100,7 +106,7 @@ export function restoreSidebarScroll(container, snapshot) {
   });
 }
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, sectorFilter, onSectorFilterChange, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenWorkCalendar, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, showOrders, isOrdersActive, ordersPendingCount, onSelectOrders, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, sectorFilter, onSectorFilterChange, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenWorkCalendar, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
   // v85: ANTES de tocar el DOM se guarda dónde estaba el scroll de cada contenedor (se restaura al final de esta función).
   const scrollSnapshot = captureSidebarScroll(container);
   container.classList.toggle("is-collapsed", !!isCollapsed);
@@ -180,6 +186,11 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       <span class="sidebar__item-name sidebar__label">Papelera</span>
     </button>
     ${exclusiveItems}
+    ${showOrders ? `<button class="sidebar__item sidebar__item--pinned${isOrdersActive ? " is-active" : ""}" id="btn-orders" title="${ordersPendingCount ? `Pedidos · ${ordersPendingCount} pendientes de tramitar` : "Pedidos"}">
+      <span class="sidebar__item-icon">📦</span>
+      <span class="sidebar__item-name sidebar__label">Pedidos</span>
+      ${ordersPendingCount ? `<span class="sidebar__item-count sidebar__label" id="orders-count">${ordersPendingCount}</span>` : ""}
+    </button>` : ""}
     </div>
     </div>
 
@@ -260,6 +271,8 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   container.querySelector("#btn-timeline").addEventListener("click", onSelectTimeline);
   container.querySelector("#btn-archive").addEventListener("click", onSelectArchive);
   container.querySelector("#btn-trash").addEventListener("click", onSelectTrash);
+  const ordersBtn = container.querySelector("#btn-orders"); // v86: solo existe para quien tiene permiso
+  if (ordersBtn && onSelectOrders) ordersBtn.addEventListener("click", onSelectOrders);
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
   container.querySelector("#btn-toggle-collapse").addEventListener("click", onToggleCollapse);

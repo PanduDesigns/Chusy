@@ -27,6 +27,7 @@ import { resolveColumns, columnHeaderCellsHtml, wireColumnResize, wireColumnReor
 import { createSelectionController } from "../components/bulk-selection.js";
 import { renderBulkToolbar, removeBulkToolbar } from "../components/bulk-toolbar.js";
 import { convertibleToOffers, convertToOffers } from "../components/convert-to-offers.js";
+import { hasPurchaseTrace, purchaseTrace } from "../workflow-stages.js";
 
 function tagPill(name, tagsRegistry) {
   const found = (tagsRegistry || []).find((t) => t.name.toLowerCase() === name.toLowerCase());
@@ -41,6 +42,17 @@ const BASE_COLUMNS = [
   { key: "priority", label: "Prioridad", defaultWidth: 80, minWidth: 64 },
   { key: "tags", label: "Etiquetas", defaultWidth: 160, minWidth: 90 },
 ];
+
+// v86: columnas de trazabilidad de compras (Proveedor, Nº de pedido, Código Proveedor). Solo aparecen cuando alguna tarea
+// del proyecto ya tiene alguno de los tres rellenado (si no, serían tres columnas vacías en todos los proyectos que no
+// compran); luego se pueden ocultar o mover como cualquier otra desde el menú de columnas. Se leen de la copia que lleva
+// la tarea (`supplier`/`orderNumber`/`supplierCode`) y, si faltara, de la etapa.
+const TRACE_COLUMNS = [
+  { key: "supplier", label: "Proveedor", defaultWidth: 140, minWidth: 80 },
+  { key: "orderNumber", label: "Nº de pedido", defaultWidth: 120, minWidth: 80 },
+  { key: "supplierCode", label: "Código Proveedor", defaultWidth: 130, minWidth: 80 },
+];
+const traceValue = (task, key) => (task[key] || purchaseTrace(task.workflow)[key] || "");
 
 // Selección múltiple: vive fuera de renderListView() para sobrevivir a que
 // esta función se vuelva a llamar (cada cambio de filtro/orden, cada
@@ -63,7 +75,8 @@ export function renderListView(container, opts) {
   function rerenderSelf() { renderListView(container, opts); }
 
   const customCols = (project.customFieldDefs || []).map((f) => ({ key: `cf:${f.id}`, label: f.name, fieldId: f.id, defaultWidth: 120, minWidth: 70 }));
-  const allColumns = [...BASE_COLUMNS, ...customCols];
+  const traceCols = tasks.some(hasPurchaseTrace) ? TRACE_COLUMNS : []; // v86
+  const allColumns = [...BASE_COLUMNS, ...traceCols, ...customCols];
   const scopeKey = `project:${project.id}`;
   const prefs = (currentUser.columnPrefs || {})[scopeKey];
   const { visible, gridTemplate, widthOf } = resolveColumns(allColumns, prefs, currentUser.columnOrder);
@@ -126,6 +139,9 @@ export function renderListView(container, opts) {
               return task.tags && task.tags.length
                 ? `<span class="list-table__tags-cell">${task.tags.map((t) => tagPill(t, tagsRegistry)).join("")}</span>`
                 : `<span class="list-table__cell-text">—</span>`;
+            }
+            if (col.key === "supplier" || col.key === "orderNumber" || col.key === "supplierCode") {
+              return `<span class="list-table__cell-text">${escapeHtml(traceValue(task, col.key) || "—")}</span>`;
             }
             return `<span class="list-table__cell-text">${escapeHtml(task.customFields?.[col.fieldId] ?? "—")}</span>`;
           })

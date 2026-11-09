@@ -93,6 +93,20 @@ rules_version = '2';
 //    (fechas, nombres) NO se puede validar desde aquí: las reglas no recorren
 //    listas — lo comprueba la aplicación (work-calendar.js) al escribir.
 //
+//  - meta/ordersAccess: `{ allowedDepartments, updatedBy, updatedAt }` — qué
+//    departamentos ven la sección «Pedidos» (v86, apartado 3.19 del README), en
+//    UN solo documento como el calendario. LECTURA para cualquier cuenta activa
+//    (la barra lateral de cada persona necesita saber si pinta el botón) y
+//    ESCRITURA solo para un admin, con la forma exacta (esas tres claves, y
+//    `allowedDepartments` una lista corta). Que «Pedidos» salga o no es una
+//    comprobación de interfaz, como Ofertas y Métricas: las tareas de proyecto
+//    ya las puede leer cualquier cuenta activa.
+//  - Tareas (v86): los tres campos de trazabilidad de compras (`supplier`,
+//    `orderNumber`, `supplierCode`, copia de `workflow.purchase`) son campos
+//    normales de la tarea y NO necesitan regla propia: las reglas de tareas no
+//    limitan qué claves lleva el documento. Leerlos y editarlos tiene los
+//    mismos permisos que el resto de la tarea.
+//
 // Cuentas eliminadas: "Eliminar usuario" (panel de administración) NO
 // borra el documento de Firestore ni la cuenta de Firebase Auth (borrar la
 // cuenta de Auth de otra persona exige el SDK de administración, con un
@@ -248,6 +262,20 @@ service cloud.firestore {
         request.resource.data.keys().hasOnly(['holidays', 'absences', 'updatedBy', 'updatedAt']) &&
         request.resource.data.holidays is list && request.resource.data.holidays.size() <= 400 &&
         request.resource.data.absences is list && request.resource.data.absences.size() <= 2000 &&
+        (!('updatedBy' in request.resource.data) || request.resource.data.updatedBy == null || request.resource.data.updatedBy == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ---- Acceso a «Pedidos» por departamento (v86): `{ allowedDepartments, updatedBy,
+    // updatedAt }`. Lo escribe solo un admin (el modal «Accesos por departamento»).
+    // `allowedDepartments` es obligatoria y de tipo lista, con un tope muy por encima
+    // de los grupos que existen; puede ir vacía (= solo los admins ven «Pedidos»). ----
+    match /meta/ordersAccess {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin() &&
+        request.resource.data.keys().hasAll(['allowedDepartments']) &&
+        request.resource.data.keys().hasOnly(['allowedDepartments', 'updatedBy', 'updatedAt']) &&
+        request.resource.data.allowedDepartments is list && request.resource.data.allowedDepartments.size() <= 20 &&
         (!('updatedBy' in request.resource.data) || request.resource.data.updatedBy == null || request.resource.data.updatedBy == request.auth.uid);
       allow delete: if isAdmin();
     }

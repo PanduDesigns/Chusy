@@ -345,3 +345,22 @@ textarea.modal__title-input {
 .qc-stage-cfg .qc-stage-days { width: 58px; flex: none; font-size: 12px; padding: 3px 6px; }
 .qc-dates__stages { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 2px 0 4px 8px; font-size: 11.5px; color: var(--color-text-lo); }
 .qc-dates__chain { color: var(--color-text-faint); }
+
+/* ============================================================================
+   v86 · Datos de la compra (Proveedor, Nº de pedido, Código Proveedor).
+   · .wf-row__trace: sub-fila dentro de la etapa Compra/Pedido del modal de tarea.
+   · .trace-grid: los mismos tres campos en la ventana de relevo.
+   Rejilla 1.2fr 1fr 1fr SIN desbordes (min-width:0, width:100%, box-sizing) que pasa
+   a UNA columna en pantallas estrechas.
+   ============================================================================ */
+.wf-row__trace, .trace-grid {
+  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px;
+  width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box;
+}
+.wf-trace__cell, .trace-grid__cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; width: 100%; box-sizing: border-box; }
+.wf-trace__label, .trace-grid__label { font-size: 11px; color: var(--color-text-faint); }
+.wf-trace__cell .field__input, .trace-grid__cell .field__input { min-width: 0; width: 100%; box-sizing: border-box; }
+.stage-handoff__trace { gap: 6px; }
+@media (max-width: 560px) {
+  .wf-row__trace, .trace-grid { grid-template-columns: minmax(0, 1fr); }
+}

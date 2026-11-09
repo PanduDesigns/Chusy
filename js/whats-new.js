@@ -25,6 +25,17 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 86,
+    date: "2026-11-06",
+    title: "Nueva sección «Pedidos» y datos de compra en las tareas",
+    items: [
+      "Nueva sección «📦 Pedidos» en la barra lateral, junto a Ofertas, para quien tenga permiso: reúne las tareas de todos los proyectos que ya han llegado a Compra/Pedido, separadas en «Pendientes de pedir», «Pedidos realizados» y «Completados / Recibidos». El contador de la barra lateral te dice cuántos quedan por tramitar.",
+      "Las tareas con etapa de Compra/Pedido tienen tres campos nuevos: Proveedor (te sugiere los que ya usaste), Nº de pedido y Código Proveedor. Los rellenas en la propia tarea o, al completar la compra, en la ventana de relevo hacia Recepción/Fabricación, y en «Pedidos» se editan directamente en la fila.",
+      "En «Pedidos» hay una barra de búsqueda que filtra mientras escribes por cualquier trozo del Nº de pedido, del Código Proveedor, de la tarea o del proyecto, y desplegables para filtrar por Comercial, Proyecto, Proveedor, Sector y Responsable.",
+      "Un administrador decide qué departamentos ven «Pedidos» en «Accesos por departamento», igual que con Ofertas.",
+    ],
+  },
+  {
     id: 85,
     date: "2026-11-04",
     title: "Etapas visibles en la línea de tiempo, filtro por sector y arreglos de la barra lateral",

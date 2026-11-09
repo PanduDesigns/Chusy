@@ -19,7 +19,7 @@
 // escrituras por lotes, el perfil propio de auth.js y los avisos/papelera.
 //
 // ESTADO
-//   tasks · projects · offers · users · departments · tags · workCalendar → Map<id, documento>
+//   tasks · projects · offers · users · departments · tags · workCalendar · ordersAccess → Map<id, documento>
 //   ui → { activeView, activeProjectId, filters }  (objeto; se puede ampliar)
 //
 //   · El id de cada documento va dentro, con el nombre que ya usa la app:
@@ -74,6 +74,7 @@ export const COLLECTION_SLICES = Object.freeze({
   departments: "value",
   tags: "id",
   workCalendar: "id", // v78: UN solo documento (meta/workCalendar → { id: "workCalendar", holidays, absences }), ver data/work-calendar.js
+  ordersAccess: "id", // v86: UN solo documento (meta/ordersAccess → { id: "ordersAccess", allowedDepartments }), ver data/orders-access.js
 });
 
 const UI_SLICE = "ui";

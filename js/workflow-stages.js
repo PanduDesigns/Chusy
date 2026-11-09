@@ -30,6 +30,16 @@
 //  · DEVOLVER (reopenLastStage / reopenStage): reabre una etapa ya completada; las posteriores
 //    vuelven a estar pendientes y la reabierta recupera a su responsable de antes (su `assigneeId`
 //    no se borra nunca al completarla).
+//
+// v86 · TRAZABILIDAD DE COMPRAS. La etapa `purchase` (y SOLO ella) guarda además tres textos:
+//    supplier      Proveedor              (texto libre con memoria: ver collectSupplierOptions en orders.js)
+//    orderNumber   Nº de pedido           (código interno de NUESTRO pedido de compra)
+//    supplierCode  Código Proveedor       (referencia que el proveedor da a esa compra: pedido/presupuesto/albarán)
+// Viven en `task.workflow.purchase.{supplier,orderNumber,supplierCode}` (la fuente de verdad) y se COPIAN a la tarea como
+// `task.supplier`, `task.orderNumber` y `task.supplierCode` (workflowTaskPatch → purchaseTraceFields) para que tablas,
+// búsquedas y consultas los lean sin saber de etapas. Con Compra/Pedido desmarcada, la copia queda vacía (los datos de la
+// etapa se conservan por si se vuelve a marcar, igual que su responsable y sus fechas). Las etapas Diseño y Recepción/Fab.
+// NO llevan estas claves (su forma no cambia).
 // ============================================================================
 import { addWorkingDays, nextWorkingDay, dateKey, formatDayMonth } from "./work-calendar.js";
 
@@ -50,13 +60,21 @@ export const STAGE_TIMELINE_COLORS = Object.freeze({ design: "#3b82f6", purchase
 export const STAGE_TIMELINE_LABELS = Object.freeze({ design: "Diseño", purchase: "Compra", production: "Recepción/Fab." });
 const PROJECTED_DAYS = Object.freeze({ design: null, purchase: PURCHASE_DEFAULT_DAYS, production: PRODUCTION_PROJECTED_DAYS });
 
+/** v86 · Los tres campos de trazabilidad de la etapa Compra/Pedido, y su longitud máxima. */
+export const PURCHASE_TRACE_KEYS = Object.freeze(["supplier", "orderNumber", "supplierCode"]);
+export const PURCHASE_TRACE_MAX = Object.freeze({ supplier: 120, orderNumber: 60, supplierCode: 60 });
+export const PURCHASE_TRACE_LABELS = Object.freeze({ supplier: "Proveedor", orderNumber: "Nº de pedido", supplierCode: "Código Proveedor" });
+
 const isKey = (k) => STAGE_KEYS.includes(k);
 const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+/** Un campo de trazabilidad: acepta texto o número, colapsa los espacios (también los de en medio) y recorta. */
+const traceText = (v, max) => (typeof v === "string" || typeof v === "number" ? String(v).replace(/\s+/g, " ").trim().slice(0, max) : "");
 const uidOrNull = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
 
-/** Una etapa vacía (sin responsable ni fechas). */
-export function emptyStage(enabled = false) {
-  return { enabled: !!enabled, completed: false, completedAt: null, completedBy: null, assigneeId: null, startDate: null, dueDate: null, note: "" };
+/** Una etapa vacía (sin responsable ni fechas). Con `key === "purchase"` (v86) lleva además sus tres campos de trazabilidad, vacíos. */
+export function emptyStage(enabled = false, key = null) {
+  const base = { enabled: !!enabled, completed: false, completedAt: null, completedBy: null, assigneeId: null, startDate: null, dueDate: null, note: "" };
+  return key === "purchase" ? { ...base, supplier: "", orderNumber: "", supplierCode: "" } : base;
 }
 
 function isoOrNull(v) {
@@ -65,10 +83,10 @@ function isoOrNull(v) {
   return d instanceof Date && !isNaN(d.getTime()) ? d.toISOString() : null;
 }
 
-function cleanStage(raw) {
-  if (!raw || typeof raw !== "object") return emptyStage(false);
+function cleanStage(raw, key = null) {
+  if (!raw || typeof raw !== "object") return emptyStage(false, key);
   const completed = raw.completed === true;
-  return {
+  const out = {
     enabled: raw.enabled === true,
     completed,
     completedAt: completed ? isoOrNull(raw.completedAt) : null,
@@ -78,6 +96,8 @@ function cleanStage(raw) {
     dueDate: dateKey(raw.dueDate),
     note: text(raw.note, 500),
   };
+  if (key === "purchase") for (const f of PURCHASE_TRACE_KEYS) out[f] = traceText(raw[f], PURCHASE_TRACE_MAX[f]);
+  return out;
 }
 
 /**
@@ -88,13 +108,13 @@ function cleanStage(raw) {
 export function normalizeWorkflow(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const out = {};
-  for (const k of STAGE_KEYS) out[k] = cleanStage(raw[k]);
+  for (const k of STAGE_KEYS) out[k] = cleanStage(raw[k], k);
   return out;
 }
 
 /** El flujo de una tarea NUEVA de proyecto: las 3 etapas marcadas, sin responsables ni fechas. */
 export function defaultWorkflow() {
-  return { design: emptyStage(true), purchase: emptyStage(true), production: emptyStage(true) };
+  return { design: emptyStage(true, "design"), purchase: emptyStage(true, "purchase"), production: emptyStage(true, "production") };
 }
 
 /**
@@ -104,7 +124,7 @@ export function defaultWorkflow() {
 export function workflowFromEnabled(enabled, details = {}) {
   const on = Array.isArray(enabled) ? new Set(enabled) : new Set(Object.keys(enabled || {}).filter((k) => enabled[k]));
   const wf = {};
-  for (const k of STAGE_KEYS) wf[k] = cleanStage({ ...(details[k] || {}), enabled: on.has(k) });
+  for (const k of STAGE_KEYS) wf[k] = cleanStage({ ...(details[k] || {}), enabled: on.has(k) }, k);
   return wf;
 }
 
@@ -184,11 +204,15 @@ export function taskStageBadge(task, offersProjectId) {
 
 const clone = (wf) => ({ design: { ...wf.design }, purchase: { ...wf.purchase }, production: { ...wf.production } });
 
-/** El mismo flujo con todas las etapas sin completar (al duplicar una tarea): conserva qué etapas lleva, sus responsables y sus fechas. */
+/**
+ * El mismo flujo con todas las etapas sin completar (al duplicar una tarea): conserva qué etapas lleva, sus responsables y sus fechas.
+ * v86: una copia es OTRA compra, así que NO hereda el Nº de pedido ni el Código Proveedor (son únicos de cada pedido); el Proveedor sí.
+ */
 export function resetWorkflow(wf) {
   if (!wf) return wf;
   const out = clone(wf);
   for (const k of STAGE_KEYS) out[k] = { ...out[k], completed: false, completedAt: null, completedBy: null };
+  if (out.purchase && "orderNumber" in out.purchase) out.purchase = { ...out.purchase, orderNumber: "", supplierCode: "" };
   return out;
 }
 
@@ -209,7 +233,29 @@ export function updateStage(wf, key, patch) {
   if ("startDate" in patch) s.startDate = dateKey(patch.startDate);
   if ("dueDate" in patch) s.dueDate = dateKey(patch.dueDate);
   if ("note" in patch) s.note = text(patch.note, 500);
+  if (key === "purchase") for (const f of PURCHASE_TRACE_KEYS) if (f in patch) s[f] = traceText(patch[f], PURCHASE_TRACE_MAX[f]);
   return out;
+}
+
+/** v86 · Los tres textos de trazabilidad de la etapa Compra/Pedido tal como están (siempre strings; vacíos si no hay flujo). */
+export function purchaseTrace(wf) {
+  const p = (wf && wf.purchase) || {};
+  return { supplier: traceText(p.supplier, PURCHASE_TRACE_MAX.supplier), orderNumber: traceText(p.orderNumber, PURCHASE_TRACE_MAX.orderNumber), supplierCode: traceText(p.supplierCode, PURCHASE_TRACE_MAX.supplierCode) };
+}
+
+/**
+ * v86 · Lo que se COPIA a la tarea (`supplier`, `orderNumber`, `supplierCode`): los de la etapa si Compra/Pedido está
+ * habilitada; vacío si no (los datos de la etapa se conservan en el flujo, solo la copia se apaga).
+ */
+export function purchaseTraceFields(wf) {
+  return wf && wf.purchase && wf.purchase.enabled ? purchaseTrace(wf) : { supplier: "", orderNumber: "", supplierCode: "" };
+}
+
+/** v86 · ¿Tiene la tarea algún dato de compra rellenado (en su copia o en la etapa)? */
+export function hasPurchaseTrace(task) {
+  if (!task) return false;
+  const t = purchaseTrace(task.workflow);
+  return PURCHASE_TRACE_KEYS.some((f) => t[f] || traceText(task[f], PURCHASE_TRACE_MAX[f]));
 }
 
 // ------------------------------------------------------------------ campos principales de la tarea
@@ -247,12 +293,13 @@ export function upcomingAssigneeIds(wf) {
 
 /**
  * Todos los campos de la tarea que dependen del flujo, listos para escribir en una actualización:
- *   { workflow, upcomingAssigneeIds, [assigneeIds], [startDate], [dueDate] }
+ *   { workflow, upcomingAssigneeIds, supplier, orderNumber, supplierCode, [assigneeIds], [startDate], [dueDate] }
  * `assigneeIds`/`startDate`/`dueDate` solo aparecen si la etapa activa los tiene (ver activeFieldsFor).
  * Sin etapa activa (todas hechas, o ninguna habilitada) la tarea se queda como esté: solo se guarda el flujo.
  */
 export function workflowTaskPatch(wf) {
-  const patch = { workflow: wf, upcomingAssigneeIds: upcomingAssigneeIds(wf) };
+  // v86: además, la copia de la trazabilidad de compras (`supplier`/`orderNumber`/`supplierCode`) para tablas y búsquedas.
+  const patch = { workflow: wf, upcomingAssigneeIds: upcomingAssigneeIds(wf), ...purchaseTraceFields(wf) };
   const active = activeFieldsFor(wf);
   if (active) {
     if (active.assigneeIds) patch.assigneeIds = active.assigneeIds;
@@ -301,7 +348,8 @@ export function planPurchaseHandoff({ buyerId, today, cfg, days = PURCHASE_DEFAU
 
 /**
  * Completa la etapa activa.
- *   handoff: { assigneeId, startDate, dueDate, note? } para la etapa siguiente (obligatorio si la hay).
+ *   handoff: { assigneeId, startDate, dueDate, note?, purchase? } para la etapa siguiente (obligatorio si la hay).
+ *            `purchase` (v86, solo al completar Compra/Pedido): { supplier, orderNumber, supplierCode } confirmados en el relevo.
  *   → { workflow, finished, completedKey, activatedKey }
  * Si no queda ninguna etapa habilitada después, `finished` es true (la tarea entera pasa a completada).
  * Sin etapa activa devuelve null.
@@ -311,6 +359,10 @@ export function completeCurrentStage(wf, { userId, now, handoff } = {}) {
   if (!cur) return null;
   const out = clone(wf);
   out[cur] = { ...out[cur], completed: true, completedAt: isoOrNull(now) || new Date().toISOString(), completedBy: uidOrNull(userId) };
+  // v86: al completar Compra/Pedido, el diálogo de relevo puede traer Proveedor, Nº de pedido y Código Proveedor (`handoff.purchase`).
+  if (cur === "purchase" && handoff && handoff.purchase && typeof handoff.purchase === "object") {
+    for (const f of PURCHASE_TRACE_KEYS) if (f in handoff.purchase) out[cur][f] = traceText(handoff.purchase[f], PURCHASE_TRACE_MAX[f]);
+  }
   const next = nextStageKey(wf);
   if (!next) return { workflow: out, finished: true, completedKey: cur, activatedKey: null };
   if (handoff) {

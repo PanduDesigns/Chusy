@@ -72,7 +72,7 @@ import { openStageHandoffDialog } from "./stage-handoff.js";
 import {
   STAGE_KEYS, STAGE_LABELS, STAGE_SHORT, defaultWorkflow, normalizeWorkflow, workflowFromEnabled, currentStageKey, stageStatus,
   setStageEnabled, updateStage, activeFieldsFor, workflowTaskPatch, planTaskCheck, completeCurrentStage, reopenLastStage, reopenStage,
-  canReturnToPreviousStage,
+  canReturnToPreviousStage, purchaseTrace, PURCHASE_TRACE_LABELS, PURCHASE_TRACE_MAX,
 } from "../workflow-stages.js";
 import { addComment, subscribeToComments } from "../data/comments.js";
 import {
@@ -105,7 +105,7 @@ import {
   offerSectionOnCompletionChange,
   OFFER_FIRST_VERSION,
 } from "../offers.js";
-import { attachTextSuggest } from "./text-suggest.js";
+import { attachTextSuggest, attachSupplierSuggest } from "./text-suggest.js";
 import { defaultSectorOf } from "../departments.js";
 import { getWorkCalendar } from "../data/work-calendar.js";
 import { describeDay, nextWorkingDay, dateKey, formatDayMonth } from "../work-calendar.js";
@@ -221,6 +221,8 @@ export function openTaskModal({
   let originalRevisionChecked = false;
   // Desplegables de sugerencias enganchados a campos de este formulario.
   let suggestHandles = [];
+  // v86: el desplegable de «Proveedor» del bloque Compra/Pedido (se rehace con cada repintado del bloque de etapas).
+  let wfSuggestHandles = [];
   // v68: la sección «Archivos» (null si no se muestra) y si el modal se cierra
   // tras GUARDAR (decide si lo subido/quitado se confirma o se descarta).
   let fileUi = null;
@@ -321,6 +323,8 @@ export function openTaskModal({
     }
     suggestHandles.forEach((h) => h.destroy());
     suggestHandles = [];
+    wfSuggestHandles.forEach((h) => h.destroy());
+    wfSuggestHandles = [];
     document.querySelectorAll(".project-add-popover").forEach((p) => p.remove());
     document.removeEventListener("keydown", onKeydown);
     overlay.remove();
@@ -1152,9 +1156,24 @@ export function openTaskModal({
     renderWorkflow();
   }
 
+  /**
+   * v86 · Sub-fila «Datos de la compra» DENTRO de la etapa Compra/Pedido (solo existe mientras esa etapa está marcada):
+   * Proveedor (con las sugerencias de los ya usados), Nº de pedido y Código Proveedor, en una rejilla 1.2fr 1fr 1fr que
+   * pasa a una columna en pantallas estrechas (css/07-modals.css, .wf-row__trace).
+   */
+  function traceRowHtml(stage) {
+    const t = purchaseTrace({ purchase: stage });
+    const cell = (f, cls, placeholder) => `
+        <label class="wf-trace__cell wf-trace__cell--${cls}"><span class="wf-trace__label">${escapeHtml(PURCHASE_TRACE_LABELS[f])}</span><input class="field__input" type="text" maxlength="${PURCHASE_TRACE_MAX[f]}" autocomplete="off" data-wf-trace="${f}" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(t[f])}"></label>`;
+    return `<div class="wf-row__trace" data-wf-trace-row>${cell("supplier", "supplier", "Proveedor")}${cell("orderNumber", "order", "Nuestro nº de pedido")}${cell("supplierCode", "code", "Ref. del proveedor")}
+          </div>`;
+  }
+
   function renderWorkflow() {
     const box = overlay.querySelector("#t-workflow");
     if (!box) return;
+    wfSuggestHandles.forEach((h) => h.destroy()); // v86: el repintado de abajo crea campos nuevos
+    wfSuggestHandles = [];
     if (!wfEligible()) { box.hidden = true; box.innerHTML = ""; return; }
     if (isNew && !draft.workflow && !wfDefaulted) { draft.workflow = defaultWorkflow(); wfDefaulted = true; } // tarea nueva: las 3 etapas marcadas
     box.hidden = false;
@@ -1185,6 +1204,7 @@ export function openTaskModal({
             <input class="field__input wf-row__date" type="date" data-wf-start="${k}" value="${toDateInputValue(s.startDate)}" aria-label="Inicio de ${escapeHtml(STAGE_SHORT[k])}" title="Inicio">
             <input class="field__input wf-row__date" type="date" data-wf-due="${k}" value="${toDateInputValue(s.dueDate)}" aria-label="Fin de ${escapeHtml(STAGE_SHORT[k])}" title="Fin">
           </div>
+          ${k === "purchase" ? traceRowHtml(s) : ""}
           <input class="field__input wf-row__note" type="text" maxlength="500" data-wf-note="${k}" placeholder="Nota de relevo (opcional)" value="${escapeHtml(s.note || "")}">
         </div>`;
     }).join("");
@@ -1206,6 +1226,18 @@ export function openTaskModal({
       draft.workflow = updateStage(draft.workflow, inp.dataset.wfNote, { note: inp.value });
       markDirty();
     }));
+    // v86: Proveedor / Nº de pedido / Código Proveedor. Se guardan en el borrador al teclear (sin repintar: el foco no se
+    // pierde); «change» vuelve a leer el valor porque el desplegable de sugerencias lo ajusta («juan  perez» → «Juan Pérez»).
+    box.querySelectorAll("[data-wf-trace]").forEach((inp) => {
+      if (inp.dataset.wfTrace === "supplier") wfSuggestHandles.push(attachSupplierSuggest(inp));
+      const save = () => {
+        if (!draft.workflow) return;
+        draft.workflow = updateStage(draft.workflow, "purchase", { [inp.dataset.wfTrace]: inp.value });
+        markDirty();
+      };
+      inp.addEventListener("input", save);
+      inp.addEventListener("change", save);
+    });
     box.querySelectorAll("[data-wf-reopen]").forEach((btn) => btn.addEventListener("click", () => {
       const next = reopenStage(draft.workflow, btn.dataset.wfReopen);
       if (next) wfApply(next, false);

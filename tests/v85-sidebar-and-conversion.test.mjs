@@ -61,7 +61,8 @@ const cfg = wc.normalizeWorkCalendar({
   await tick(20);
   const rows = [...document.querySelectorAll(".wf-row")];
   eq("modal: 3 etapas activas por defecto, una fila cada una", rows.length, 3);
-  check("… cada etapa son 3 sub-filas hijas directas: cabecera, controles y nota", rows.every((r) => [...r.children].map((c) => c.className.split(" ").find((k) => k.startsWith("wf-row__"))).join() === "wf-row__head,wf-row__controls,wf-row__note"), rows.map((r) => [...r.children].map((c) => c.className)));
+  // v86: la etapa Compra/Pedido añade una sub-fila propia («wf-row__trace», datos de la compra) entre los controles y la nota; las demás siguen con 3.
+  check("… cada etapa son sub-filas hijas directas: cabecera, controles y nota (v86: Compra/Pedido lleva además la de datos de compra)", rows.every((r) => [...r.children].map((c) => c.className.split(" ").find((k) => k.startsWith("wf-row__"))).join() === (/Compra/.test($(".wf-row__name", r).textContent) ? "wf-row__head,wf-row__controls,wf-row__trace,wf-row__note" : "wf-row__head,wf-row__controls,wf-row__note")), rows.map((r) => [...r.children].map((c) => c.className)));
   check("… la cabecera lleva el punto + nombre y el estado en elementos aparte (no se pisan)", rows.every((r) => $(".wf-row__head .wf-row__name .wf-dot", r) && $(".wf-row__head .wf-row__state", r) && !$(".wf-row__name", r).contains($(".wf-row__state", r))));
   check("… los controles son: responsable (select) + inicio + fin, y la nota va fuera de ellos", rows.every((r) => { const c = $(".wf-row__controls", r); return c.children.length === 3 && c.children[0].tagName === "SELECT" && c.children[1].type === "date" && c.children[2].type === "date" && !c.contains($(".wf-row__note", r)); }));
   check("… el responsable ofrece «Sin responsable» completo y conserva sus atributos data-wf-*", rows.every((r) => /Sin responsable/.test($("[data-wf-who]", r).textContent) && $("[data-wf-start]", r) && $("[data-wf-due]", r) && $("[data-wf-note]", r)));
@@ -366,10 +367,10 @@ const pp = await import("../js/project-properties.js");
 {
   const idx = read("index.html");
   const major = parseInt(JSON.parse(read("package.json")).version, 10);
-  check("package.json es 85 y los 14 <link> CSS llevan ?v=85 (ninguno con ?v=84)", major === 85 && (idx.match(/\?v=85\b/g) || []).length === 14 && !/\?v=84/.test(idx));
+  check("package.json (≥ 85) y los 14 <link> CSS van a la par, ninguno con ?v=84", major >= 85 && (idx.match(new RegExp(`\\?v=${major}\\b`, "g")) || []).length === 14 && !/\?v=84/.test(idx));
   const wn = await import("../js/whats-new.js");
   const r = wn.RELEASES.find((x) => x.id === 85);
-  check("Novedades: la v85 es la más reciente y habla de sector, icono/color, etapas y barra lateral", !!r && wn.RELEASES[0].id === 85 && /sector/i.test(JSON.stringify(r)) && /icono/i.test(JSON.stringify(r)) && /etapas/i.test(JSON.stringify(r)) && /barra lateral/i.test(JSON.stringify(r)));
+  check("Novedades: la v85 consta y habla de sector, icono/color, etapas y barra lateral", !!r && wn.RELEASES[0].id >= 85 && /sector/i.test(JSON.stringify(r)) && /icono/i.test(JSON.stringify(r)) && /etapas/i.test(JSON.stringify(r)) && /barra lateral/i.test(JSON.stringify(r)));
   const readme = read("README.md");
   check("README documenta la v85 (Chusy-85, filtro por sector, proyección de etapas y test nuevo)", /v85/.test(readme) && /Chusy-85/.test(readme) && /chusy_sidebar_sector_filter/.test(readme) && /timelineStages/.test(readme) && /v85-sidebar-and-conversion/.test(readme));
   check("el CSS nuevo vive en los archivos pedidos (07-modals, 08-calendar-timeline, 05-layout)", /\.wf-row__controls/.test(read("css/07-modals.css")) && /\.tl-bar--seg\.is-pending/.test(read("css/08-calendar-timeline.css")) && /\.sector-filter__pill/.test(read("css/05-layout.css")));

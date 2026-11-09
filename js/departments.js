@@ -217,3 +217,38 @@ export function canViewWorkload(user) {
 export function canViewMetrics(user) {
   return !!user && (user.role === "admin" || user.role === "revisor" || isDepartmentHead(user));
 }
+
+// ============================================================================
+// Acceso a la sección «Pedidos» (v86)
+//
+// «Pedidos» (js/orders.js, js/views/orders-view.js) es una vista TRANSVERSAL —recoge tareas de todos los proyectos—,
+// no un proyecto: no tiene `allowedDepartments` propio como Ofertas. Su permiso se guarda en UN documento,
+// `meta/ordersAccess` ({ allowedDepartments: [grupos…] }, ver data/orders-access.js), y se configura desde el mismo
+// modal «Accesos por departamento» que Ofertas, con las mismas casillas de GRUPO de acceso (Diseño, Técnicos,
+// Producción).
+//  · Sin documento (nadie lo ha configurado nunca) rige el valor por defecto: los Técnicos (la Oficina Técnica, que
+//    es quien gestiona las compras; no existe un departamento «Compras» aparte). Un admin entra SIEMPRE.
+//  · Con documento, vale lo que diga, también una lista vacía (= solo admins).
+// Es una puerta de INTERFAZ (barra lateral y selectOrders), como Métricas y Ofertas: las tareas de proyecto ya las lee
+// cualquier cuenta activa por firestore.rules, así que no es una regla de seguridad de datos.
+// ============================================================================
+/** Los grupos con acceso a «Pedidos» mientras nadie lo haya configurado. */
+export const DEFAULT_ORDERS_GROUPS = Object.freeze(["tecnicos"]);
+
+/**
+ * Lo que hay en `meta/ordersAccess` (o `null`/sin campo = no configurado) → la lista de grupos con acceso.
+ * Se quedan solo valores conocidos (un grupo o un departamento que existan), sin repetir.
+ */
+export function normalizeOrdersAllowed(doc) {
+  if (!doc || !Array.isArray(doc.allowedDepartments)) return [...DEFAULT_ORDERS_GROUPS];
+  const known = new Set([...DEPARTMENT_GROUPS.map((g) => g.value), ...DEPARTMENTS.map((d) => d.value)]);
+  return [...new Set(doc.allowedDepartments.filter((v) => typeof v === "string" && known.has(v)))];
+}
+
+/** ¿Ve esta persona «Pedidos» en su barra lateral y puede entrar? Admin siempre; el resto, según `allowedGroups` (los de normalizeOrdersAllowed). */
+export function canViewOrders(user, allowedGroups) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  const allowed = Array.isArray(allowedGroups) ? allowedGroups : [...DEFAULT_ORDERS_GROUPS];
+  return departmentHasAccess(user.department, allowed);
+}
