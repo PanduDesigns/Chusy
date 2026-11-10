@@ -337,3 +337,121 @@ body.tl-dragging-bar { user-select: none; }
 .tl-stage-swatch { display: inline-block; width: 14px; height: 8px; border-radius: 2px; background: var(--seg); }
 .tl-sector { padding: 0; }
 .tl-sector .sector-filter__pill { flex: none; padding: 3px 10px; font-size: 12px; }
+
+/* ============================================================================
+   v88 · Cronograma de «Pedidos» (.orders-timeline-*): tabla fija a la izquierda (sticky) + rejilla de días y semanas ISO.
+   UN solo contenedor con scroll (vertical y horizontal): la cabecera es sticky arriba y el bloque izquierdo sticky a la izquierda,
+   así filas y rejilla no se desalinean. Fines de semana, festivos y «hoy» son columnas superpuestas (una por día).
+   Colores solo con las variables del tema (claro / oscuro / clásico): --color-dim sombrea, --color-danger-soft marca festivos.
+   ============================================================================ */
+.orders-timeline { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.orders-timeline__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.orders-timeline__nav { display: inline-flex; gap: 4px; }
+.orders-timeline__zoom { display: inline-flex; border: 1px solid var(--color-line); border-radius: var(--radius-sm); overflow: hidden; }
+.orders-timeline__zoombtn { padding: 5px 10px; font-size: 12px; cursor: pointer; border: 0; background: var(--color-panel); color: var(--color-text-lo); }
+.orders-timeline__zoombtn + .orders-timeline__zoombtn { border-left: 1px solid var(--color-line); }
+.orders-timeline__zoombtn:hover { color: var(--color-text-hi); }
+.orders-timeline__zoombtn.is-active { background: var(--color-signal-soft); color: var(--color-text-hi); font-weight: 600; box-shadow: inset 0 -2px 0 var(--color-signal); }
+.orders-timeline__sort { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-faint); }
+.orders-timeline__sort .field__select { padding: 4px 8px; font-size: 12.5px; }
+.orders-timeline__range { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-faint); }
+
+.orders-timeline__scroll {
+  position: relative; overflow: auto; max-height: calc(100vh - 330px); min-height: 240px;
+  border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: var(--color-void); cursor: grab;
+}
+.orders-timeline__scroll.is-dragging { cursor: grabbing; user-select: none; }
+.orders-timeline__scroll:focus-visible { outline: 2px solid var(--color-signal); outline-offset: 1px; }
+.orders-timeline__grid { position: relative; min-width: 100%; }
+
+/* cabecera: sticky arriba; la esquina, además, sticky a la izquierda */
+.orders-timeline__head { display: flex; position: sticky; top: 0; z-index: 6; background: var(--color-panel); border-bottom: 1px solid var(--color-line-bright); }
+.orders-timeline__corner { display: flex; position: sticky; left: 0; z-index: 7; flex: none; align-items: stretch; background: var(--color-panel); border-right: 2px solid var(--color-line-bright); }
+.orders-timeline__hl {
+  display: flex; align-items: flex-end; flex: none; box-sizing: border-box; padding: 0 8px 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-faint); border-right: 1px solid var(--color-line);
+}
+.orders-timeline__hdays { flex: none; }
+.orders-timeline__hrow { display: flex; }
+.orders-timeline__hcell {
+  box-sizing: border-box; flex: none; overflow: hidden; white-space: nowrap; text-align: center; border-right: 1px solid var(--color-line); color: var(--color-text-lo);
+}
+.orders-timeline__hcell--month { padding: 3px 6px; text-align: left; font-size: 11px; font-weight: 700; color: var(--color-text-hi); border-bottom: 1px solid var(--color-line); }
+.orders-timeline__hcell--week { padding: 2px 0; font-family: var(--font-mono); font-size: 11px; color: var(--color-signal-text, var(--color-signal)); border-bottom: 1px solid var(--color-line); }
+.orders-timeline__hcell--week.is-today { background: var(--color-signal-soft); font-weight: 700; }
+.orders-timeline__hcell--day { display: flex; flex-direction: column; align-items: center; padding: 2px 0 3px; line-height: 1.15; }
+.orders-timeline__hcell--day.is-nonworking { background: var(--color-dim); color: var(--color-text-faint); }
+.orders-timeline__hcell--day.is-today { background: var(--color-signal); color: var(--color-ink); font-weight: 700; }
+.orders-timeline__dnum { font-size: 11.5px; font-weight: 600; }
+.orders-timeline__dlet { font-size: 9.5px; text-transform: uppercase; opacity: 0.75; }
+
+/* cuerpo: una fila por pedido (alto uniforme); columnas superpuestas detrás de las barras */
+.orders-timeline__body { position: relative; }
+.orders-timeline__cols { position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
+.orders-timeline__col { position: absolute; top: 0; bottom: 0; }
+.orders-timeline__col.is-weekend { background: var(--color-dim); }
+.orders-timeline__col.is-holiday {
+  background: repeating-linear-gradient(135deg, rgba(255, 92, 108, 0.18), rgba(255, 92, 108, 0.18) 8px, rgba(255, 92, 108, 0.08) 8px, rgba(255, 92, 108, 0.08) 16px), var(--color-dim);
+}
+.orders-timeline__col.is-today { box-shadow: inset 2px 0 0 var(--color-signal), inset -2px 0 0 var(--color-signal); background-color: var(--color-signal-soft); }
+.orders-timeline__row { display: flex; height: var(--tl-row-h, 36px); box-sizing: border-box; border-bottom: 1px solid var(--color-line); cursor: pointer; }
+.orders-timeline__row.is-group-start { border-top: 2px solid var(--color-line-bright); }
+.orders-timeline__row:hover .orders-timeline__cal { background: var(--color-signal-soft); }
+.orders-timeline__row.is-complete .orders-timeline__left { opacity: 0.8; }
+.orders-timeline__left {
+  display: flex; position: sticky; left: 0; z-index: 3; flex: none; width: var(--tl-left-w); background: var(--color-void); border-right: 2px solid var(--color-line-bright);
+}
+.orders-timeline__row:hover .orders-timeline__left { background: var(--color-void-raised); }
+.orders-timeline__cell {
+  display: flex; align-items: center; flex: none; box-sizing: border-box; padding: 0 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 12.5px; color: var(--color-text-hi); border-right: 1px solid var(--color-line);
+}
+.orders-timeline__cell--project { padding-left: 6px; }
+.orders-timeline__proj { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
+.orders-timeline__code { font-family: var(--font-mono); font-size: 11px; font-weight: 600; flex: none; }
+.orders-timeline__pname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.orders-timeline__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.orders-timeline__title:hover { color: var(--color-signal-text, var(--color-signal)); text-decoration: underline; }
+.orders-timeline__muted { color: var(--color-text-faint); font-size: 11.5px; }
+.orders-timeline__status { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 20px; background: var(--color-void-raised); border: 1px solid var(--color-line); }
+.orders-timeline__prio { font-size: 11px; font-weight: 600; }
+.orders-timeline__prio.is-urgente { color: var(--color-danger); }
+.orders-timeline__prio.is-alta { color: var(--color-warning, #E8963C); }
+.orders-timeline__cell .wf-badge { margin-left: 0; }
+.orders-timeline__cal { position: relative; z-index: 1; flex: none; height: 100%; }
+
+/* barras */
+.orders-timeline__bar {
+  position: absolute; top: 5px; bottom: 5px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: 0 1px; overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.35); border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; line-height: 1; letter-spacing: -0.2px;
+}
+.orders-timeline__bar:hover { filter: brightness(1.12); z-index: 2; }
+.orders-timeline__bar.is-done { opacity: 0.55; }
+.orders-timeline__bar.is-late { outline: 2px solid var(--color-danger); outline-offset: -1px; }
+.orders-timeline__bar.is-clip-left { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-style: dashed; }
+.orders-timeline__bar.is-clip-right { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right-style: dashed; }
+.orders-timeline__barlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; pointer-events: none; }
+.orders-timeline__nodate, .orders-timeline__offrange {
+  position: sticky; left: calc(var(--tl-sticky-w, var(--tl-left-w)) + 10px); top: 7px; display: inline-flex; align-items: center; height: 22px; padding: 0 10px; cursor: pointer;
+  font-size: 11px; color: var(--color-text-faint); background: var(--color-void); border: 1px dashed var(--color-line-bright); border-radius: 20px;
+}
+.orders-timeline__nodate:hover, .orders-timeline__offrange:hover { color: var(--color-text-hi); border-color: var(--color-signal-dim); }
+.orders-timeline__cal > .orders-timeline__nodate, .orders-timeline__cal > .orders-timeline__offrange { left: 10px; position: relative; top: 7px; margin-left: 10px; }
+.orders-timeline__legend { margin: 0; font-size: 11.5px; color: var(--color-text-faint); }
+.orders-timeline__lg { display: inline-block; width: 18px; height: 6px; margin: 0 4px 1px 8px; border-radius: 2px; vertical-align: middle; }
+.orders-timeline__lg--purchase { background: #f59e0b; }
+.orders-timeline__lg--production { background: #10b981; }
+@media (max-width: 860px) { .orders-timeline__range { display: none; } .orders-timeline__scroll { max-height: calc(100vh - 300px); } }
+
+/* Muchas columnas elegidas (`.is-wide`, lo decide el JS al pintar): solo Proyecto y Descripción quedan fijas a la izquierda; el resto
+   de columnas se desplaza con la rejilla, para no comerse la pantalla. `display: contents` deja las celdas como hijos de la fila. */
+.orders-timeline__widehint { display: none; }
+.orders-timeline__scroll.is-wide ~ .orders-timeline__legend .orders-timeline__widehint { display: inline; }
+.orders-timeline__scroll.is-wide .orders-timeline__corner, .orders-timeline__scroll.is-wide .orders-timeline__left { display: contents; }
+.orders-timeline__scroll.is-wide .orders-timeline__hl:nth-child(-n+2),
+.orders-timeline__scroll.is-wide .orders-timeline__cell--project,
+.orders-timeline__scroll.is-wide .orders-timeline__cell--title { position: sticky; z-index: 7; background-color: var(--color-panel); }
+.orders-timeline__scroll.is-wide .orders-timeline__cell--project, .orders-timeline__scroll.is-wide .orders-timeline__cell--title { z-index: 3; background-color: var(--color-void); }
+.orders-timeline__scroll.is-wide .orders-timeline__hl:nth-child(1), .orders-timeline__scroll.is-wide .orders-timeline__cell--project { left: 0; }
+.orders-timeline__scroll.is-wide .orders-timeline__hl:nth-child(2), .orders-timeline__scroll.is-wide .orders-timeline__cell--title { left: var(--tl-fixed-w); border-right: 2px solid var(--color-line-bright); }
+.orders-timeline__scroll.is-wide .orders-timeline__row:hover .orders-timeline__cell--title { background-color: var(--color-void-raised); }

@@ -5,6 +5,10 @@
 //  · Cabecera: BÚSQUEDA instantánea (<input type="search">, con lupa y botón × para limpiar; filtra mientras se
 //    teclea por cualquier fragmento del Nº de pedido, del Código Proveedor, de la tarea o del proyecto) y cinco
 //    desplegables combinables: Comercial · Proyecto · Proveedor · Sector · Responsable.
+//  · v88: conmutador «📋 Tabla | 📅 Cronograma» (se guarda en localStorage, `chusy_orders_view_mode`) y, encima del
+//    listado, una fila de CHIPS de proveedor (Todos · cada proveedor con su contador · Sin proveedor) que filtra al instante y
+//    se sincroniza en los dos sentidos con el desplegable «Proveedor». El Cronograma (tabla fija + rejilla de semanas ISO)
+//    se pinta en views/orders-timeline.js.
 //  · Tres pestañas con su contador: «Pendientes de pedir», «Pedidos realizados» y «Completados / Recibidos».
 //  · Cada fila: tarea (con el check que completa la etapa y dispara el relevo a Recepción/Fabricación), proyecto (código
 //    YYXXX), Comercial, responsable de Compra, Proveedor / Nº de pedido / Código Proveedor EDITABLES EN LÍNEA (se guardan
@@ -26,9 +30,10 @@ import { SECTOR_FILTER_OPTIONS, normalizeSectorFilter } from "../project-propert
 import { suggestionKey } from "../offers.js";
 import {
   ORDER_TABS, emptyOrdersState, applyOrderFilters, hasActiveOrderFilters, orderFilterOptions, groupOrdersByStatus, sortOrderRows,
-  countOrdersByStatus,
+  countOrdersByStatus, ORDERS_VIEW_MODES, loadViewMode, saveViewMode, SUPPLIER_NONE, supplierChips, supplierChipActive, emptyTimelineState,
 } from "../orders.js";
 import { PURCHASE_TRACE_MAX } from "../workflow-stages.js";
+import { renderOrdersTimeline, disposeOrdersTimeline } from "./orders-timeline.js";
 
 /** Columnas de la tabla (el ancho se puede cambiar arrastrando el borde; se guarda por persona bajo el ámbito «orders»). */
 const ORDER_COLUMNS = [
@@ -69,6 +74,8 @@ export function renderOrdersView(container, opts) {
   const state = { ...emptyOrdersState(), ...(opts.state || {}) };
   state.filters = { ...emptyOrdersState().filters, ...(state.filters || {}) };
   state.sort = { ...emptyOrdersState().sort, ...(state.sort || {}) };
+  state.timeline = { ...emptyTimelineState(), ...(state.timeline || {}) };
+  let viewMode = loadViewMode(); // v88: 'table' | 'timeline' (localStorage)
 
   // ---- qué tenía el foco antes de repintar (para devolvérselo después)
   const active = document.activeElement;
@@ -94,7 +101,8 @@ export function renderOrdersView(container, opts) {
   const select = (id, label, optsHtml) => `<label class="orders-select"><span class="orders-select__label">${label}</span><select class="field__select" id="${id}">${optsHtml}</select></label>`;
   const opt = (value, label, selected) => `<option value="${escapeHtml(value)}"${selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
   const commercials = optionList(options.commercials, f.commercial, (v) => v);
-  const suppliers = optionList(options.suppliers, f.supplier, (v) => v);
+  const suppliers = optionList(options.suppliers, f.supplier === SUPPLIER_NONE ? "" : f.supplier, (v) => v);
+  const hasNoSupplierRows = rows.some((r) => !r.supplier);
 
   container.innerHTML = `
     <div class="orders-view">
@@ -107,13 +115,15 @@ export function renderOrdersView(container, opts) {
         <div class="orders-selects">
           ${select("of-commercial", "Comercial", opt("", "Todos", !f.commercial) + commercials.map((c) => opt(c, c, suggestionKey(c) === suggestionKey(f.commercial) && !!f.commercial)).join(""))}
           ${select("of-project", "Proyecto", opt("", "Todos", !f.projectId) + options.projects.map((p) => opt(p.id, `${p.code ? p.code + " · " : ""}${p.name}`, p.id === f.projectId)).join(""))}
-          ${select("of-supplier", "Proveedor", opt("", "Todos", !f.supplier) + suppliers.map((s) => opt(s, s, suggestionKey(s) === suggestionKey(f.supplier) && !!f.supplier)).join(""))}
+          ${select("of-supplier", "Proveedor", opt("", "Todos", !f.supplier) + suppliers.map((s) => opt(s, s, suggestionKey(s) === suggestionKey(f.supplier) && !!f.supplier && f.supplier !== SUPPLIER_NONE)).join("") + (hasNoSupplierRows || f.supplier === SUPPLIER_NONE ? opt(SUPPLIER_NONE, "Sin proveedor", f.supplier === SUPPLIER_NONE) : ""))}
           ${select("of-sector", "Sector", SECTOR_FILTER_OPTIONS.map((o) => opt(o.key, o.label, o.key === normalizeSectorFilter(f.sector))).join(""))}
           ${select("of-assignee", "Responsable", opt("", "Todos", !f.assigneeId) + optionList(options.assignees, f.assigneeId, (a) => a.uid).map((a) => (typeof a === "string" ? opt(a, "Responsable", true) : opt(a.uid, a.name, a.uid === f.assigneeId))).join(""))}
           <button type="button" class="filterbar__clear" id="of-clear" hidden>✕ Limpiar filtros</button>
         </div>
+        <div class="orders-viewtoggle" id="orders-viewtoggle" role="group" aria-label="Modo de vista">${ORDERS_VIEW_MODES.map((m) => `<button type="button" class="orders-viewtoggle__btn${m.key === viewMode ? " is-active" : ""}" data-view-mode="${m.key}" aria-pressed="${m.key === viewMode}">${m.icon} ${m.label}</button>`).join("")}</div>
       </div>
       <div class="orders-tabs" id="orders-tabs" role="tablist"></div>
+      <div class="orders-chips" id="orders-chips" role="group" aria-label="Filtrar por proveedor"></div>
       <div class="orders-results" id="orders-results"></div>
     </div>`;
 
@@ -135,12 +145,15 @@ export function renderOrdersView(container, opts) {
     ).join("");
     $("#orders-tabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.tab = b.dataset.tab; notify(); paintResults(); }));
 
+    paintChips(tab);
+
     const sort = state.sort.column ? state.sort : { column: "deadline", direction: tab === "done" ? "desc" : "asc" };
     const sorted = sortOrderRows(grouped[tab], sort.column, sort.direction);
     const shown = sorted.slice(0, ORDERS_RENDER_LIMIT);
     const box = $("#orders-results");
 
     if (!sorted.length) {
+      disposeOrdersTimeline();
       // Si la búsqueda/los filtros dejan este bloque vacío pero hay resultados en otro, se avisa con un atajo.
       const others = ORDER_TABS.filter((t) => t.key !== tab && counts[t.key] > 0);
       const filtering = hasActiveOrderFilters(state.filters);
@@ -151,6 +164,19 @@ export function renderOrdersView(container, opts) {
       box.querySelectorAll("[data-goto-tab]").forEach((b) => b.addEventListener("click", () => { state.tab = b.dataset.gotoTab; notify(); paintResults(); }));
       return;
     }
+
+    if (viewMode === "timeline") {
+      renderOrdersTimeline(box, {
+        rows: grouped[tab], allRows: rows, timeline: state.timeline,
+        onTimelineChange: (t) => { state.timeline = t; notify(); },
+        onOpenTask,
+        onContextMenu: (x, y, r) => openTaskContextMenu(x, y, r.task, onOpenTask, currentUser, teamMembers, projects),
+        teamMembers, workCalendar: opts.workCalendar, offersProjectId: opts.offersProjectId,
+        truncated: grouped[tab].length > ORDERS_RENDER_LIMIT ? `Mostrando ${ORDERS_RENDER_LIMIT} de ${grouped[tab].length}. Usa la búsqueda, los chips o los filtros para acotar.` : "",
+      });
+      return;
+    }
+    disposeOrdersTimeline();
 
     const header = `<div class="list-table__header" style="grid-template-columns:${gridTemplate};">${columnHeaderCellsHtml(visible, widthOf, state.sort.column ? state.sort : null).replace(/ draggable="true"/g, "")}<span></span></div>`;
     const memberById = new Map((teamMembers || []).map((m) => [m.uid, m]));
@@ -238,7 +264,28 @@ export function renderOrdersView(container, opts) {
     });
   }
 
-  function notify() { if (typeof onStateChange === "function") onStateChange({ tab: state.tab, filters: { ...state.filters }, sort: { ...state.sort } }); }
+  // ---- v88: chips de proveedor. Cuentan lo que saldría al pulsarlos: las filas de ESTE bloque con el resto de filtros aplicados.
+  function paintChips(tab) {
+    const chipsBox = $("#orders-chips");
+    const scope = applyOrderFilters(rows, { ...state.filters, supplier: "" }).filter((r) => r.status === tab);
+    const chips = supplierChips(scope);
+    const cur = state.filters.supplier || "";
+    const items = [{ value: "", label: "Todos", count: chips.all }, ...chips.suppliers.map((s) => ({ value: s.name, label: s.name, count: s.count }))];
+    if (chips.none > 0 || cur === SUPPLIER_NONE) items.push({ value: SUPPLIER_NONE, label: "Sin proveedor", count: chips.none });
+    if (cur && !items.some((i) => supplierChipActive(cur, i.value))) items.push({ value: cur, label: cur, count: 0 }); // el elegido sigue visible aunque ya no tenga pedidos aquí
+    chipsBox.hidden = items.length === 1 && chips.all === 0 && !cur;
+    chipsBox.innerHTML = items
+      .map((i) => `<button type="button" class="orders-chip${supplierChipActive(cur, i.value) ? " is-active" : ""}${i.value === SUPPLIER_NONE ? " orders-chip--none" : ""}" data-supplier="${escapeHtml(i.value)}" aria-pressed="${supplierChipActive(cur, i.value)}" title="${escapeHtml(i.label)}"><span class="orders-chip__name">${escapeHtml(i.label)}</span><span class="orders-chip__count">(${i.count})</span></button>`)
+      .join("");
+    chipsBox.querySelectorAll("[data-supplier]").forEach((b) => b.addEventListener("click", () => {
+      const value = b.dataset.supplier;
+      const sel = $("#of-supplier");
+      if (sel) sel.value = value; // bidireccional: el desplegable «Proveedor» sigue al chip
+      setFilter({ supplier: value });
+    }));
+  }
+
+  function notify() { if (typeof onStateChange === "function") onStateChange({ tab: state.tab, filters: { ...state.filters }, sort: { ...state.sort }, timeline: { ...state.timeline } }); }
   function setFilter(patch) { state.filters = { ...state.filters, ...patch }; notify(); paintResults(); }
 
   // ---- cabecera: búsqueda instantánea (en cada pulsación, sin retardo) y desplegables
@@ -248,7 +295,12 @@ export function renderOrdersView(container, opts) {
   $("#orders-search-clear").addEventListener("click", () => { searchInput.value = ""; setFilter({ search: "" }); searchInput.focus(); });
   $("#of-commercial").addEventListener("change", (e) => setFilter({ commercial: e.target.value }));
   $("#of-project").addEventListener("change", (e) => setFilter({ projectId: e.target.value }));
-  $("#of-supplier").addEventListener("change", (e) => setFilter({ supplier: e.target.value }));
+  $("#of-supplier").addEventListener("change", (e) => setFilter({ supplier: e.target.value })); // paintResults repinta los chips con el nuevo estado
+  container.querySelectorAll("[data-view-mode]").forEach((b) => b.addEventListener("click", () => {
+    viewMode = saveViewMode(b.dataset.viewMode);
+    container.querySelectorAll("[data-view-mode]").forEach((x) => { const on = x.dataset.viewMode === viewMode; x.classList.toggle("is-active", on); x.setAttribute("aria-pressed", String(on)); });
+    paintResults();
+  }));
   $("#of-sector").addEventListener("change", (e) => setFilter({ sector: e.target.value }));
   $("#of-assignee").addEventListener("change", (e) => setFilter({ assigneeId: e.target.value }));
   $("#of-clear").addEventListener("click", () => {

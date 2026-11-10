@@ -338,12 +338,13 @@ globalThis.__fb = { collections: {}, sets: [], hooks: {} };
 // ---------------------------------------------------------------- 6) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=87", (idx.match(/css\/[\w-]+\.css\?v=87/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en una versión anterior", !/\.css\?v=(?!87)\d+/.test(idx));
-  check("package.json y package-lock.json: 87.0.0", JSON.parse(read("package.json")).version === "87.0.0" && JSON.parse(read("package-lock.json")).version === "87.0.0");
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 87; la entrega actual lo fija en v88-orders-timeline.test.mjs)", new Set([...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => m[1])).size + ":" + (idx.match(/css\/[\w-]+\.css\?v=\d+/g) || []).length, "1:14");
+  check("index.html: ningún <link> se ha quedado en una versión anterior a la 87", [...idx.matchAll(/\.css\?v=(\d+)/g)].every((m) => Number(m[1]) >= 87));
+  check("package.json y package-lock.json: versión ≥ 87", parseInt(JSON.parse(read("package.json")).version, 10) >= 87 && parseInt(JSON.parse(read("package-lock.json")).version, 10) >= 87);
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: entrada 87 la primera, mayor que la 86, y habla de etapas e iconos de coche", r.id === 87 && r.id > RELEASES[1].id && /etapas/i.test(JSON.stringify(r)) && /coche/i.test(JSON.stringify(r)) && r.items.length >= 3, r && r.id);
+  const r = RELEASES.find((x) => x.id === 87);
+  const r86 = RELEASES.find((x) => x.id === 86);
+  check("Novedades: entrada 87, mayor que la 86, y habla de etapas e iconos de coche", !!r && r.id > r86.id && /etapas/i.test(JSON.stringify(r)) && /coche/i.test(JSON.stringify(r)) && r.items.length >= 3, r && r.id);
   const readme = read("README.md");
   check("README: historial v86 → v87 y la migración de iconos documentada", /v86 → v87 \(Chusy-87\.zip\)/.test(readme) && /migrateAutomotiveProjectIcons/.test(readme) && /AUTOMOTIVE_ICONS/.test(readme));
 }

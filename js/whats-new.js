@@ -25,6 +25,17 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 88,
+    date: "2026-11-10",
+    title: "Cronograma de Pedidos, con filtro rápido por proveedor",
+    items: [
+      "En «Pedidos» tienes ahora un conmutador «📋 Tabla | 📅 Cronograma» (se acuerda de lo que elijas). La Tabla sigue como siempre; el Cronograma pone a la izquierda las columnas del pedido y a la derecha un calendario por semanas (S46, S47…) y días, con una barra por pedido que lleva dentro su Nº de pedido.",
+      "Encima del listado hay una fila de chips con cada proveedor y cuántos pedidos tiene (más «Sin proveedor»): un clic filtra al momento, en la Tabla y en el Cronograma, y va a la par con el desplegable «Proveedor».",
+      "Con «⚙️ Columnas» eliges qué ver a la izquierda del Cronograma (Proveedor, Nº Pedido, Cód. Proveedor, Etapa, Prioridad, Responsable, Comercial, Sector, Fecha Fin y los campos personalizados de tus proyectos). Proyecto, con su color, y Descripción siempre se ven.",
+      "Los fines de semana y festivos salen sombreados, hoy va resaltado, puedes ordenar por Proyecto, Fecha o Proveedor, moverte con ◀ Anterior / Hoy / Siguiente ▶, elegir 4, 8 o 12 semanas (o todo el rango) y arrastrar el calendario con el ratón. Los pedidos sin fecha aparecen igualmente, con un botón para asignársela.",
+    ],
+  },
+  {
     id: 87,
     date: "2026-11-09",
     title: "Iconos de coches para Automoción y arreglo del «Flujo de Etapas»",

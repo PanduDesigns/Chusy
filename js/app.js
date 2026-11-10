@@ -1080,6 +1080,7 @@ function renderShell() {
       rows: orderRows, state: ordersViewState,
       onStateChange: (st) => { ordersViewState = st; }, // solo guarda: la vista repinta por su cuenta (no se pierde el foco al buscar)
       onOpenTask: openTask, currentUser, teamMembers, projects,
+      workCalendar: getWorkCalendar(), offersProjectId: (getOffersProject() || {}).id, // v88: festivos sombreados del Cronograma
     });
     return;
   }
