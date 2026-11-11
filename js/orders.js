@@ -27,8 +27,13 @@
 // (tabla fija a la izquierda + rejilla de días y semanas ISO a la derecha). Aquí viven los chips de proveedor (con
 // contadores), las columnas elegibles del cronograma (y su persistencia), el rango de fechas de cada pedido, las semanas ISO,
 // la ventana temporal con sus zooms, la ordenación y el texto del tooltip. La pantalla está en views/orders-timeline.js.
+//
+// v89 · CRONOGRAMA INTERACTIVO (también puro, tras las columnas y tras las fechas de un pedido): anchos de columna (límites,
+// normalización y persistencia), preferencias POR USUARIO Y NAVEGADOR (columnas, anchos, modo de vista, escala y orden: clave
+// `<base>_<uid>` con lectura de reserva en la clave general de la v88) y el arrastre de las barras (cálculo del nuevo rango al
+// mover o estirar, y el parche de fechas coherente con orderDateRange: etapas Compra/Recepción o fechas de la tarea).
 // ============================================================================
-import { taskWorkflow, purchaseTrace, PURCHASE_TRACE_MAX, STAGE_TIMELINE_COLORS, STAGE_TIMELINE_LABELS } from "./workflow-stages.js";
+import { taskWorkflow, purchaseTrace, PURCHASE_TRACE_MAX, STAGE_TIMELINE_COLORS, STAGE_TIMELINE_LABELS, updateStage, activeFieldsFor, syncActiveStageDates } from "./workflow-stages.js";
 import { dateKey, parseDateKey, isWeekend, getHoliday, formatDayMonth } from "./work-calendar.js";
 import { collectSuggestions, cleanSuggestionText, suggestionKey } from "./offers.js";
 import { projectSectorKey, normalizeSectorFilter, SECTOR_FILTER_ALL } from "./project-properties.js";
@@ -465,6 +470,161 @@ export function customFieldValue(row, key) {
   return clean(typeof v === "object" ? "" : v);
 }
 
+// ------------------------------------------------------------------ v89 · preferencias por usuario y navegador
+
+export const ORDERS_TIMELINE_WIDTHS_KEY = "chusy_orders_timeline_col_widths";
+export const ORDERS_TIMELINE_SCALE_KEY = "chusy_orders_timeline_scale";
+export const ORDERS_TIMELINE_SORT_KEY = "chusy_orders_timeline_sort";
+
+const uidOf = (userId) => (typeof userId === "string" ? userId.trim() : "");
+
+/** `base_<uid>` si hay usuario; la clave general (`base`) si no. */
+export function userScopedKey(baseKey, userId) {
+  const uid = uidOf(userId);
+  return uid ? `${baseKey}_${uid}` : baseKey;
+}
+
+/** Lee el valor de la clave del usuario y, si no hay, el de la clave general del navegador (lo guardado en la v88). null si no hay nada. */
+function readScoped(baseKey, userId, storage) {
+  const st = storageOf(storage);
+  if (!st) return null;
+  if (uidOf(userId)) {
+    const own = st.getItem(userScopedKey(baseKey, userId));
+    if (own != null) return own;
+  }
+  return st.getItem(baseKey);
+}
+
+/** Escribe SOLO en la clave del usuario (o en la general si no hay usuario): lo de una persona no pisa lo de otra. */
+function writeScoped(baseKey, userId, value, storage) {
+  const st = storageOf(storage);
+  if (st) st.setItem(userScopedKey(baseKey, userId), value);
+}
+
+/** Columnas visibles de este usuario en este navegador (con reserva en la clave general; las de por defecto si no hay nada). */
+export function loadOrdersTimelineColumns(userId, storage) {
+  try {
+    const raw = readScoped(TIMELINE_COLUMNS_KEY, userId, storage);
+    return raw == null ? [...TIMELINE_DEFAULT_COLUMNS] : normalizeTimelineColumns(raw);
+  } catch (e) {
+    return [...TIMELINE_DEFAULT_COLUMNS];
+  }
+}
+
+/** Guarda las columnas (normalizadas) para este usuario y las devuelve; si localStorage falla, las devuelve igual. */
+export function saveOrdersTimelineColumns(columns, userId, storage) {
+  const cols = normalizeTimelineColumns(columns);
+  try { writeScoped(TIMELINE_COLUMNS_KEY, userId, JSON.stringify(cols), storage); } catch (e) { /* localStorage no disponible */ }
+  return cols;
+}
+
+/** Modo de vista (Tabla | Cronograma) de este usuario, con reserva en la clave general. */
+export function loadOrdersViewMode(userId, storage) {
+  try { return normalizeViewMode(readScoped(ORDERS_VIEW_MODE_KEY, userId, storage)); } catch (e) { return "table"; }
+}
+
+export function saveOrdersViewMode(value, userId, storage) {
+  const mode = normalizeViewMode(value);
+  try { writeScoped(ORDERS_VIEW_MODE_KEY, userId, mode, storage); } catch (e) { /* localStorage no disponible */ }
+  return mode;
+}
+
+/** Escala (zoom) y orden del cronograma de este usuario: { zoom, sort }, con los valores por defecto si no hay nada o están corruptos. */
+export function loadOrdersTimelinePrefs(userId, storage) {
+  let zoom = null, sort = null;
+  try { zoom = readScoped(ORDERS_TIMELINE_SCALE_KEY, userId, storage); } catch (e) { /* sin localStorage */ }
+  try { sort = readScoped(ORDERS_TIMELINE_SORT_KEY, userId, storage); } catch (e) { /* sin localStorage */ }
+  return { zoom: normalizeTimelineZoom(zoom), sort: normalizeTimelineSort(sort) };
+}
+
+export function saveOrdersTimelinePrefs(prefs, userId, storage) {
+  const out = { zoom: normalizeTimelineZoom(prefs && prefs.zoom), sort: normalizeTimelineSort(prefs && prefs.sort) };
+  try { writeScoped(ORDERS_TIMELINE_SCALE_KEY, userId, out.zoom, storage); } catch (e) { /* localStorage no disponible */ }
+  try { writeScoped(ORDERS_TIMELINE_SORT_KEY, userId, out.sort, storage); } catch (e) { /* localStorage no disponible */ }
+  return out;
+}
+
+// ------------------------------------------------------------------ v89 · anchos de columna
+
+export const TIMELINE_COL_MIN_W = 60;
+export const TIMELINE_COL_MAX_W = 520;
+/** Anchos por defecto de las dos columnas fijas. */
+export const TIMELINE_FIXED_COLUMN_WIDTHS = Object.freeze({ project: 190, title: 240 });
+const WIDTH_KEYS = Object.freeze(["project", "title", ...STANDARD_KEYS]);
+
+/** Un ancho en px → entero dentro de [60, 520]; null si no es un número. */
+export function clampTimelineColumnWidth(value) {
+  if (typeof value === "boolean" || value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(TIMELINE_COL_MAX_W, Math.max(TIMELINE_COL_MIN_W, Math.round(n)));
+}
+
+/** El ancho por defecto de una columna (fija, estándar o personalizada), o null si la clave no es de ninguna. */
+export function defaultTimelineColumnWidth(key) {
+  if (key in TIMELINE_FIXED_COLUMN_WIDTHS) return TIMELINE_FIXED_COLUMN_WIDTHS[key];
+  const def = TIMELINE_COLUMN_DEFS.find((c) => c.key === key);
+  if (def) return def.width;
+  return typeof key === "string" && key.startsWith(CUSTOM_PREFIX) && key.length > CUSTOM_PREFIX.length ? TIMELINE_CUSTOM_WIDTH : null;
+}
+
+const validWidthKey = (k) => typeof k === "string" && (WIDTH_KEYS.includes(k) || (k.startsWith(CUSTOM_PREFIX) && k.length > CUSTOM_PREFIX.length && k.length <= 90));
+
+/**
+ * El mapa de anchos guardado (objeto, o su texto JSON) → { clave: px } limpio: solo claves conocidas (Proyecto, Descripción,
+ * estándar y `cf:nombre`), valores numéricos recortados a 60–520 px. Cualquier otra cosa → {}.
+ */
+export function normalizeOrdersTimelineColumnWidths(raw) {
+  let obj = raw;
+  if (typeof raw === "string") { try { obj = JSON.parse(raw); } catch (e) { obj = null; } }
+  const out = {};
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return out;
+  let custom = 0;
+  for (const [k, v] of Object.entries(obj)) {
+    if (!validWidthKey(k)) continue;
+    const w = clampTimelineColumnWidth(v);
+    if (w === null) continue;
+    if (k.startsWith(CUSTOM_PREFIX)) { if (custom >= TIMELINE_MAX_CUSTOM_COLUMNS) continue; custom++; }
+    out[k] = w;
+  }
+  return out;
+}
+
+/** Anchos de este usuario en este navegador ({} = todos por defecto), con reserva en la clave general. */
+export function loadOrdersTimelineColumnWidths(userId, storage) {
+  try { return normalizeOrdersTimelineColumnWidths(readScoped(ORDERS_TIMELINE_WIDTHS_KEY, userId, storage)); } catch (e) { return {}; }
+}
+
+/** Guarda los anchos (normalizados) para este usuario y los devuelve; si localStorage falla, los devuelve igual. */
+export function saveOrdersTimelineColumnWidths(widthsMap, userId, storage) {
+  const widths = normalizeOrdersTimelineColumnWidths(widthsMap);
+  try { writeScoped(ORDERS_TIMELINE_WIDTHS_KEY, userId, JSON.stringify(widths), storage); } catch (e) { /* localStorage no disponible */ }
+  return widths;
+}
+
+/** Copia del mapa con la columna al ancho dado (recortado); si queda igual al de por defecto, se quita del mapa. */
+export function setTimelineColumnWidth(widths, key, px) {
+  const out = { ...normalizeOrdersTimelineColumnWidths(widths) };
+  const w = clampTimelineColumnWidth(px);
+  if (!validWidthKey(key) || w === null || w === defaultTimelineColumnWidth(key)) delete out[key];
+  else out[key] = w;
+  return out;
+}
+
+/** Copia del mapa sin esa columna (vuelve a su ancho por defecto); sin `key`, sin ninguna (restablecer todos). */
+export function resetTimelineColumnWidths(widths, key) {
+  if (key === undefined || key === null) return {};
+  const out = { ...normalizeOrdersTimelineColumnWidths(widths) };
+  delete out[key];
+  return out;
+}
+
+/** Las columnas con su ancho personalizado aplicado (las que no tienen, con el suyo). No toca el array original. */
+export function applyTimelineColumnWidths(cols, widths) {
+  const map = normalizeOrdersTimelineColumnWidths(widths);
+  return (cols || []).map((c) => ({ ...c, width: map[c.key] !== undefined ? map[c.key] : c.width }));
+}
+
 // ------------------------------------------------------------------ fechas de un pedido
 
 const MS_DAY = 86400000;
@@ -550,6 +710,113 @@ export function describeOrderBar(row, range) {
     lines.push(`${seg.label}: ${a && b && a !== b ? `${a}–${b}` : a || b}`);
   }
   return lines.join("\n");
+}
+
+// ------------------------------------------------------------------ v89 · arrastrar y estirar la barra de un pedido
+
+/** Los tres gestos: desplazar la barra entera, estirar el borde izquierdo (inicio) o el derecho (fin). */
+export const ORDER_BAR_DRAG_MODES = Object.freeze(["move", "resize-left", "resize-right"]);
+
+/** El tramo que acaba el rango (el último con `dueDate` = fin del pedido): al que estira el borde derecho. null si no hay tramos. */
+export function orderLastSegment(range) {
+  const segs = (range && range.segments) || [];
+  return [...segs].reverse().find((s) => s.dueDate === range.end) || segs[segs.length - 1] || null;
+}
+
+/**
+ * El rango NUEVO de un pedido tras arrastrar su barra `dayDelta` días (negativo = hacia atrás):
+ *   move          desplaza inicio y fin lo mismo (la duración se conserva);
+ *   resize-left   mueve solo el inicio, sin pasar del fin (con etapas, sin pasar del fin de la PRIMERA etapa);
+ *   resize-right  mueve solo el fin, sin quedar antes del inicio (con etapas, sin quedar antes del inicio de la ÚLTIMA etapa).
+ * → { start, end } o null si no cambia nada (o el rango/gesto no son válidos). Es lo mismo que luego escribe el parche.
+ */
+export function computeOrderBarDrag(range, mode, dayDelta) {
+  if (!range || !range.start || !range.end || !ORDER_BAR_DRAG_MODES.includes(mode)) return null;
+  const delta = Math.trunc(Number(dayDelta));
+  if (!delta) return null;
+  const stages = range.source === "stages" && (range.segments || []).length > 0;
+  let start = range.start, end = range.end;
+  if (mode === "move") {
+    start = addDaysKey(range.start, delta);
+    end = addDaysKey(range.end, delta);
+  } else if (mode === "resize-left") {
+    const limit = stages ? range.segments[0].dueDate : range.end;
+    start = addDaysKey(range.start, delta);
+    if (start > limit) start = limit;
+  } else {
+    const last = stages ? orderLastSegment(range) : null;
+    const limit = last ? last.startDate : range.start;
+    end = addDaysKey(range.end, delta);
+    if (end < limit) end = limit;
+  }
+  return start === range.start && end === range.end ? null : { start, end };
+}
+
+/** Días naturales que abarca un rango (inclusive): 5 para del 09 al 13. */
+export function orderRangeDays(start, end) {
+  const n = dayDiff(start, end) + 1;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** El texto del aviso flotante durante el arrastre: «09/11 → 13/11 · 5d». */
+export function formatOrderDragRange(start, end) {
+  const dm = (k) => { const d = dateKey(k); return d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : ""; };
+  return `${dm(start)} → ${dm(end)} · ${orderRangeDays(start, end)}d`;
+}
+
+/**
+ * El parche de `updateTask` para dejar el pedido en [newStartISO, newEndISO] de forma coherente con orderDateRange(row):
+ *  · Si el rango sale de las ETAPAS (Compra/Pedido y Recepción/Fabricación con fechas): mover (inicio y fin cambian lo mismo)
+ *    desplaza las fechas de todas esas etapas; si solo cambia el inicio, se ajusta el inicio de la PRIMERA etapa; si solo cambia
+ *    el fin, el fin de la ÚLTIMA. Las etapas que se tocan quedan con las dos fechas escritas. Además se sincronizan
+ *    `startDate`/`dueDate` de la tarea con la etapa activa (como al guardar el modal), solo si cambian.
+ *    → { workflow, [startDate], [dueDate] }
+ *  · Si no (fechas de la propia tarea, solo `dueDate` o ninguna): { startDate, dueDate } más las fechas de la etapa activa
+ *    (syncActiveStageDates, igual que al arrastrar en el Gantt).
+ * → null si las fechas no son válidas o no cambia nada. `offersProjectId` es opcional (las tareas de Ofertas no llevan flujo).
+ */
+export function buildOrderTimelineDatePatch(task, newStartISO, newEndISO, offersProjectId) {
+  const a = dateKey(newStartISO), b = dateKey(newEndISO);
+  if (!task || !a || !b) return null;
+  const start = a <= b ? a : b, end = a <= b ? b : a;
+  const range = orderDateRange({ task }, offersProjectId);
+
+  if (range && range.source === "stages") {
+    const dStart = dayDiff(range.start, start), dEnd = dayDiff(range.end, end);
+    if (!dStart && !dEnd) return null;
+    let wf = taskWorkflow(task, offersProjectId);
+    const segs = range.segments;
+    const set = (seg, s, e) => { wf = updateStage(wf, seg.key, { startDate: s, dueDate: e }); };
+    if (dStart === dEnd) {
+      for (const seg of segs) set(seg, addDaysKey(seg.startDate, dStart), addDaysKey(seg.dueDate, dStart));
+    } else {
+      const first = segs[0], last = orderLastSegment(range);
+      const edit = new Map(); // key → { seg, s, e }
+      const get = (seg) => { if (!edit.has(seg.key)) edit.set(seg.key, { seg, s: seg.startDate, e: seg.dueDate }); return edit.get(seg.key); };
+      if (dStart) { const x = get(first); x.s = start > x.e ? x.e : start; }
+      if (dEnd) { const x = get(last); x.e = end < x.s ? x.s : end; }
+      for (const x of edit.values()) set(x.seg, x.s, x.e);
+    }
+    const patch = { workflow: wf };
+    const active = activeFieldsFor(wf);
+    if (active && active.startDate && dateKey(task.startDate) !== active.startDate) patch.startDate = active.startDate;
+    if (active && active.dueDate && dateKey(task.dueDate) !== active.dueDate) patch.dueDate = active.dueDate;
+    return patch;
+  }
+
+  if (range && range.start === start && range.end === end && dateKey(task.startDate) === start && dateKey(task.dueDate) === end) return null;
+  const base = { startDate: start, dueDate: end };
+  return { ...base, ...syncActiveStageDates(task, base, offersProjectId) };
+}
+
+/** El parche INVERSO de `patch` (para «Deshacer»): los mismos campos con el valor que tenía la tarea antes (null si no tenía). */
+export function buildOrderDatesUndoPatch(task, patch) {
+  const out = {};
+  for (const k of Object.keys(patch || {})) {
+    if (k === "workflow") out.workflow = task && task.workflow ? JSON.parse(JSON.stringify(task.workflow)) : null;
+    else out[k] = (task && dateKey(task[k])) || null;
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ semanas ISO y rejilla de días

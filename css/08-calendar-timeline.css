@@ -455,3 +455,42 @@ body.tl-dragging-bar { user-select: none; }
 .orders-timeline__scroll.is-wide .orders-timeline__hl:nth-child(1), .orders-timeline__scroll.is-wide .orders-timeline__cell--project { left: 0; }
 .orders-timeline__scroll.is-wide .orders-timeline__hl:nth-child(2), .orders-timeline__scroll.is-wide .orders-timeline__cell--title { left: var(--tl-fixed-w); border-right: 2px solid var(--color-line-bright); }
 .orders-timeline__scroll.is-wide .orders-timeline__row:hover .orders-timeline__cell--title { background-color: var(--color-void-raised); }
+
+/* ============================================================================
+   v89 · Cronograma de «Pedidos» interactivo: columnas redimensionables, barras que se mueven/estiran y asignación en «Sin fecha».
+   Colores solo con variables del tema (claro / oscuro / clásico).
+   ============================================================================ */
+
+/* Tirador de ancho en el borde derecho de cada cabecera de columna (6 px). Los anchos viajan en variables --tl-w-N: al arrastrar,
+   cambian en vivo la cabecera y todas las celdas de la columna sin repintar. */
+.orders-timeline__hl { position: relative; }
+.orders-tl-col-resizer {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; width: 6px; cursor: col-resize; touch-action: none;
+}
+.orders-tl-col-resizer:hover, .orders-tl-col-resizer.is-active { background: var(--color-signal-soft); box-shadow: inset -2px 0 0 var(--color-signal); }
+
+/* Barras: el cuerpo se agarra para mover el pedido entero; los tiradores de los extremos cambian el inicio o el fin. */
+.orders-timeline__bar.orders-tl-bar { cursor: grab; }
+.orders-tl-bar.is-dragging { cursor: grabbing; z-index: 5; filter: brightness(1.15); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4); }
+.orders-tl-bar-handle { position: absolute; top: 0; bottom: 0; z-index: 2; width: 8px; cursor: ew-resize; }
+.orders-tl-bar-handle.handle-left { left: 0; }
+.orders-tl-bar-handle.handle-right { right: 0; }
+.orders-tl-bar-handle::after {
+  content: ""; position: absolute; top: 25%; bottom: 25%; left: 3px; width: 2px; border-radius: 1px; background: currentColor; opacity: 0;
+}
+.orders-tl-bar:hover .orders-tl-bar-handle::after, .orders-tl-bar.is-dragging .orders-tl-bar-handle::after { opacity: 0.55; }
+.orders-tl-bar-handle:hover { background: rgba(0, 0, 0, 0.18); }
+
+/* Pedidos «Sin fecha»: un clic en un día (o arrastrar varios) les asigna esa fecha o rango. */
+.orders-tl-assign { cursor: crosshair; }
+.orders-tl-assign-band {
+  position: absolute; top: 5px; bottom: 5px; z-index: 2; box-sizing: border-box; pointer-events: none;
+  background: var(--color-signal-soft); border: 1px dashed var(--color-signal); border-radius: 4px;
+}
+
+/* Aviso flotante con el rango («09/11 → 13/11 · 5d») mientras se arrastra, como el del Gantt de proyectos. */
+.orders-tl-drag-tip {
+  position: fixed; transform: translate(-50%, -100%); z-index: 200; pointer-events: none; white-space: nowrap;
+  background: var(--color-panel-raised); border: 1px solid var(--color-line-bright); border-radius: var(--radius-sm); padding: 3px 8px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-hi); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}

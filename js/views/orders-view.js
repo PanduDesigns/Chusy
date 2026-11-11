@@ -9,6 +9,8 @@
 //    listado, una fila de CHIPS de proveedor (Todos · cada proveedor con su contador · Sin proveedor) que filtra al instante y
 //    se sincroniza en los dos sentidos con el desplegable «Proveedor». El Cronograma (tabla fija + rejilla de semanas ISO)
 //    se pinta en views/orders-timeline.js.
+//  · v89: el Cronograma es interactivo (columnas redimensionables, barras que se arrastran para cambiar fechas) y recuerda, por
+//    usuario y navegador, modo de vista, columnas, anchos, escala y orden (ver orders.js y orders-timeline.js).
 //  · Tres pestañas con su contador: «Pendientes de pedir», «Pedidos realizados» y «Completados / Recibidos».
 //  · Cada fila: tarea (con el check que completa la etapa y dispara el relevo a Recepción/Fabricación), proyecto (código
 //    YYXXX), Comercial, responsable de Compra, Proveedor / Nº de pedido / Código Proveedor EDITABLES EN LÍNEA (se guardan
@@ -30,7 +32,8 @@ import { SECTOR_FILTER_OPTIONS, normalizeSectorFilter } from "../project-propert
 import { suggestionKey } from "../offers.js";
 import {
   ORDER_TABS, emptyOrdersState, applyOrderFilters, hasActiveOrderFilters, orderFilterOptions, groupOrdersByStatus, sortOrderRows,
-  countOrdersByStatus, ORDERS_VIEW_MODES, loadViewMode, saveViewMode, SUPPLIER_NONE, supplierChips, supplierChipActive, emptyTimelineState,
+  countOrdersByStatus, ORDERS_VIEW_MODES, loadOrdersViewMode, saveOrdersViewMode, loadOrdersTimelinePrefs, SUPPLIER_NONE, supplierChips, supplierChipActive,
+  emptyTimelineState,
 } from "../orders.js";
 import { PURCHASE_TRACE_MAX } from "../workflow-stages.js";
 import { renderOrdersTimeline, disposeOrdersTimeline } from "./orders-timeline.js";
@@ -75,7 +78,15 @@ export function renderOrdersView(container, opts) {
   state.filters = { ...emptyOrdersState().filters, ...(state.filters || {}) };
   state.sort = { ...emptyOrdersState().sort, ...(state.sort || {}) };
   state.timeline = { ...emptyTimelineState(), ...(state.timeline || {}) };
-  let viewMode = loadViewMode(); // v88: 'table' | 'timeline' (localStorage)
+  // v89: modo de vista, escala y orden del cronograma se guardan por usuario y navegador (localStorage, claves con el uid; con
+  // reserva en la clave general de la v88). El estado de sesión manda; si aún está en los valores de arranque, entran los guardados.
+  const userId = (currentUser && currentUser.uid) || null;
+  const savedPrefs = loadOrdersTimelinePrefs(userId);
+  const startTl = emptyTimelineState();
+  if (state.timeline.zoom === startTl.zoom) state.timeline.zoom = savedPrefs.zoom;
+  if (state.timeline.sort === startTl.sort) state.timeline.sort = savedPrefs.sort;
+  let viewMode = loadOrdersViewMode(userId); // 'table' | 'timeline'
+
 
   // ---- qué tenía el foco antes de repintar (para devolvérselo después)
   const active = document.activeElement;
@@ -169,7 +180,7 @@ export function renderOrdersView(container, opts) {
       renderOrdersTimeline(box, {
         rows: grouped[tab], allRows: rows, timeline: state.timeline,
         onTimelineChange: (t) => { state.timeline = t; notify(); },
-        onOpenTask,
+        onOpenTask, userId, onDatesChange: opts.onDatesChange,
         onContextMenu: (x, y, r) => openTaskContextMenu(x, y, r.task, onOpenTask, currentUser, teamMembers, projects),
         teamMembers, workCalendar: opts.workCalendar, offersProjectId: opts.offersProjectId,
         truncated: grouped[tab].length > ORDERS_RENDER_LIMIT ? `Mostrando ${ORDERS_RENDER_LIMIT} de ${grouped[tab].length}. Usa la búsqueda, los chips o los filtros para acotar.` : "",
@@ -297,7 +308,7 @@ export function renderOrdersView(container, opts) {
   $("#of-project").addEventListener("change", (e) => setFilter({ projectId: e.target.value }));
   $("#of-supplier").addEventListener("change", (e) => setFilter({ supplier: e.target.value })); // paintResults repinta los chips con el nuevo estado
   container.querySelectorAll("[data-view-mode]").forEach((b) => b.addEventListener("click", () => {
-    viewMode = saveViewMode(b.dataset.viewMode);
+    viewMode = saveOrdersViewMode(b.dataset.viewMode, userId);
     container.querySelectorAll("[data-view-mode]").forEach((x) => { const on = x.dataset.viewMode === viewMode; x.classList.toggle("is-active", on); x.setAttribute("aria-pressed", String(on)); });
     paintResults();
   }));

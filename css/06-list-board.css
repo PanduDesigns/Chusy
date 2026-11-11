@@ -330,3 +330,10 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .orders-colmenu__item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12.5px; color: var(--color-text-hi); }
 .orders-colmenu__item:hover { background: var(--color-void-raised); }
 @media (max-width: 720px) { .orders-viewtoggle { margin-left: 0; } .orders-colmenu { right: auto; left: 0; } }
+
+/* v89 · «Restablecer anchos» dentro del menú «⚙️ Columnas» del Cronograma de Pedidos. */
+.orders-colmenu__reset {
+  display: block; width: calc(100% - 16px); margin: 2px 8px 6px; padding: 5px 8px; text-align: left; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--color-text-hi); background: var(--color-void); border: 1px solid var(--color-line); border-radius: var(--radius-sm);
+}
+.orders-colmenu__reset:hover { background: var(--color-void-raised); border-color: var(--color-signal-dim); }

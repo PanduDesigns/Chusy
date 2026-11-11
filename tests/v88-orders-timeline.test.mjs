@@ -196,7 +196,7 @@ const cfg = { holidays: [{ id: "h1", date: "2026-11-11", name: "Festivo de prueb
 
   // paso a Cronograma
   click(toggle[1]);
-  check("clic en Cronograma: se guarda en localStorage y se pinta", localStorage.getItem("chusy_orders_view_mode") === "timeline" && !!$(".orders-timeline", host) && $$(".orders-row", host).length === 0 && toggle[1].classList.contains("is-active") && toggle[0].getAttribute("aria-pressed") === "false");
+  check("clic en Cronograma: se guarda en localStorage y se pinta", localStorage.getItem("chusy_orders_view_mode_compras") === "timeline" && !!$(".orders-timeline", host) && $$(".orders-row", host).length === 0 && toggle[1].classList.contains("is-active") && toggle[0].getAttribute("aria-pressed") === "false");
   const trs = () => $$(".orders-timeline__row", host);
   eq("cronograma: una fila por pedido del bloque, por proyecto", trs().map((r) => r.dataset.taskId), ["t1", "t2", "t3", "t4"]);
 
@@ -244,7 +244,7 @@ const cfg = { holidays: [{ id: "h1", date: "2026-11-11", name: "Festivo de prueb
   check("… se abre y ofrece las 9 estándar y los campos personalizados", $("#orders-col-menu", host).hidden === false && $$("[data-col]", host).length === 11 && $$("[data-col]", host).filter((i) => i.checked).map((i) => i.dataset.col).join() === "supplier,orderNumber,stageStatus" && $$(".orders-colmenu__item", host).some((l) => l.textContent.trim() === "TIPO"));
   const tick1 = (key) => { const i = $$("[data-col]", host).find((x) => x.dataset.col === key); i.checked = !i.checked; fire(i, "change"); };
   tick1("commercial"); tick1("dueDateText"); tick1("cf:tipo"); tick1("supplier");
-  eq("marcar/desmarcar repinta las columnas y se guarda", [$$(".orders-timeline__hl", host).map((h) => h.textContent), JSON.parse(localStorage.getItem("chusy_orders_timeline_columns"))], [["Proyecto", "Descripción", "Nº Pedido", "Etapa / Estado", "Comercial", "Fecha Fin / Entrega", "TIPO"], ["orderNumber", "stageStatus", "commercial", "dueDateText", "cf:tipo"]]);
+  eq("marcar/desmarcar repinta las columnas y se guarda", [$$(".orders-timeline__hl", host).map((h) => h.textContent), JSON.parse(localStorage.getItem("chusy_orders_timeline_columns_compras"))], [["Proyecto", "Descripción", "Nº Pedido", "Etapa / Estado", "Comercial", "Fecha Fin / Entrega", "TIPO"], ["orderNumber", "stageStatus", "commercial", "dueDateText", "cf:tipo"]]);
   check("… el menú sigue abierto tras marcar", $("#orders-col-menu", host).hidden === false);
   const r1b = trs()[0], r3b = trs()[2];
   eq("celdas nuevas: comercial, fecha fin (corta) y campo personalizado por nombre (TIPO de P1 y «tipo» de P2)", [$(".orders-timeline__cell--commercial", r1b).textContent, $(".orders-timeline__cell--dueDateText", r1b).textContent, $(".orders-timeline__cell--custom", r1b).textContent, $(".orders-timeline__cell--custom", r3b).textContent, $(".orders-timeline__cell--custom", trs()[3]).textContent, $(".orders-timeline__cell--dueDateText", r3b).textContent], ["Juan Pérez", "20 nov", "Cabina", "Horno", "—", "—"]);
@@ -314,7 +314,7 @@ const cfg = { holidays: [{ id: "h1", date: "2026-11-11", name: "Festivo de prueb
 
   // vuelta a la Tabla
   click(toggle[0]);
-  check("de vuelta a Tabla: se guarda y se pintan las filas de siempre", localStorage.getItem("chusy_orders_view_mode") === "table" && $$(".orders-row", host).length === 4 && !$(".orders-timeline", host));
+  check("de vuelta a Tabla: se guarda y se pintan las filas de siempre", localStorage.getItem("chusy_orders_view_mode_compras") === "table" && $$(".orders-row", host).length === 4 && !$(".orders-timeline", host));
   // bloque vacío en cronograma
   click(toggle[1]);
   renderOrdersView(host, { ...opts, rows: [], state: orders.emptyOrdersState() });
@@ -325,18 +325,18 @@ const cfg = { holidays: [{ id: "h1", date: "2026-11-11", name: "Festivo de prueb
 // ---------------------------------------------------------------- 6) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=88", (idx.match(/css\/[\w-]+\.css\?v=88/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en otra versión", !/\.css\?v=(?!88)\d+/.test(idx));
-  check("package.json y package-lock.json: 88.0.0", JSON.parse(read("package.json")).version === "88.0.0" && JSON.parse(read("package-lock.json")).version === "88.0.0");
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 88; la entrega actual lo fija en v89-orders-timeline-interactive.test.mjs)", new Set([...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => m[1])).size + ":" + (idx.match(/css\/[\w-]+\.css\?v=\d+/g) || []).length, "1:14");
+  check("index.html: ningún <link> se ha quedado en una versión anterior a la 88", [...idx.matchAll(/\.css\?v=(\d+)/g)].every((m) => Number(m[1]) >= 88));
+  check("package.json y package-lock.json: versión ≥ 88", parseInt(JSON.parse(read("package.json")).version, 10) >= 88 && parseInt(JSON.parse(read("package-lock.json")).version, 10) >= 88);
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: entrada 88 la primera, mayor que la 87, sobre Cronograma, proveedor y columnas", r.id === 88 && r.id > RELEASES[1].id && /Cronograma/.test(r.title) && /proveedor/i.test(JSON.stringify(r)) && /Columnas/.test(JSON.stringify(r)) && r.items.length >= 3, r && r.id);
+  const r = RELEASES.find((x) => x.id === 88);
+  check("Novedades: entrada 88, mayor que la 87, sobre Cronograma, proveedor y columnas", !!r && r.id > RELEASES.find((x) => x.id === 87).id && /Cronograma/.test(r.title) && /proveedor/i.test(JSON.stringify(r)) && /Columnas/.test(JSON.stringify(r)) && r.items.length >= 3, r && r.id);
   const css = [read("css/06-list-board.css"), read("css/08-calendar-timeline.css")].join("\n");
   check("CSS: chips, conmutador, menú de columnas y cronograma (.orders-timeline__*)", [".orders-chip", ".orders-viewtoggle", ".orders-colmenu", ".orders-timeline__scroll", ".orders-timeline__head", ".orders-timeline__left", ".orders-timeline__bar", ".orders-timeline__col.is-weekend", ".orders-timeline__col.is-holiday", ".orders-timeline__col.is-today", ".orders-timeline__hcell--week"].every((c) => css.includes(c)));
   check("CSS: bloque izquierdo y cabecera sticky; el sombreado usa variables del tema", /\.orders-timeline__left\s*\{[^}]*position:\s*sticky;[^}]*left:\s*0/.test(css) && /\.orders-timeline__head\s*\{[^}]*position:\s*sticky;[^}]*top:\s*0/.test(css) && /\.orders-timeline__col\.is-weekend\s*\{\s*background:\s*var\(--color-dim\)/.test(css));
   check("CSS: modo de columnas anchas (.is-wide): Proyecto y Descripción siguen fijas, el resto se desplaza", /\.orders-timeline__scroll\.is-wide \.orders-timeline__cell--title[^{]*\{[^}]*position:\s*sticky/.test(css) && /display:\s*contents/.test(css) && /is-wide/.test(read("js/views/orders-timeline.js")));
   const view = read("js/views/orders-view.js");
-  check("orders-view.js: integra conmutador, chips y el módulo del cronograma", /renderOrdersTimeline/.test(view) && /data-view-mode/.test(view) && /id="orders-chips"/.test(view) && /supplierChips/.test(view) && /saveViewMode/.test(view));
+  check("orders-view.js: integra conmutador, chips y el módulo del cronograma", /renderOrdersTimeline/.test(view) && /data-view-mode/.test(view) && /id="orders-chips"/.test(view) && /supplierChips/.test(view) && /saveOrdersViewMode/.test(view));
   const app = read("js/app.js");
   check("app.js: pasa el calendario laboral y la oferta a la vista de Pedidos", /workCalendar: getWorkCalendar\(\), offersProjectId/.test(app));
   const readme = read("README.md");

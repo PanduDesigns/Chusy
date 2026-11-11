@@ -25,6 +25,18 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 89,
+    date: "2026-11-10",
+    title: "Cronograma de Pedidos interactivo: columnas a tu medida y fechas arrastrando",
+    items: [
+      "En el Cronograma de «Pedidos» puedes cambiar el ancho de cualquier columna de la izquierda (Proyecto, Descripción, las opcionales y tus campos personalizados): arrastra el borde derecho de su cabecera. Doble clic en ese borde la devuelve a su ancho de siempre, y «↔ Restablecer anchos», dentro de «⚙️ Columnas», lo hace con todas.",
+      "Tus columnas visibles, sus anchos, el modo Tabla/Cronograma, la escala (4/8/12 semanas o todo) y el orden se guardan para ti en este navegador: otra persona que use el mismo ordenador tiene los suyos, y lo que ya tenías configurado no se pierde.",
+      "Las barras de los pedidos se mueven y se estiran con el ratón, igual que en la línea de tiempo de los proyectos: arrastra la barra para desplazar el pedido sin cambiar su duración, o sus extremos para cambiar el inicio o el fin. Mientras arrastras ves el nuevo rango («09/11 → 13/11 · 5d»), y al soltar aparece «Deshacer». Un clic sin arrastrar sigue abriendo la tarea.",
+      "En un pedido «Sin fecha», haz clic en un día del calendario (o arrastra varios días) y se convierte en barra al instante.",
+      "Al cambiar un ancho, mover una barra, filtrar por proveedor o recibir un cambio de otro compañero, el cronograma ya no salta al principio: se queda donde estabas.",
+    ],
+  },
+  {
     id: 88,
     date: "2026-11-10",
     title: "Cronograma de Pedidos, con filtro rápido por proveedor",
