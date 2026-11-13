@@ -48,6 +48,9 @@
 // botón ni su contador. Lleva las mismas clases que «Mis tareas», así que se pliega a icono con el resto del bloque y su
 // contador sale como insignia pequeña (css/05-layout.css). app.js decide a dónde va (selectOrders) y calcula el contador.
 //
+// Visualizador de piezas (v90): justo debajo de «Pedidos», el botón «Visualizador de piezas» (icono de cubo, `data-view="parts-viewer"`), SOLO
+// para quien tiene permiso (`showPartsViewer`, ver canViewPartsViewer en departments.js): visor 3D y buscador de referencias CAD.
+//
 // Propiedades (v57): el menú de clic derecho de un proyecto normal (no de
 // las secciones exclusivas) incluye «Propiedades», que abre la ventana con
 // sus metadatos (project-properties-modal.js). El menú solo avisa con
@@ -106,7 +109,7 @@ export function restoreSidebarScroll(container, snapshot) {
   });
 }
 
-export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, showOrders, isOrdersActive, ordersPendingCount, onSelectOrders, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, sectorFilter, onSectorFilterChange, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenWorkCalendar, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
+export function renderSidebar(container, { projects, currentProjectId, isMyTasksActive, isTimelineActive, isArchiveActive, isTrashActive, myTasksCount, showOrders, isOrdersActive, ordersPendingCount, onSelectOrders, showPartsViewer, isPartsViewerActive, onSelectPartsViewer, userProfile, isCollapsed, onToggleCollapse, isNavCollapsed, onToggleNav, sectorFilter, onSectorFilterChange, onSelectProject, onSelectMyTasks, onSelectTimeline, onSelectArchive, onSelectTrash, onSelectMetrics, onCreateProject, onOpenSearch, onOpenAccount, onOpenWhatsNew, onOpenTeamAdmin, onOpenDepartmentAccess, onOpenWorkCalendar, onOpenOutlookBridge, onOpenDriveStorage, onOpenAsanaImport, onOpenQuickCreateAdmin, onOpenProjectProperties, onLogout }) {
   // v85: ANTES de tocar el DOM se guarda dónde estaba el scroll de cada contenedor (se restaura al final de esta función).
   const scrollSnapshot = captureSidebarScroll(container);
   container.classList.toggle("is-collapsed", !!isCollapsed);
@@ -191,6 +194,10 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
       <span class="sidebar__item-name sidebar__label">Pedidos</span>
       ${ordersPendingCount ? `<span class="sidebar__item-count sidebar__label" id="orders-count">${ordersPendingCount}</span>` : ""}
     </button>` : ""}
+    ${showPartsViewer ? `<button class="sidebar__item sidebar__item--pinned${isPartsViewerActive ? " is-active" : ""}" id="btn-parts-viewer" data-view="parts-viewer" title="Visualizador de piezas">
+      <span class="sidebar__item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M12 2.5 3.5 7.2v9.6L12 21.5l8.5-4.7V7.2L12 2.5Z"/><path d="M3.5 7.2 12 12l8.5-4.8M12 12v9.5"/></svg></span>
+      <span class="sidebar__item-name sidebar__label">Visualizador de piezas</span>
+    </button>` : ""}
     </div>
     </div>
 
@@ -273,6 +280,8 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
   container.querySelector("#btn-trash").addEventListener("click", onSelectTrash);
   const ordersBtn = container.querySelector("#btn-orders"); // v86: solo existe para quien tiene permiso
   if (ordersBtn && onSelectOrders) ordersBtn.addEventListener("click", onSelectOrders);
+  const partsViewerBtn = container.querySelector("#btn-parts-viewer"); // v90: solo existe para quien tiene permiso
+  if (partsViewerBtn && onSelectPartsViewer) partsViewerBtn.addEventListener("click", onSelectPartsViewer);
   container.querySelector("#btn-new-project").addEventListener("click", onCreateProject);
   container.querySelector("#btn-logout").addEventListener("click", onLogout);
   container.querySelector("#btn-toggle-collapse").addEventListener("click", onToggleCollapse);

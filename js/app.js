@@ -20,7 +20,7 @@ import { RELEASES, releasesBetween } from "./whats-new.js";
 import { openWhatsNewModal } from "./components/whats-new-modal.js";
 import { subscribeToQuickCreateConfig } from "./data/quick-create.js";
 import { subscribeToDriveConfig } from "./data/drive-config.js"; // v68: archivos en Google Drive
-import { setDriveConfig, resetDriveService } from "./drive-service.js";
+import { setDriveConfig, resetDriveService, driveService } from "./drive-service.js";
 import { subscribeToTrash, trashProject, restoreTrashItem, purgeTrashItems, purgeExpiredTrash } from "./data/trash.js";
 import { offerUndoForTrash, trashRestoreMessage, trashFailureMessage } from "./components/undo-toast.js";
 import {
@@ -43,11 +43,18 @@ import { renderMyTasksView } from "./views/my-tasks-view.js";
 import { renderTrashView, visibleTrashItems } from "./views/trash-view.js";
 import { renderArchiveView } from "./views/archive-view.js";
 import { renderMetricsView } from "./views/metrics-view.js";
-import { metricsScopeFor, metricsFilterLabel, canViewWorkload, canViewMetrics, canViewOrders, DEFAULT_ORDERS_GROUPS } from "./departments.js";
+import { metricsScopeFor, metricsFilterLabel, canViewWorkload, canViewMetrics, canViewOrders, DEFAULT_ORDERS_GROUPS, canViewPartsViewer, DEFAULT_PARTS_VIEWER_GROUPS } from "./departments.js";
 // v86: sección «Pedidos» (transversal, de Compras): lógica pura en orders.js, pantalla en views/orders-view.js, permiso por departamento en meta/ordersAccess
 import { renderOrdersView } from "./views/orders-view.js";
 import { subscribeToOrdersAccess } from "./data/orders-access.js";
 import { collectOrderRows, pendingOrdersCount, collectSupplierOptions, emptyOrdersState } from "./orders.js";
+// v90: sección «Visualizador de piezas» (transversal): visor 3D de archivos CAD con medición. Lógica pura en parts-viewer.js, pantalla en
+// views/parts-viewer-view.js, permiso por departamento en meta/partsViewerAccess (data/parts-viewer-access.js)
+import { renderPartsViewerView } from "./views/parts-viewer-view.js";
+import { subscribeToPartsViewerAccess } from "./data/parts-viewer-access.js";
+import { indexUploadedCadParts, emptyPartsState } from "./parts-viewer.js";
+import { isCadFileName } from "./cad-viewer.js";
+import { isDriveAttachment } from "./drive-files.js";
 import { setSuggestProvider } from "./components/text-suggest.js";
 import { resolveTimelineGroupBy } from "./workload.js"; // v81
 import { openProjectModal } from "./components/project-modal.js";
@@ -93,7 +100,7 @@ let currentProjectId = null;
 let currentProject = null;
 let currentTasks = [];
 let currentView = "list";
-let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'trash' | 'metrics' | 'orders'
+let mode = "project"; // 'project' | 'mytasks' | 'timeline' | 'archive' | 'trash' | 'metrics' | 'orders' | 'parts-viewer'
 // v86 · «Pedidos»: qué grupos de departamento la ven (meta/ordersAccess; sin configurar, los Técnicos — ver departments.js),
 // el estado de la vista (pestaña, filtros, búsqueda y orden: solo de sesión, orders-view.js lo actualiza SIN repintar) y los
 // pedidos pendientes de tramitar que trae la consulta del contador (no hace falta cargar todas las tareas para saber cuántos son).
@@ -102,6 +109,11 @@ let ordersViewState = emptyOrdersState();
 let ordersPendingTasks = [];
 let unsubOrdersAccess = null;
 let unsubOrdersPending = null;
+// v90 · «Visualizador de piezas»: qué grupos de departamento lo ven (meta/partsViewerAccess; sin configurar, los tres — ver departments.js)
+// y el estado de la vista (búsqueda y filtros: solo de sesión, parts-viewer-view.js lo actualiza SIN repintar).
+let partsViewerAllowed = [...DEFAULT_PARTS_VIEWER_GROUPS];
+let partsViewerState = emptyPartsState();
+let unsubPartsViewerAccess = null;
 let ordersPendingSubscribed = false;
 let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
@@ -132,7 +144,7 @@ const taskLoader = createTaskLoader({
   onChange: (projectId) => {
     const isCurrent = projectId === currentProjectId;
     if (isCurrent) syncCurrentTasks();
-    if (mode === "timeline" || mode === "metrics" || mode === "orders" || (mode === "project" && isCurrent)) renderShell();
+    if (mode === "timeline" || mode === "metrics" || mode === "orders" || mode === "parts-viewer" || (mode === "project" && isCurrent)) renderShell();
   },
 });
 // { [projectId]: tasks[] } — objeto VIVO del cargador (no se reasigna). Solo trae
@@ -310,6 +322,8 @@ function restoreLastLocation() {
     selectTrash();
   } else if (saved && saved.mode === "orders") {
     selectOrders(); // v86: comprueba el permiso; sin él cae a «Mis tareas»
+  } else if (saved && saved.mode === "parts-viewer") {
+    selectPartsViewer(); // v90: igual: comprueba el permiso; sin él cae a «Mis tareas»
   } else if (saved && saved.mode === "metrics") {
     // selectMetrics() ya comprueba el rol antes de aplicar el modo — por
     // si la cuenta dejó de ser admin desde la última vez que se guardó
@@ -438,11 +452,12 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig, unsubWorkCalendar, unsubOrdersAccess, unsubOrdersPending].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig, unsubWorkCalendar, unsubOrdersAccess, unsubOrdersPending, unsubPartsViewerAccess].forEach((fn) => fn && fn());
   taskLoader.stopAll();
   store.stopAll(); // v73: por si acaso, que no quede en memoria nada de la cuenta que sale
-  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = unsubWorkCalendar = unsubOrdersAccess = unsubOrdersPending = null;
+  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = unsubWorkCalendar = unsubOrdersAccess = unsubOrdersPending = unsubPartsViewerAccess = null;
   ordersAllowed = [...DEFAULT_ORDERS_GROUPS]; ordersViewState = emptyOrdersState(); ordersPendingTasks = []; ordersPendingSubscribed = false; // v86
+  partsViewerAllowed = [...DEFAULT_PARTS_VIEWER_GROUPS]; partsViewerState = emptyPartsState(); // v90
   resetDriveService(); // v68: fuera el permiso de Drive y las miniaturas de la cuenta que sale
   resetWorkCalendar(); // v78: y el calendario laboral de la cuenta que sale
   projects = []; rawProjects = []; prevActiveProjectIds = null; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
@@ -553,6 +568,10 @@ function bootstrap() {
   if (unsubOrdersAccess) unsubOrdersAccess();
   unsubOrdersAccess = subscribeToOrdersAccess((groups) => { ordersAllowed = groups; syncOrdersPendingSubscription(); renderShell(); });
   syncOrdersPendingSubscription();
+
+  // v90: quién ve «Visualizador de piezas» (meta/partsViewerAccess). Al llegar (o cambiar) se repinta; no tiene consulta propia.
+  if (unsubPartsViewerAccess) unsubPartsViewerAccess();
+  unsubPartsViewerAccess = subscribeToPartsViewerAccess((groups) => { partsViewerAllowed = groups; renderShell(); });
 
   if (unsubMyTasks) unsubMyTasks();
   unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; renderShell(); });
@@ -693,6 +712,22 @@ function selectProject(projectId) {
     }
     renderShell();
   });
+  renderShell();
+}
+
+/** v90: ¿esta cuenta ve «Visualizador de piezas»? (admin siempre; el resto, según los grupos de meta/partsViewerAccess). */
+function canSeePartsViewer() {
+  return !!currentUser && canViewPartsViewer(currentUser, partsViewerAllowed);
+}
+
+/** v90: único punto de entrada al modo «Visualizador de piezas» (restoreLastLocation y la barra lateral): sin permiso cae a «Mis tareas». */
+function selectPartsViewer() {
+  if (!canSeePartsViewer()) { selectMyTasks(); return; }
+  mode = "parts-viewer";
+  saveLastLocation({ mode: "parts-viewer" });
+  activeFilters = {};
+  searchText = "";
+  taskLoader.ensureAll(); // «Visualizador de piezas» busca en los adjuntos de las tareas de todos los proyectos
   renderShell();
 }
 
@@ -960,6 +995,8 @@ function renderSidebarOnly() {
     isTrashActive: mode === "trash",
     showOrders: canSeeOrders(), isOrdersActive: mode === "orders", ordersPendingCount: getOrdersPendingCount(), // v86
     onSelectOrders: () => { selectOrders(); sidebarEl.classList.remove("is-open"); },
+    showPartsViewer: canSeePartsViewer(), isPartsViewerActive: mode === "parts-viewer", // v90
+    onSelectPartsViewer: () => { selectPartsViewer(); sidebarEl.classList.remove("is-open"); },
     myTasksCount: myTasks.filter((t) => !t.isComplete && !isUpcomingForUser(t, currentUser.uid, (getOffersProject() || {}).id)).length, // v84: lo que aún no me toca no cuenta
     userProfile: currentUser,
     isCollapsed: sidebarCollapsed,
@@ -977,7 +1014,7 @@ function renderSidebarOnly() {
     onOpenAccount: () => openAccountModal({ userProfile: currentUser }),
     onOpenWhatsNew: () => openWhatsNewModal({ releases: RELEASES }),
     onOpenTeamAdmin: () => openTeamAdminModal({ teamMembers, currentUser }),
-    onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive), ordersAccess: ordersAllowed, currentUser }),
+    onOpenDepartmentAccess: () => openDepartmentAccessModal({ exclusiveProjects: projects.filter((p) => p.exclusive), ordersAccess: ordersAllowed, partsViewerAccess: partsViewerAllowed, currentUser }),
     onOpenWorkCalendar: () => openWorkCalendarModal({ currentUser, teamMembers }), // v78: todas las cuentas (solo un admin edita)
     onOpenOutlookBridge: () => openOutlookBridgeModal({ currentUser }),
     onOpenDriveStorage: () => openDriveStorageModal({ currentUser }),
@@ -1081,6 +1118,25 @@ function renderShell() {
       onStateChange: (st) => { ordersViewState = st; }, // solo guarda: la vista repinta por su cuenta (no se pierde el foco al buscar)
       onOpenTask: openTask, currentUser, teamMembers, projects,
       workCalendar: getWorkCalendar(), offersProjectId: (getOffersProject() || {}).id, // v88: festivos sombreados del Cronograma
+    });
+    return;
+  }
+
+  if (mode === "parts-viewer") {
+    // v90: «Visualizador de piezas». Segunda comprobación del permiso (por si lo pierde en mitad de la sesión: el botón ya habría desaparecido).
+    if (!canSeePartsViewer()) { selectMyTasks(); return; }
+    filterbarEl.innerHTML = ""; // el buscador y los filtros son de la propia vista
+    if (!taskLoader.isAllLoaded()) {
+      topbarEl.innerHTML = `<span class="topbar__title">Visualizador de piezas</span>`;
+      mainContentEl.innerHTML = loadingStateHtml("Cargando las tareas de todos los proyectos…");
+      return;
+    }
+    const cadParts = indexUploadedCadParts(getKnownProjectTasks(), projects);
+    topbarEl.innerHTML = `<span class="topbar__title">Visualizador de piezas</span><span class="topbar__count">${cadParts.length} ${cadParts.length === 1 ? "pieza" : "piezas"} con archivos CAD</span>`;
+    renderPartsViewerView(mainContentEl, {
+      parts: cadParts, state: partsViewerState,
+      onStateChange: (st) => { partsViewerState = st; }, // solo guarda: la vista repinta por su cuenta (no se pierde el foco al buscar)
+      onOpenTask: openTask, storage: driveService, projects,
     });
     return;
   }
@@ -1292,6 +1348,7 @@ function openNewProjectTask(sectionId, presetDueDate) {
     tagsRegistry,
     currentUserProfile: currentUser,
     getCommercialOptions,
+    getProjectAttachments: getProjectCadAttachments, // v90: STEP gemelo de un .ipt/.iam en otra tarea del proyecto
     onConvertOffer: openOfferConversion,
     onOpenProject: openConvertedProject,
     onSaved: () => showToast(isOffersProject(currentProject) ? "Oferta creada." : "Tarea creada."),
@@ -1308,6 +1365,7 @@ function openNewPersonalTask() {
     tagsRegistry,
     currentUserProfile: currentUser,
     getCommercialOptions,
+    getProjectAttachments: getProjectCadAttachments, // v90: STEP gemelo de un .ipt/.iam en otra tarea del proyecto
     onConvertOffer: openOfferConversion,
     onOpenProject: openConvertedProject,
     onSaved: () => showToast("Recordatorio creado."),
@@ -1331,6 +1389,7 @@ function openTask(taskId) {
     tagsRegistry,
     currentUserProfile: currentUser,
     getCommercialOptions,
+    getProjectAttachments: getProjectCadAttachments, // v90: STEP gemelo de un .ipt/.iam en otra tarea del proyecto
     onConvertOffer: openOfferConversion,
     onOpenProject: openConvertedProject,
     onSaved: () => {},
@@ -1353,6 +1412,25 @@ function openTask(taskId) {
  * quien puede verla (admin o el departamento con acceso), así que quien no
  * la ve sugiere solo lo que hay en las propiedades de proyectos.
  */
+/**
+ * v90: los adjuntos CAD de Drive (.step, .stp, .ipt, .iam) de las demás tareas YA CARGADAS de esos proyectos, con su tarea y proyecto, para que el 👁️
+ * de un .ipt/.iam encuentre su STEP gemelo aunque esté en otra tarea del mismo proyecto (ver findCompanionStepAttachment).
+ */
+function getProjectCadAttachments(projectIds, exceptTaskId) {
+  const ids = new Set(projectIds || []);
+  if (!ids.size) return [];
+  const out = [];
+  getKnownProjectTasks().forEach((t) => {
+    if (!t || t.id === exceptTaskId) return;
+    const projectId = [t.projectId, ...(Array.isArray(t.extraProjectIds) ? t.extraProjectIds : [])].find((id) => ids.has(id));
+    if (!projectId) return;
+    (Array.isArray(t.attachments) ? t.attachments : []).forEach((a) => {
+      if (isDriveAttachment(a) && isCadFileName(a.name)) out.push({ ...a, taskId: t.id, projectId });
+    });
+  });
+  return out;
+}
+
 function getCommercialOptions() {
   const values = [];
   const offers = projects.find((p) => isOffersProject(p));

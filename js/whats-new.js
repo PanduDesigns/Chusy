@@ -25,6 +25,19 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 90,
+    date: "2026-11-12",
+    title: "Visor 3D de piezas: ver y medir archivos STEP, y el nuevo «Visualizador de piezas»",
+    items: [
+      "Los archivos .step, .stp, .ipt y .iam de una tarea tienen ahora un botón 👁️ («Ver y medir en 3D»). Se abre un visor 3D en el que giras la pieza con el ratón, haces zoom y la desplazas, con vistas rápidas (Isométrica, Frontal, Planta, Perfil, Ajustar a pantalla), aristas CAD, modo alámbrico, rejilla y ejes, y siempre a la vista las medidas totales de la pieza en milímetros (X × Y × Z).",
+      "Medición Punto a Punto (clic en el punto A y en el B, con imán a vértices y aristas) y Cara a Cara: clic en una cara y en otra y te da el espesor o la distancia perpendicular entre caras paralelas, la distancia mínima y el ángulo entre ellas. Sirve para medir el espesor de una chapa o la luz entre dos bridas sin abrir Inventor.",
+      "Un .ipt o .iam se ve en 3D a través de su .STEP/.STP gemelo (el que se llame igual, en la misma tarea o en el mismo proyecto). Si todavía no lo hay, el visor te ofrece convertir ese archivo a .STEP en tu PC o cargar uno desde tu ordenador al vuelo.",
+      "Al subir a una tarea un .ipt o .iam sin su .STEP, Chusy te pregunta: convertirlo en tu PC (PowerShell + Inventor, SOLO ese archivo, nunca toda la carpeta), incluir el .STEP generado y subir todo, o subir solo el archivo de Inventor. Necesita instalar una vez el ayudante de assets/convertir-step/ (como el de «Abrir Ubicación»).",
+      "Nueva sección «Visualizador de piezas» en la barra lateral: un buscador de referencias entre todos los archivos CAD subidos (por referencia, nombre de archivo, código de proyecto como 26001, comercial o tarea), con filtros de Proyecto, Sector y Disponibilidad 3D. Cada pieza muestra si ya tiene su modelo 3D STEP listo y se abre y mide con un clic. También puedes abrir un .STEP/.STP suelto de tu ordenador sin subirlo.",
+      "Quién ve el «Visualizador de piezas» lo decide un administrador en «Accesos por departamento», junto a «Pedidos». De entrada lo ven Diseño, Técnicos y Producción.",
+    ],
+  },
+  {
     id: 89,
     date: "2026-11-10",
     title: "Cronograma de Pedidos interactivo: columnas a tu medida y fechas arrastrando",

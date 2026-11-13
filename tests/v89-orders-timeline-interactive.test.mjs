@@ -494,12 +494,12 @@ const { dismissUndoToast } = await import("../js/components/undo-toast.js");
 // ---------------------------------------------------------------- 5) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=89", (idx.match(/css\/[\w-]+\.css\?v=89/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en otra versión", !/\.css\?v=(?!89)\d+/.test(idx));
-  check("package.json y package-lock.json: 89.0.0", JSON.parse(read("package.json")).version === "89.0.0" && JSON.parse(read("package-lock.json")).version === "89.0.0");
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 89; la entrega actual lo fija en v90-cad-parts-viewer.test.mjs)", new Set([...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => m[1])).size + ":" + (idx.match(/css\/[\w-]+\.css\?v=\d+/g) || []).length, "1:14");
+  check("index.html: ningún <link> se ha quedado en una versión anterior a la 89", [...idx.matchAll(/\.css\?v=(\d+)/g)].every((m) => Number(m[1]) >= 89));
+  check("package.json y package-lock.json: versión ≥ 89", parseInt(JSON.parse(read("package.json")).version, 10) >= 89 && parseInt(JSON.parse(read("package-lock.json")).version, 10) >= 89);
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: entrada 89 la primera, mayor que la 88, sobre columnas, usuario y arrastrar", r.id === 89 && r.id > RELEASES[1].id && /Cronograma/.test(r.title) && /ancho/i.test(JSON.stringify(r)) && /navegador/i.test(JSON.stringify(r)) && /arrast/i.test(JSON.stringify(r)) && r.items.length >= 4, r && r.id);
+  const r = RELEASES.find((x) => x.id === 89);
+  check("Novedades: entrada 89, mayor que la 88, sobre columnas, usuario y arrastrar", !!r && r.id > RELEASES.find((x) => x.id === 88).id && /Cronograma/.test(r.title) && /ancho/i.test(JSON.stringify(r)) && /navegador/i.test(JSON.stringify(r)) && /arrast/i.test(JSON.stringify(r)) && r.items.length >= 4, r && r.id);
   const css = [read("css/06-list-board.css"), read("css/08-calendar-timeline.css")].join("\n");
   check("CSS: tirador de columna, tiradores de barra, franja de asignación, aviso flotante y «Restablecer anchos»", [".orders-tl-col-resizer", ".orders-tl-bar-handle", ".orders-tl-bar-handle.handle-left", ".orders-tl-bar-handle.handle-right", ".orders-tl-assign-band", ".orders-tl-drag-tip", ".orders-colmenu__reset"].every((c) => css.includes(c)));
   check("CSS: tirador de 6 px con cursor col-resize y tiradores de barra con ew-resize", /\.orders-tl-col-resizer\s*\{[^}]*width:\s*6px;[^}]*cursor:\s*col-resize/.test(css) && /\.orders-tl-bar-handle\s*\{[^}]*cursor:\s*ew-resize/.test(css) && /\.orders-timeline__bar\.orders-tl-bar\s*\{\s*cursor:\s*grab/.test(css) && /\.orders-tl-bar\.is-dragging\s*\{\s*cursor:\s*grabbing/.test(css));

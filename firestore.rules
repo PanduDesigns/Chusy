@@ -101,6 +101,10 @@ rules_version = '2';
 //    `allowedDepartments` una lista corta). Que «Pedidos» salga o no es una
 //    comprobación de interfaz, como Ofertas y Métricas: las tareas de proyecto
 //    ya las puede leer cualquier cuenta activa.
+//  - meta/partsViewerAccess (v90): lo mismo que meta/ordersAccess pero para la
+//    sección «Visualizador de piezas» (visor 3D de archivos CAD, apartado 3.20 del
+//    README). Lectura para cualquier cuenta activa, escritura solo admin, forma
+//    exacta. Las tareas y sus adjuntos CAD (Drive) no necesitan regla nueva.
 //  - Tareas (v86): los tres campos de trazabilidad de compras (`supplier`,
 //    `orderNumber`, `supplierCode`, copia de `workflow.purchase`) son campos
 //    normales de la tarea y NO necesitan regla propia: las reglas de tareas no
@@ -271,6 +275,18 @@ service cloud.firestore {
     // `allowedDepartments` es obligatoria y de tipo lista, con un tope muy por encima
     // de los grupos que existen; puede ir vacía (= solo los admins ven «Pedidos»). ----
     match /meta/ordersAccess {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin() &&
+        request.resource.data.keys().hasAll(['allowedDepartments']) &&
+        request.resource.data.keys().hasOnly(['allowedDepartments', 'updatedBy', 'updatedAt']) &&
+        request.resource.data.allowedDepartments is list && request.resource.data.allowedDepartments.size() <= 20 &&
+        (!('updatedBy' in request.resource.data) || request.resource.data.updatedBy == null || request.resource.data.updatedBy == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ---- Acceso a «Visualizador de piezas» (v90): meta/partsViewerAccess, la MISMA forma y los
+    // mismos permisos que meta/ordersAccess (lectura cuenta activa, escritura admin). ----
+    match /meta/partsViewerAccess {
       allow read: if isActiveUser();
       allow create, update: if isAdmin() &&
         request.resource.data.keys().hasAll(['allowedDepartments']) &&

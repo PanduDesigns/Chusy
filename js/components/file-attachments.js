@@ -38,6 +38,9 @@ import {
 import { isAbortError } from "../drive-storage.js";
 import { makeThumbnailBlob } from "../drive-thumbs.js";
 import { openFilePreview, downloadAttachment } from "./file-preview.js";
+import { isCadFileName, partitionUploadBatch } from "../cad-viewer.js";
+import { openCadViewerModal, closeCadViewerModal } from "./cad-viewer-modal.js";
+import { openCadUploadAssistant } from "./cad-upload-assistant.js";
 
 const MAX_PARALLEL = 2;
 
@@ -67,6 +70,9 @@ export function createFileAttachments({
   removeAttachment,
   currentUser,
   getTaskId,
+  getLocation, // v90: () => carpeta del proyecto (texto) — dónde buscará el ayudante «Convertir a .STEP» un .ipt/.iam por su nombre
+  getProjectId, // v90: () => id del proyecto principal de la tarea (para emparejar un .ipt/.iam con su STEP gemelo del mismo proyecto)
+  getAttachmentsPool, // v90: () => [{ ...adjunto, taskId, projectId }] — adjuntos de otras tareas del proyecto, para ese emparejamiento
   getOwner, // v70: () => ({ code, name, kind, folderId }) | ({ id, name }) | null — de quién es el archivo (puede devolver una promesa)
   onOwnerFolder, // v75: (folderId, owner) => void — la carpeta del ID donde quedó un archivo (→ `driveFolderId`)
   onDirty,
@@ -78,6 +84,7 @@ export function createFileAttachments({
   const thumbUrls = new Map(); // thumbId → dirección blob: ya descargada
   let active = 0;
   let destroyed = false;
+  let assistant = null; // v90: asistente de subida de .ipt/.iam abierto
 
   const driveItems = () => (getAttachments() || []).filter(isDriveAttachment);
 
@@ -103,6 +110,7 @@ export function createFileAttachments({
           <div class="file-card__meta">${escapeHtml(meta)}</div>
         </div>
         <div class="file-card__actions">
+          ${enabled && isCadFileName(att.name) ? `<button type="button" class="file-card__btn attachment-btn preview-cad-btn" data-act="cad" title="Ver y medir en 3D">👁️</button>` : ""}
           ${enabled ? `<button type="button" class="file-card__btn" data-act="download" title="Descargar">⬇</button>` : ""}
           <button type="button" class="file-card__btn file-card__btn--remove" data-act="remove" title="Quitar">✕</button>
         </div>
@@ -206,7 +214,21 @@ export function createFileAttachments({
 
   function addFiles(files) {
     if (!storage.isEnabled()) return;
-    Array.from(files || []).forEach((f) => { if (f) enqueue(f); });
+    // v90: un .ipt/.iam sin su .STEP/.STP gemelo (ni en este lote ni ya adjunto) espera a que el asistente decida.
+    const known = driveItems().concat(uploads.map((u) => ({ name: u.name })));
+    const { ready, needsStep } = partitionUploadBatch(files, known);
+    ready.forEach((f) => enqueue(f));
+    if (needsStep.length) askForStep(needsStep);
+  }
+
+  function askForStep(natives) {
+    const handle = openCadUploadAssistant({ files: natives, getLocation: () => (getLocation ? getLocation() : "") });
+    if (handle.merged) return;
+    assistant = handle;
+    handle.result.then(({ files: toUpload }) => {
+      if (assistant === handle) assistant = null;
+      if (!destroyed) toUpload.forEach((f) => enqueue(f));
+    });
   }
 
   function pump() {
@@ -328,6 +350,22 @@ export function createFileAttachments({
     render();
   }
 
+  /** v90: abre el visor 3D de un .step/.stp/.ipt/.iam (un .ipt/.iam busca su STEP gemelo en la tarea y, luego, en el proyecto). */
+  function openCad(att) {
+    const taskId = (getTaskId && getTaskId()) || "";
+    const projectId = (getProjectId && getProjectId()) || "";
+    const own = driveItems().map((a) => ({ ...a, taskId, projectId }));
+    const seen = new Set(own.map((a) => a.id));
+    const extra = ((getAttachmentsPool && getAttachmentsPool()) || []).filter((a) => a && !seen.has(a.id));
+    openCadViewerModal({
+      attachment: { ...att, taskId, projectId },
+      attachmentsPool: own.concat(extra),
+      storage,
+      projectLocation: getLocation ? getLocation() : "",
+      onUploadStep: (f) => addFiles([f]),
+    });
+  }
+
   function openPreview(att) {
     const items = driveItems();
     const index = Math.max(0, items.findIndex((a) => a.id === att.id));
@@ -362,6 +400,7 @@ export function createFileAttachments({
       if (!att) return;
       if (act.dataset.act === "remove") removeFile(att);
       else if (act.dataset.act === "download") downloadAttachment(att, storage);
+      else if (act.dataset.act === "cad") openCad(att);
       return;
     }
     const drop = t.closest(".file-drop");
@@ -478,6 +517,8 @@ export function createFileAttachments({
     },
     destroy() {
       destroyed = true;
+      if (assistant) { assistant.close(); assistant = null; }
+      closeCadViewerModal();
       container.removeEventListener("click", onContainerClick);
       container.removeEventListener("keydown", onContainerKeydown);
       container.removeEventListener("change", onContainerChange);

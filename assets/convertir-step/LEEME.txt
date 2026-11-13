@@ -1,0 +1,80 @@
+CHUSY - AYUDANTE DE "CONVERTIR A .STEP" (solo Windows, con Autodesk Inventor)
+===========================================================================
+
+Para que sirve
+--------------
+El visor 3D de Chusy dibuja y mide archivos STEP (.step / .stp). Una pieza de
+Inventor (.ipt) o un conjunto (.iam) hay que pasarlo antes a STEP. Este ayudante
+lo hace con un clic desde Chusy: PowerShell le pide a TU Inventor que exporte
+ESE archivo a .STEP (protocolo AP214) en su misma carpeta.
+
+REGLA: convierte SOLO el archivo .ipt o .iam que se indica. NUNCA toda la carpeta.
+
+Instalar (una vez por ordenador y usuario de Windows)
+-----------------------------------------------------
+1. Descomprime esta carpeta entera (no ejecutes nada desde dentro del zip).
+2. Doble clic en  Instalar-ConvertirStep.bat
+3. En Chusy, pulsa "Convertir a .STEP en mi PC". La primera vez el navegador
+   pregunta si permite abrir "Chusy - Convertir a STEP": marca la casilla de
+   recordar y acepta.
+
+No hace falta ser administrador: solo escribe en %LOCALAPPDATA%\Chusy y en el
+registro del propio usuario (HKCU\Software\Classes\chusy-step).
+
+Como se usa
+-----------
+A) Al SUBIR un .ipt/.iam a una tarea, si su .STEP no esta ya en la tarea ni en el
+   lote, Chusy te lo avisa:
+     1. "Convertir a .STEP en mi PC"  -> Inventor genera el .STEP junto al .ipt/.iam
+        y se abre el Explorador con el archivo seleccionado.
+     2. "Incluir el .STEP generado y subir todo" -> eliges ese .STEP y se sube
+        junto al .ipt/.iam.
+     o bien "Subir solo el .ipt/.iam sin .STEP".
+B) Con el boton del ojo (Ver y medir en 3D) de un .ipt/.iam sin .STEP gemelo:
+   "Convertir este archivo a .STEP en mi PC (PowerShell)" o "Cargar archivo
+   .STEP/.STP local" para verlo al vuelo.
+
+Como encuentra el archivo
+-------------------------
+El navegador no puede saber en que carpeta esta el archivo que subes, asi que
+Chusy le pasa al ayudante el NOMBRE del archivo y la carpeta del proyecto (el
+campo "Ubicacion" del proyecto o de la oferta, o la que escribas en el asistente).
+El ayudante busca en esa carpeta (y subcarpetas, sin mirar las "OldVersions")
+unicamente ese nombre exacto:
+  - Si no aparece, o aparece mas de una vez, no convierte nada y te lo dice:
+    escribe entonces en el asistente la ruta COMPLETA del archivo.
+  - Si escribes la ruta completa (C:\...\Eje_26001.ipt o \\servidor\...\Eje_26001.ipt)
+    convierte directamente ese archivo.
+
+Que hace con Inventor
+---------------------
+- Usa el Inventor que ya tienes abierto. Si no hay ninguno, abre uno propio sin
+  ventana y lo cierra al terminar.
+- Si el archivo ya estaba abierto en Inventor, lo usa tal cual y lo deja abierto
+  sin tocarlo. Si no, lo abre solo para exportarlo y lo cierra SIN guardar cambios.
+- Si ya existia un .step con ese nombre, lo sustituye.
+
+Si algo falla
+-------------
+- Error "E_FAIL": Inventor y el navegador tienen que estar al mismo nivel de
+  permisos (los dos normales, o los dos como administrador). Lo mismo si pegas el
+  comando en una ventana de PowerShell: que no sea de administrador si Inventor no lo es.
+- No ocurre nada al pulsar el boton: el ayudante no esta instalado, o una directiva
+  de la empresa (por ejemplo el antivirus o FortiClient) bloquea PowerShell. Chusy
+  deja copiado el comando de PowerShell para pegarlo a mano; si tampoco funciona,
+  avisa a Informatica.
+- Para ejecutarlo a mano, en PowerShell:
+    & "$env:LOCALAPPDATA\Chusy\convertir-step.ps1" -FilePath 'C:\ruta\Eje_26001.ipt'
+    & "$env:LOCALAPPDATA\Chusy\convertir-step.ps1" -FileName 'Eje_26001.ipt' -SearchRoot '\\servidor\carpeta del proyecto'
+
+Quitar
+------
+Doble clic en  Desinstalar-ConvertirStep.bat
+
+Que hace exactamente
+--------------------
+Instalar-ConvertirStep.bat copia convertir-step.ps1 a %LOCALAPPDATA%\Chusy y crea
+la clave HKCU\Software\Classes\chusy-step, que hace que Windows ejecute ese script
+con los enlaces "chusy-step://convert?file=...&searchRoot=...". El script solo
+convierte archivos .ipt o .iam y no ejecuta nada mas de lo que le llega.
+Desinstalar-ConvertirStep.bat borra esa clave y ese archivo.

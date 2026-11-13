@@ -12,6 +12,8 @@
 import { el, escapeHtml, showToast } from "../utils.js";
 import { previewMime, fileKind, fileIconFor, formatBytes, PREVIEW_LIMIT_BYTES } from "../drive-files.js";
 import { isAbortError } from "../drive-storage.js";
+import { isCadFileName } from "../cad-viewer.js";
+import { openCadViewerModal } from "./cad-viewer-modal.js";
 
 /** Guarda un Blob como archivo con ese nombre (lo que haría un enlace de descarga). */
 export function saveBlobAs(blob, fileName) {
@@ -110,7 +112,15 @@ export function openFilePreview({ items, index = 0, storage }) {
     const kind = fileKind(att.mimeType, att.name);
     const downloadBtn = `<button type="button" class="btn btn--primary" data-fp-download>⬇ Descargar</button>`;
     if (!mime) {
-      showMessage(att, `<div class="fp-message__icon">${fileIconFor(kind, att.name)}</div><p>No se puede ver aquí este tipo de archivo.</p>${downloadBtn}`);
+      // v90: un archivo CAD no se ve como imagen o PDF, pero sí en el visor 3D (.ipt/.iam a través de su STEP gemelo).
+      const cadBtn = isCadFileName(att.name) ? `<button type="button" class="btn btn--primary" data-fp-cad>👁️ Ver y medir en 3D</button> ` : "";
+      showMessage(att, `<div class="fp-message__icon">${fileIconFor(kind, att.name)}</div><p>No se puede ver aquí este tipo de archivo.</p>${cadBtn}${downloadBtn}`);
+      const cad = stage.querySelector("[data-fp-cad]");
+      if (cad) cad.addEventListener("click", () => {
+        const pool = items.map((a) => ({ ...a }));
+        close();
+        openCadViewerModal({ attachment: att, attachmentsPool: pool, storage });
+      });
       return;
     }
     if ((Number(att.size) || 0) > PREVIEW_LIMIT_BYTES) {

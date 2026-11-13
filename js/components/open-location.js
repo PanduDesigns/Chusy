@@ -18,17 +18,17 @@ import { showToast } from "../utils.js";
 import { normalizeLocation, hasLocation, protocolUrl, locationHasCode, OPEN_LOCATION_LABEL, getRememberedRoot, setRememberedRoot, rememberRootFromLocation, suggestedLocation } from "../location.js";
 
 /** Cuánto se espera a ver si el navegador pierde el foco (señal de que el ayudante abrió el Explorador). */
-const LAUNCH_WAIT_MS = 1200;
+export const LAUNCH_WAIT_MS = 1200;
 
 /** Los botones que ahora mismo están abriendo algo (para ignorar clics repetidos). */
 const busyButtons = new WeakSet();
 
-function isWindows() {
+export function isWindows() {
   return /Windows/i.test(navigator.userAgent || "");
 }
 
 /** Copia con el portapapeles moderno y, si el navegador no lo permite, con el método antiguo. Devuelve una promesa de true/false. */
-function copyToClipboard(text) {
+export function copyToClipboard(text) {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       return navigator.clipboard.writeText(text).then(() => true, () => legacyCopy(text));
@@ -59,7 +59,7 @@ function legacyCopy(text) {
  * molestar. Chrome y Edge, en cambio, no hacen nada visible si no hay
  * ayudante instalado, y necesitan el clic en el propio documento.
  */
-function launchProtocol(url) {
+export function launchProtocol(url) {
   if (/Firefox/i.test(navigator.userAgent || "")) {
     const frame = document.createElement("iframe");
     frame.style.display = "none";
@@ -79,7 +79,7 @@ function launchProtocol(url) {
 }
 
 /** Promesa de `true` si el navegador pierde el foco (o se oculta) antes de `ms`, `false` si no. Hay que llamarla ANTES de lanzar el protocolo. */
-function waitForFocusLoss(ms) {
+export function waitForFocusLoss(ms) {
   return new Promise((resolve) => {
     let finished = false;
     let timer = null;

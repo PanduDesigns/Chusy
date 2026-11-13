@@ -252,3 +252,33 @@ export function canViewOrders(user, allowedGroups) {
   const allowed = Array.isArray(allowedGroups) ? allowedGroups : [...DEFAULT_ORDERS_GROUPS];
   return departmentHasAccess(user.department, allowed);
 }
+
+// ============================================================================
+// Acceso a la sección «Visualizador de piezas» (v90)
+//
+// Misma idea que «Pedidos» (arriba): una vista TRANSVERSAL —busca en los archivos CAD de todos los proyectos—, con su
+// permiso en UN documento, `meta/partsViewerAccess` ({ allowedDepartments: [grupos…] }, ver data/parts-viewer-access.js),
+// que se marca desde el mismo modal «Accesos por departamento». Un admin entra SIEMPRE.
+//  · Sin documento rige el valor por defecto: los tres grupos (Diseño, Técnicos y Producción), porque medir una pieza lo
+//    necesita también quien la fabrica o la almacena; un admin puede quitar grupos cuando quiera.
+//  · Con documento, vale lo que diga, también una lista vacía (= solo admins).
+// Es una puerta de INTERFAZ (barra lateral y selectPartsViewer): las tareas y sus adjuntos ya los lee cualquier cuenta
+// activa por firestore.rules, así que no es una regla de seguridad de datos.
+// ============================================================================
+/** Los grupos con acceso a «Visualizador de piezas» mientras nadie lo haya configurado. */
+export const DEFAULT_PARTS_VIEWER_GROUPS = Object.freeze(DEPARTMENT_GROUPS.map((g) => g.value));
+
+/** Lo que hay en `meta/partsViewerAccess` (o `null`/sin campo = no configurado) → la lista de grupos con acceso (solo valores conocidos, sin repetir). */
+export function normalizePartsViewerAllowed(doc) {
+  if (!doc || !Array.isArray(doc.allowedDepartments)) return [...DEFAULT_PARTS_VIEWER_GROUPS];
+  const known = new Set([...DEPARTMENT_GROUPS.map((g) => g.value), ...DEPARTMENTS.map((d) => d.value)]);
+  return [...new Set(doc.allowedDepartments.filter((v) => typeof v === "string" && known.has(v)))];
+}
+
+/** ¿Ve esta persona «Visualizador de piezas» en su barra lateral y puede entrar? Admin siempre; el resto, según `allowedGroups`. */
+export function canViewPartsViewer(user, allowedGroups) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  const allowed = Array.isArray(allowedGroups) ? allowedGroups : [...DEFAULT_PARTS_VIEWER_GROUPS];
+  return departmentHasAccess(user.department, allowed);
+}
