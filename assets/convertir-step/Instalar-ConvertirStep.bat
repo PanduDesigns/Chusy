@@ -2,8 +2,8 @@
 setlocal
 title Chusy - Instalar "Convertir a STEP"
 
-rem Instala el ayudante "Convertir a .STEP" de Chusy en ESTE ordenador y para ESTE
-rem usuario de Windows. No pide permisos de administrador: solo escribe en
+rem Instala (o ACTUALIZA, si ya estaba) el ayudante "Convertir a .STEP" de Chusy en ESTE
+rem ordenador y para ESTE usuario de Windows. Al actualizar Chusy, vuelve a ejecutarlo. No pide permisos de administrador: solo escribe en
 rem %LOCALAPPDATA%\Chusy y en HKEY_CURRENT_USER\Software\Classes\chusy-step.
 
 set "SRC=%~dp0convertir-step.ps1"
@@ -20,12 +20,13 @@ reg add "%KEY%" /ve /t REG_SZ /d "URL:Chusy - Convertir a STEP" /f >nul
 if errorlevel 1 goto :noreg
 reg add "%KEY%" /v "URL Protocol" /t REG_SZ /d "" /f >nul
 if errorlevel 1 goto :noreg
-reg add "%KEY%\shell\open\command" /ve /t REG_SZ /d "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"%DEST%\convertir-step.ps1\" \"%%1\"" /f >nul
+reg add "%KEY%\shell\open\command" /ve /t REG_SZ /d "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File \"%DEST%\convertir-step.ps1\" \"%%1\"" /f >nul
 if errorlevel 1 goto :noreg
 
 echo.
 echo Listo. Ya puedes usar el boton "Convertir a .STEP en mi PC" de Chusy en este ordenador.
 echo.
+echo Al convertir se abre una ventana de PowerShell con el progreso (y el motivo si algo falla).
 echo La primera vez, el navegador preguntara si permite abrir "Chusy - Convertir a STEP":
 echo marca la casilla de recordar la eleccion y acepta.
 echo.

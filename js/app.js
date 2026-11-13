@@ -1136,7 +1136,7 @@ function renderShell() {
     renderPartsViewerView(mainContentEl, {
       parts: cadParts, state: partsViewerState,
       onStateChange: (st) => { partsViewerState = st; }, // solo guarda: la vista repinta por su cuenta (no se pierde el foco al buscar)
-      onOpenTask: openTask, storage: driveService, projects,
+      onOpenTask: openTask, storage: driveService,
     });
     return;
   }

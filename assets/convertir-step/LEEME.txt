@@ -1,4 +1,4 @@
-CHUSY - AYUDANTE DE "CONVERTIR A .STEP" (solo Windows, con Autodesk Inventor)
+CHUSY - AYUDANTE DE "CONVERTIR A .STEP" (solo Windows, con Autodesk Inventor) - v91
 ===========================================================================
 
 Para que sirve
@@ -32,40 +32,50 @@ A) Al SUBIR un .ipt/.iam a una tarea, si su .STEP no esta ya en la tarea ni en e
      o bien "Subir solo el .ipt/.iam sin .STEP".
 B) Con el boton del ojo (Ver y medir en 3D) de un .ipt/.iam sin .STEP gemelo:
    "Convertir este archivo a .STEP en mi PC (PowerShell)" o "Cargar archivo
-   .STEP/.STP local" para verlo al vuelo.
+   .STEP/.STP local" para verlo al vuelo. Ahi Chusy solo conoce el nombre y el tamano.
 
 Como encuentra el archivo
 -------------------------
-El navegador no puede saber en que carpeta esta el archivo que subes, asi que
-Chusy le pasa al ayudante el NOMBRE del archivo y la carpeta del proyecto (el
-campo "Ubicacion" del proyecto o de la oferta, o la que escribas en el asistente).
-El ayudante busca en esa carpeta (y subcarpetas, sin mirar las "OldVersions")
-unicamente ese nombre exacto:
-  - Si no aparece, o aparece mas de una vez, no convierte nada y te lo dice:
-    escribe entonces en el asistente la ruta COMPLETA del archivo.
-  - Si escribes la ruta completa (C:\...\Eje_26001.ipt o \\servidor\...\Eje_26001.ipt)
-    convierte directamente ese archivo.
+El navegador no puede decir en que carpeta esta el archivo que subes: solo da su
+NOMBRE, su TAMANO y su FECHA de modificacion. Con esos tres datos el ayudante lo
+localiza en tu PC, por este orden, y solo acepta un archivo con ESE nombre, ese
+tamano y esa fecha (asi no convierte otro del mismo nombre que este en otra carpeta):
+  1. Un documento que ya tengas abierto en Inventor con ese nombre.
+  2. La lista de "archivos recientes" de Windows (lo que acabas de elegir en el
+     selector de archivos del navegador).
+  3. Si no aparece, abre una ventana para que elijas TU el archivo original.
+Despues convierte ese archivo y deja el .stp en SU MISMA carpeta (la de origen, no la
+del proyecto de Chusy). Si arrastras el archivo desde el Explorador y no lo tienes
+abierto en Inventor, es normal que salga la ventana de eleccion.
 
 Que hace con Inventor
 ---------------------
+- Trabaja igual que Exportar-IPT.ps1: Windows PowerShell 5.1 en STA, abre el archivo
+  con SkipAllUnresolvedFiles (sin dialogos), traductor STEP AP214 y SaveCopyAs.
+  Solo convierte ESE archivo; Exportar-IPT.ps1 sigue siendo el de "toda la carpeta".
 - Usa el Inventor que ya tienes abierto. Si no hay ninguno, abre uno propio sin
   ventana y lo cierra al terminar.
 - Si el archivo ya estaba abierto en Inventor, lo usa tal cual y lo deja abierto
   sin tocarlo. Si no, lo abre solo para exportarlo y lo cierra SIN guardar cambios.
-- Si ya existia un .step con ese nombre, lo sustituye.
+- Crea <Nombre>.stp (la misma extension que Exportar-IPT.ps1). Si ya existia un
+  .stp con ese nombre, lo sustituye.
 
 Si algo falla
 -------------
 - Error "E_FAIL": Inventor y el navegador tienen que estar al mismo nivel de
   permisos (los dos normales, o los dos como administrador). Lo mismo si pegas el
   comando en una ventana de PowerShell: que no sea de administrador si Inventor no lo es.
-- No ocurre nada al pulsar el boton: el ayudante no esta instalado, o una directiva
+- Al pulsar el boton se abre una ventana de PowerShell con el progreso; si algo falla se
+  queda abierta con el motivo, y todo queda en %LOCALAPPDATA%\Chusy\convertir-step.log
+- No ocurre nada al pulsar el boton: el ayudante no esta instalado (o es la version
+  antigua: ejecuta de nuevo Instalar-ConvertirStep.bat), o una directiva
   de la empresa (por ejemplo el antivirus o FortiClient) bloquea PowerShell. Chusy
   deja copiado el comando de PowerShell para pegarlo a mano; si tampoco funciona,
   avisa a Informatica.
 - Para ejecutarlo a mano, en PowerShell:
     & "$env:LOCALAPPDATA\Chusy\convertir-step.ps1" -FilePath 'C:\ruta\Eje_26001.ipt'
-    & "$env:LOCALAPPDATA\Chusy\convertir-step.ps1" -FileName 'Eje_26001.ipt' -SearchRoot '\\servidor\carpeta del proyecto'
+    & "$env:LOCALAPPDATA\Chusy\convertir-step.ps1" -FileName 'Eje_26001.ipt' -Size 48213 -Modified 1731480000000
+  (-SearchRoot '<carpeta>' es opcional: busca ahi ese nombre exacto)
 
 Quitar
 ------

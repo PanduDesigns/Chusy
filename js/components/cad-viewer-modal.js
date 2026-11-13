@@ -2,12 +2,11 @@
 // Visor 3D industrial (v90): abre un .step/.stp (o el .ipt/.iam de Inventor, a través de su STEP gemelo) en una ventana
 // con rotación orbital, vistas rápidas, aristas CAD, cotas envolventes y medición Punto a Punto y Cara a Cara.
 //
-//   openCadViewerModal({ attachment, attachmentsPool, storage, file, title, projectLocation, onUploadStep, deps })
+//   openCadViewerModal({ attachment, attachmentsPool, storage, file, title, onUploadStep, deps })
 //     attachment       adjunto de Drive `{ name, driveId, size, taskId?, projectId? }` (.step/.stp o .ipt/.iam)
 //     attachmentsPool  adjuntos entre los que buscar el STEP gemelo de un .ipt/.iam (primero la misma tarea, luego el proyecto)
 //     storage          el servicio de Drive (downloadBlob)
 //     file             un File local .step/.stp (se mide al vuelo, sin subirlo a ningún sitio)
-//     projectLocation  la carpeta del proyecto: dónde buscará el ayudante el .ipt/.iam a convertir
 //     onUploadStep     (File) => void — si se pasa, un STEP cargado en local se puede subir a la tarea desde aquí
 //     deps             solo para pruebas: { loadEngine, launchConvert, copyCommand }
 //   Devuelve `{ close, ready }`; `ready` se resuelve cuando termina la carga inicial (con éxito o con un mensaje de error).
@@ -60,7 +59,7 @@ export function closeCadViewerModal() {
 export function openCadViewerModal(options = {}) {
   closeCadViewerModal();
   const {
-    attachment = null, attachmentsPool = [], storage = null, file = null, title = "", projectLocation = "", onUploadStep = null,
+    attachment = null, attachmentsPool = [], storage = null, file = null, title = "", onUploadStep = null,
     deps = {},
   } = options;
   const loadEngine = deps.loadEngine || ((o) => loadCadEngine(o));
@@ -200,11 +199,11 @@ export function openCadViewerModal(options = {}) {
           <button type="button" class="btn btn--primary" data-act="convert">⚙️ Convertir este archivo a .STEP en mi PC (PowerShell)</button>
           <button type="button" class="btn" data-act="local">📂 Cargar archivo .STEP/.STP local</button>
         </div>
-        <p class="cad-viewer-need__hint">Al terminar la conversión se abre el Explorador con el .STEP generado: cárgalo aquí para verlo al vuelo o súbelo a la tarea para que todos lo vean.
+        <p class="cad-viewer-need__hint">El ayudante busca el archivo en tu PC (Inventor abierto o archivos recientes) y, si no lo encuentra, te pide que lo elijas. Al terminar se abre el Explorador con el .STP generado: cárgalo aquí para verlo al vuelo o súbelo a la tarea para que todos lo vean.
           <button type="button" class="cad-viewer-link" data-act="copy">Copiar comando de PowerShell</button></p>
       </div>`);
     node.querySelector('[data-cad="need-title"]').textContent = `Falta el modelo 3D (.STEP) de «${nativeName}»`;
-    const convertInput = { fileName: nativeName, projectLocation };
+    const convertInput = { fileName: nativeName, size: nativeAtt.size }; // el tamaño ayuda al ayudante a reconocer ESE archivo entre varios del mismo nombre
     node.querySelector('[data-act="convert"]').addEventListener("click", () => launchConvert(convertInput));
     node.querySelector('[data-act="local"]').addEventListener("click", pickLocalStep);
     node.querySelector('[data-act="copy"]').addEventListener("click", () => copyCommand(convertInput));

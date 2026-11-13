@@ -110,7 +110,7 @@ import { defaultSectorOf } from "../departments.js";
 import { getWorkCalendar } from "../data/work-calendar.js";
 import { describeDay, nextWorkingDay, dateKey, formatDayMonth } from "../work-calendar.js";
 import { createOpenLocationButton, createSuggestLocationControls } from "./open-location.js";
-import { localFolderName, projectLocation } from "../location.js";
+import { localFolderName } from "../location.js";
 import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
 import { wireTitleField } from "./title-field.js";
@@ -789,18 +789,6 @@ export function openTaskModal({
    * hace falta), o el proyecto principal — con su ID, o sin él si es de antes de
    * la v70 y aún no se numeró —, o nadie (tarea personal).
    */
-  /** v90: la carpeta del proyecto en el PC (su «Ubicación»; en una oferta, su campo «Ubicación»), "" si no hay. */
-  function currentFolderLocation() {
-    const offers = offersProject();
-    if (offers) {
-      const def = findOfferLocationField(offers);
-      const v = def ? draft.customFields[def.id] : "";
-      return typeof v === "string" ? v : "";
-    }
-    const main = draft.projectIds[0] ? projects.find((p) => p.id === draft.projectIds[0]) : null;
-    return main ? projectLocation(main) : "";
-  }
-
   async function folderOwner() {
     const offers = offersProject();
     if (offers) {
@@ -1544,8 +1532,7 @@ export function openTaskModal({
       // Drive, por su ID; sin proyecto (tarea personal), «Tareas personales». Se lee en cada
       // subida: si se cambia de proyecto en el modal, los archivos siguientes van a la carpeta del nuevo.
       getOwner: folderOwner,
-      // v90: visor 3D y asistente de .ipt/.iam — la carpeta del proyecto (dónde busca el ayudante «Convertir a .STEP»), el proyecto y los adjuntos CAD de sus demás tareas
-      getLocation: currentFolderLocation,
+      // v90: visor 3D y asistente de .ipt/.iam — el proyecto y los adjuntos CAD de sus demás tareas (para emparejar un .ipt/.iam con su STEP)
       getProjectId: () => { const offers = offersProject(); return (offers ? offers.id : draft.projectIds[0]) || ""; },
       getAttachmentsPool: () => (getProjectAttachments ? getProjectAttachments(draft.projectIds, taskId) : []),
       onOwnerFolder, // v75: el id de la carpeta del ID donde quedó cada archivo (→ `driveFolderId`)

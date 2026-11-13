@@ -10,8 +10,8 @@
 //      ángulo), más el «snap» a vértice/arista, la agrupación de triángulos coplanares (cuando el STEP no trae caras
 //      B-Rep) y la descripción de una cara a partir de sus triángulos.
 //   3. Vistas rápidas, distancia de encuadre y textos de las cotas.
-//   4. El enlace `chusy-step://` y el comando de PowerShell del ayudante que convierte UN .ipt/.iam a .STEP
-//      (assets/convertir-step/), y el reparto de un lote de subida (qué archivos esperan a su STEP).
+//   4. El enlace `chusy-step://` y el comando de PowerShell del ayudante que convierte UN .ipt/.iam a STEP (.stp, junto al original;
+//      assets/convertir-step/), y el reparto de un lote de subida (qué archivos esperan a su STEP).
 //
 // Unidades: milímetros (occt-import-js entrega las coordenadas del STEP en mm). Un punto es `[x, y, z]` o `{x, y, z}`.
 // ============================================================================
@@ -468,25 +468,30 @@ function cleanPathInput(raw) {
   return n.kind === "folder" ? n.value : "";
 }
 
-/** `{ filePath, fileName, searchRoot }` ya validados para el ayudante, o `null` si no hay un `.ipt`/`.iam` al que apuntar. */
-function resolveConvertTarget({ filePath, fileName, projectLocation } = {}) {
+const positiveInt = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
+
+/** `{ filePath, fileName, searchRoot, size, modified }` ya validados para el ayudante, o `null` si no hay un `.ipt`/`.iam` al que apuntar. */
+function resolveConvertTarget({ filePath, fileName, projectLocation, size, lastModified } = {}) {
   const full = cleanPathInput(filePath);
-  if (full && isInventorNativeFile(full)) return { filePath: full, fileName: "", searchRoot: "" };
+  if (full && isInventorNativeFile(full)) return { filePath: full, fileName: "", searchRoot: "", size: 0, modified: 0 };
   const name = cleanText(fileName).replace(/^.*[\\/]/, "");
   if (!name || !isInventorNativeFile(name)) return null;
-  return { filePath: "", fileName: name, searchRoot: cleanPathInput(projectLocation) };
+  return { filePath: "", fileName: name, searchRoot: cleanPathInput(projectLocation), size: positiveInt(size), modified: positiveInt(lastModified) };
 }
 
 /**
- * El enlace que entiende el ayudante: `chusy-step://convert?file=<ruta completa o nombre>&searchRoot=<carpeta>`.
- * Con la ruta completa del `.ipt`/`.iam` solo va `file`; con solo el nombre, `searchRoot` (la ubicación del proyecto)
- * es la carpeta donde el ayudante buscará ESE nombre exacto. Devuelve "" si no hay un `.ipt`/`.iam` válido.
+ * El enlace que entiende el ayudante: `chusy-step://convert?file=<ruta completa o nombre>&size=<bytes>&modified=<ms>[&searchRoot=<carpeta>]`.
+ * El navegador NO puede saber en qué carpeta está el archivo que se sube (solo su nombre, tamaño y fecha de modificación):
+ * esos tres datos viajan para que el ayudante localice en el PC ESE archivo (Inventor abierto, archivos recientes de Windows…) y
+ * no otro del mismo nombre. Con la ruta completa del `.ipt`/`.iam` solo va `file`. `searchRoot` es opcional (una carpeta donde
+ * buscar ese nombre exacto) y Chusy ya no lo manda: la ubicación del proyecto no es la del archivo. Devuelve "" si no hay un
+ * `.ipt`/`.iam` válido.
  */
 export function buildConvertStepProtocolUrl(input) {
   const t = resolveConvertTarget(input);
   if (!t) return "";
   const file = t.filePath || t.fileName;
-  return `${CONVERT_STEP_PROTOCOL}://convert?file=${encodeURIComponent(file)}${t.searchRoot ? `&searchRoot=${encodeURIComponent(t.searchRoot)}` : ""}`;
+  return `${CONVERT_STEP_PROTOCOL}://convert?file=${encodeURIComponent(file)}${t.size ? `&size=${t.size}` : ""}${t.modified ? `&modified=${t.modified}` : ""}${t.searchRoot ? `&searchRoot=${encodeURIComponent(t.searchRoot)}` : ""}`;
 }
 
 /** Un texto entre comillas simples para PowerShell (las comillas simples, también las «tipográficas», se duplican). */
@@ -504,7 +509,7 @@ export function buildConvertStepPowerShellCommand(input) {
   const script = '& "$env:LOCALAPPDATA\\Chusy\\convertir-step.ps1"';
   return t.filePath
     ? `${script} -FilePath ${psQuote(t.filePath)}`
-    : `${script} -FileName ${psQuote(t.fileName)}${t.searchRoot ? ` -SearchRoot ${psQuote(t.searchRoot)}` : ""}`;
+    : `${script} -FileName ${psQuote(t.fileName)}${t.size ? ` -Size ${t.size}` : ""}${t.modified ? ` -Modified ${t.modified}` : ""}${t.searchRoot ? ` -SearchRoot ${psQuote(t.searchRoot)}` : ""}`;
 }
 
 // ---------------------------------------------------------------------------

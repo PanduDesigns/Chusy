@@ -3,14 +3,13 @@
 // todos los archivos CAD (.step, .stp, .ipt, .iam) subidos a las tareas, para abrirlos y medirlos en 3D sin entrar en cada
 // tarea. La lógica (indexado, emparejamiento .ipt/.iam ↔ STEP y filtros) es pura y vive en js/parts-viewer.js.
 //
-//   renderPartsViewerView(container, { parts, state, onStateChange, onOpenTask, storage, projects })
+//   renderPartsViewerView(container, { parts, state, onStateChange, onOpenTask, storage })
 //     parts   las piezas ya indexadas (indexUploadedCadParts), sin filtrar; esta vista aplica los filtros del estado
 //     state   { search, projectId, sector, availability } — de sesión; `onStateChange` lo recibe SIN repintar la pantalla
 //             entera (al teclear no se pierde el foco: solo se repinta la lista de resultados)
 // ============================================================================
 import { escapeHtml, showToast } from "../utils.js";
 import { formatBytes } from "../drive-files.js";
-import { projectLocation } from "../location.js";
 import { getCadExtension } from "../cad-viewer.js";
 import { SECTOR_FILTER_OPTIONS, normalizeSectorFilter } from "../project-properties.js";
 import {
@@ -57,7 +56,7 @@ function cardHtml(p) {
     </article>`;
 }
 
-export function renderPartsViewerView(container, { parts = [], state, onStateChange, onOpenTask, storage, projects = [] } = {}) {
+export function renderPartsViewerView(container, { parts = [], state, onStateChange, onOpenTask, storage } = {}) {
   const st = { ...emptyPartsState(), ...(state || {}) };
   st.sector = normalizeSectorFilter(st.sector);
   st.availability = normalizePartsAvailability(st.availability);
@@ -66,7 +65,6 @@ export function renderPartsViewerView(container, { parts = [], state, onStateCha
   const opt = (value, label, selected) => `<option value="${escapeHtml(value)}"${selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
   const select = (id, label, html) => `<label class="orders-select"><span class="orders-select__label">${label}</span><select class="field__select" id="${id}">${html}</select></label>`;
   const byKey = new Map(parts.map((p) => [p.key, p]));
-  const projectById = new Map(projects.map((p) => [p.id, p]));
 
   container.innerHTML = `
     <div class="orders-view parts-viewer">
@@ -120,13 +118,11 @@ export function renderPartsViewerView(container, { parts = [], state, onStateCha
 
   function openPart(p) {
     const attachment = p.primaryStep || p.primaryNative;
-    const project = projectById.get(p.projectId);
     openCadViewerModal({
       attachment,
       attachmentsPool: p.nativeFiles.concat(p.stepFiles),
       storage,
       title: p.displayName,
-      projectLocation: projectLocation(project),
     });
   }
 

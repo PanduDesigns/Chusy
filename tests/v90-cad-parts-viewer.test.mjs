@@ -185,19 +185,9 @@ const square = (z, size = 10) => [0, 0, z, size, 0, z, size, size, z, 0, 0, z, s
   // el script de PowerShell: convierte UN archivo
   const ps1 = read("assets/convertir-step/convertir-step.ps1");
   const code = ps1.split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join("\n");
-  check("convertir-step.ps1: acepta -FilePath, -FileName, -SearchRoot y la URL del protocolo", /param\(\[string\]\$Url, \[string\]\$FilePath, \[string\]\$FileName, \[string\]\$SearchRoot\)/.test(ps1) && /\^chusy-step:\/\{0,2\}/.test(ps1) && /'file'/.test(ps1) && /'searchroot'/.test(ps1));
-  check("… valida la extensión .ipt/.iam y que el archivo exista", /Test-InventorFile/.test(code) && /'\.ipt'/.test(code) && /'\.iam'/.test(code) && /Test-Path -LiteralPath \$FilePath -PathType Leaf/.test(code));
-  check("… con -FileName busca ÚNICAMENTE ese nombre exacto (filtro por nombre + comparación exacta, sin comodines)", /Get-ChildItem -LiteralPath \$root -Recurse -File -Filter \$name/.test(code) && /\$_\.Name -ieq \$name/.test(code) && !/Filter\s+['"]?\*/.test(code) && !/\*\.(ipt|iam)/i.test(ps1) && !/-Include/.test(code));
-  eq("… hay UNA sola llamada a Get-ChildItem y UNA sola exportación (SaveCopyAs): nada de bucles sobre la carpeta", [(code.match(/Get-ChildItem/g) || []).length, (code.match(/'SaveCopyAs'/g) || []).length], [1, 1]);
-  check("… ningún bucle recorre los resultados de Get-ChildItem (ni foreach, ni ForEach-Object, ni %)", !/foreach\s*\([^)]*Get-ChildItem/i.test(code) && !/Get-ChildItem[^\n]*\|\s*(ForEach-Object|%)/i.test(code) && !/\$found\s*\|\s*(ForEach-Object|%)/i.test(code) && !/foreach\s*\(\$\w+\s+in\s+\$found\)/i.test(code));
-  check("… si hay 0 o varios archivos con ese nombre no convierte ninguno", /\$found\.Count -eq 0/.test(code) && /\$found\.Count -gt 1/.test(code) && /exit 1/.test(code));
-  check("… no mira las copias OldVersions de Inventor", /OldVersions/.test(code));
-  check("… usa Inventor activo (GetActiveObject) o crea el suyo (COM) y lo cierra si lo creó", /GetActiveObject\('Inventor\.Application'\)/.test(code) && /New-Object -ComObject 'Inventor\.Application'/.test(code) && /\$createdInventor/.test(code) && /\$inventor\.Quit\(\)/.test(code));
-  check("… traductor STEP {90AF7F40-0C01-11D5-8E83-0010B541CD80}, protocolo AP214 (3) y SaveCopyAs", /\{90AF7F40-0C01-11D5-8E83-0010B541CD80\}/.test(code) && /\$apProtocolAP214 = 3/.test(code) && /ApplicationProtocolType/.test(code));
-  check("… exporta <MismoNombre>.step en la MISMA carpeta del archivo", /Split-Path -Path \$source -Parent/.test(code) && /GetFileNameWithoutExtension\(\$source\) \+ '\.step'/.test(code));
-  check("… si ya estaba abierto en Inventor lo deja abierto; si no, lo cierra SIN guardar", /\$openedByUs/.test(code) && /\$document\.Close\(\$true\)/.test(code) && /FullFileName -ieq \$source/.test(code));
-  check("… abre el Explorador con el .step seleccionado", /explorer\.exe/.test(code) && /\/select,/.test(code));
-  check("… el texto del script es ASCII (PowerShell 5 rompe las tildes sin BOM)", /^[\x00-\x7F]*$/.test(ps1));
+  // (el comportamiento del script —búsqueda del archivo, un solo archivo, Inventor— se prueba en v91-convertir-step.test.mjs)
+  const psScript = read("assets/convertir-step/convertir-step.ps1");
+  check("… el texto del script es ASCII (PowerShell 5 rompe las tildes sin BOM)", /^[\x00-\x7F]*$/.test(psScript));
   const bat = read("assets/convertir-step/Instalar-ConvertirStep.bat"), unbat = read("assets/convertir-step/Desinstalar-ConvertirStep.bat"), leeme = read("assets/convertir-step/LEEME.txt");
   check("Instalar-ConvertirStep.bat: registra HKCU\\Software\\Classes\\chusy-step (sin administrador) y copia el script", /HKCU\\Software\\Classes\\chusy-step/.test(bat) && /URL Protocol/.test(bat) && /convertir-step\.ps1/.test(bat) && /shell\\open\\command/.test(bat) && !/HKLM|HKEY_LOCAL_MACHINE/i.test(bat));
   check("Desinstalar-ConvertirStep.bat: limpia la clave y el script", /reg delete "HKCU\\Software\\Classes\\chusy-step"/.test(unbat) && /convertir-step\.ps1/.test(unbat));
@@ -395,16 +385,16 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
   const assistant = await import("../js/components/cad-upload-assistant.js");
 
   // --- sin STEP gemelo: aviso y las dos salidas
-  let h = viewer.openCadViewerModal({ attachment: { id: "n1", name: "Eje_26001.ipt", taskId: "T1", projectId: "P1" }, attachmentsPool: [{ id: "o", name: "Otro.step", taskId: "T1" }], storage: {}, projectLocation: NAS, deps: { launchConvert, copyCommand } });
+  let h = viewer.openCadViewerModal({ attachment: { id: "n1", name: "Eje_26001.ipt", taskId: "T1", projectId: "P1", size: 4096 }, attachmentsPool: [{ id: "o", name: "Otro.step", taskId: "T1" }], storage: {}, deps: { launchConvert, copyCommand } });
   await h.ready;
   const need = $(".cad-viewer-need");
   check("👁️ de un .ipt sin gemelo: el modal explica que hace falta el .STEP/.STP", need && /Falta el modelo 3D \(\.STEP\) de «Eje_26001\.ipt»/.test(need.textContent) && /gemelo/.test(need.textContent));
   const bConv = $('[data-act="convert"]', need), bLocal = $('[data-act="local"]', need);
   eq("… con los dos botones directos", [bConv.textContent, bLocal.textContent], ["⚙️ Convertir este archivo a .STEP en mi PC (PowerShell)", "📂 Cargar archivo .STEP/.STP local"]);
   click(bConv);
-  eq("… «Convertir» manda SOLO ese archivo y la carpeta del proyecto", launches, [{ fileName: "Eje_26001.ipt", projectLocation: NAS }]);
+  eq("… «Convertir» manda SOLO ese archivo (nombre y tamaño; el ayudante lo localiza en el PC)", launches, [{ fileName: "Eje_26001.ipt", size: 4096 }]);
   click($('[data-act="copy"]', need));
-  eq("… «Copiar comando de PowerShell» copia el mismo encargo", copies, [{ fileName: "Eje_26001.ipt", projectLocation: NAS }]);
+  eq("… «Copiar comando de PowerShell» copia el mismo encargo", copies, [{ fileName: "Eje_26001.ipt", size: 4096 }]);
   check("… la barra de herramientas 3D no se enseña aún", $('[data-cad="toolbar"]').hidden === true);
   h.close();
   check("cerrar quita el modal", !$(".cad-viewer-overlay"));
@@ -580,7 +570,7 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
     check("… al cerrar de nuevo se libera todo (segundo renderer)", renderers[1].disposed && renderers[1].lost);
 
     // --- .ipt sin gemelo: cargar un STEP local al vuelo y subirlo a la tarea
-    h = viewer.openCadViewerModal({ attachment: { id: "n2", name: "Placa.ipt", taskId: "T1" }, attachmentsPool: [], storage, projectLocation: NAS, onUploadStep: (f) => uploaded.push(f), deps: { loadEngine, launchConvert, copyCommand } });
+    h = viewer.openCadViewerModal({ attachment: { id: "n2", name: "Placa.ipt", taskId: "T1" }, attachmentsPool: [], storage, onUploadStep: (f) => uploaded.push(f), deps: { loadEngine, launchConvert, copyCommand } });
     await h.ready;
     let picker = null;
     const origClick = window.HTMLInputElement.prototype.click;
@@ -605,20 +595,15 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
 
   // --- asistente de subida
   const ipt = new File(["abc"], "Eje_26001.ipt"), iam = new File(["abcd"], "Conjunto.iam");
-  let a = assistant.openCadUploadAssistant({ files: [ipt], getLocation: () => NAS, deps: { launchConvert, copyCommand } });
+  let a = assistant.openCadUploadAssistant({ files: [ipt], deps: { launchConvert, copyCommand } });
   launches.length = 0;
-  const loc = $('[data-cad="location"]');
-  check("asistente: título, lista del archivo y los tres botones del enunciado", /Falta el modelo 3D/.test($(".cad-assistant").textContent) && $$(".cad-assistant__row").length === 1 && $('[data-act="convert"]').textContent === "⚙️ 1. Convertir a .STEP en mi PC" && $('[data-act="include"]').textContent === "➕ 2. Incluir el .STEP generado y subir todo" && $('[data-act="native-only"]').textContent === "Subir solo el .ipt/.iam sin .STEP" && loc.value === NAS);
+  check("asistente: título, lista del archivo y los tres botones del enunciado", /Falta el modelo 3D/.test($(".cad-assistant").textContent) && $$(".cad-assistant__row").length === 1 && $('[data-act="convert"]').textContent === "⚙️ 1. Convertir a .STEP en mi PC" && $('[data-act="include"]').textContent === "➕ 2. Incluir el .STEP generado y subir todo" && $('[data-act="native-only"]').textContent === "Subir solo el .ipt/.iam sin .STEP" && !$('[data-cad="location"]'));
   click($('[data-act="convert"]'));
   await tick(2);
-  eq("«1. Convertir» convierte SOLO ese archivo, buscándolo en la carpeta del proyecto", launches, [{ fileName: "Eje_26001.ipt", projectLocation: NAS }]);
+  eq("«1. Convertir» convierte SOLO ese archivo y manda su nombre, tamaño y fecha (no la carpeta del proyecto)", launches, [{ fileName: "Eje_26001.ipt", size: 3, lastModified: ipt.lastModified }]);
   check("… y lo marca como enviado", /Orden enviada/.test($(".cad-assistant__state").textContent));
-  typeInto(loc, "C:\\Proy\\Eje_26001.ipt");
-  click($('[data-act="convert"]'));
-  await tick(2);
-  eq("… si se escribe la ruta completa del archivo, se usa esa (-FilePath)", launches[1], { filePath: "C:\\Proy\\Eje_26001.ipt", fileName: "Eje_26001.ipt" });
   click($('[data-act="copy"]'));
-  eq("… «Copiar comando» pasa lo mismo", copies[copies.length - 1], { filePath: "C:\\Proy\\Eje_26001.ipt", fileName: "Eje_26001.ipt" });
+  eq("… «Copiar comando» pasa lo mismo", copies[copies.length - 1], { fileName: "Eje_26001.ipt", size: 3, lastModified: ipt.lastModified });
   let picker2 = null;
   const origClick2 = window.HTMLInputElement.prototype.click;
   window.HTMLInputElement.prototype.click = function () { picker2 = this; };
@@ -631,12 +616,12 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
   check("… entrega el .ipt y el .STEP elegido para subirlos juntos", res.action === "upload-with-step" && res.files.map((f) => f.name).join() === "Eje_26001.ipt,Eje_26001.step", res.files.map((f) => f.name));
   check("… y cierra el asistente", !$(".cad-assistant-overlay"));
   // varios archivos: un botón por archivo, sin conversión en bloque
-  a = assistant.openCadUploadAssistant({ files: [ipt, iam], getLocation: () => "", deps: { launchConvert, copyCommand } });
+  a = assistant.openCadUploadAssistant({ files: [ipt, iam], deps: { launchConvert, copyCommand } });
   launches.length = 0;
   check("varios archivos: una fila con su botón por cada uno y sin botón global de conversión", $$(".cad-assistant__row").length === 2 && $('[data-act="convert"]').hidden === true && $$(".cad-assistant__row button").length === 2);
   click($$(".cad-assistant__row button")[1]);
   await tick(2);
-  eq("… cada botón convierte solo SU archivo", launches, [{ fileName: "Conjunto.iam", projectLocation: "" }]);
+  eq("… cada botón convierte solo SU archivo", launches, [{ fileName: "Conjunto.iam", size: 4, lastModified: iam.lastModified }]);
   const merged = assistant.openCadUploadAssistant({ files: [new File(["z"], "Tercero.ipt")], deps: {} });
   check("si llega otro lote con el asistente abierto, se suma a la misma ventana", merged.merged === true && $$(".cad-assistant__row").length === 3 && $$(".cad-assistant-overlay").length === 1);
   click($('[data-act="native-only"]'));
@@ -667,7 +652,7 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
   let atts = [att("k1", "Soporte.ipt"), att("k2", "Soporte.step"), att("k3", "Brida.iam"), att("k4", "Plano.pdf"), att("k5", "Tapa.stp")];
   const ui2 = createFileAttachments({
     container: box, dropTarget: drop, storage: driveStorage, getAttachments: () => atts, addAttachment: (x) => atts.push(x), removeAttachment() {},
-    currentUser: { uid: "u1", name: "Ramón" }, getTaskId: () => "T1", getProjectId: () => "P1", getLocation: () => NAS,
+    currentUser: { uid: "u1", name: "Ramón" }, getTaskId: () => "T1", getProjectId: () => "P1",
     getAttachmentsPool: () => [{ ...att("z1", "Brida.step"), taskId: "T2", projectId: "P1" }], onDirty() {}, makeThumbnail: async () => null,
   });
   const cardOf = (id) => $(`[data-att-id="${id}"]`, box);
@@ -702,7 +687,6 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
   dropFiles([new File(["1"], "Nuevo.ipt"), new File(["2"], "Nuevo.step"), new File(["3"], "Notas.txt"), new File(["4"], "Cojinete.iam")]);
   await tick(20);
   check("subida: .ipt con su .step en el lote y un .txt suben directos; el .iam sin gemelo espera al asistente", uploads.sort().join() === "Notas.txt,Nuevo.ipt,Nuevo.step" && !!$(".cad-assistant-overlay") && $$(".cad-assistant__name").map((n) => n.textContent).join() === "Cojinete.iam", uploads);
-  check("… el asistente arranca con la carpeta del proyecto", $('[data-cad="location"]').value === NAS);
   click($('[data-act="native-only"]'));
   await tick(30);
   check("… «Subir solo el .iam» lo sube", uploads.includes("Cojinete.iam") && !$(".cad-assistant-overlay"));
@@ -864,21 +848,21 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
 // ---------------------------------------------------------------- 7) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=90", (idx.match(/css\/[\w-]+\.css\?v=90/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en otra versión", !/\.css\?v=(?!90)\d+/.test(idx));
-  check("package.json y package-lock.json: 90.0.0", JSON.parse(read("package.json")).version === "90.0.0" && JSON.parse(read("package-lock.json")).version === "90.0.0");
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 90; la entrega actual la fija v91-convertir-step.test.mjs)", new Set([...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => m[1])).size + ":" + (idx.match(/css\/[\w-]+\.css\?v=\d+/g) || []).length, "1:14");
+  check("index.html: ningún <link> se ha quedado en una versión anterior a la 90", [...idx.matchAll(/\.css\?v=(\d+)/g)].every((m) => Number(m[1]) >= 90));
+  check("package.json y package-lock.json: versión ≥ 90", parseInt(JSON.parse(read("package.json")).version, 10) >= 90 && parseInt(JSON.parse(read("package-lock.json")).version, 10) >= 90);
   const pkg = JSON.parse(read("package.json"));
   check("package.json: three y occt-import-js solo como devDependencies (para las pruebas; la app los carga del CDN)", !pkg.dependencies && pkg.devDependencies.three && pkg.devDependencies["occt-import-js"]);
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: entrada 90 la primera, mayor que la 89, sobre visor 3D, medir, STEP y Visualizador de piezas", r.id === 90 && r.id > RELEASES[1].id && /3D/.test(r.title) && /Punto a Punto/.test(JSON.stringify(r)) && /Cara a Cara/.test(JSON.stringify(r)) && /Visualizador de piezas/.test(JSON.stringify(r)) && /\.STEP/.test(JSON.stringify(r)) && r.items.length >= 5, r.title);
+  const r = RELEASES.find((x) => x.id === 90);
+  check("Novedades: entrada 90, mayor que la 89, sobre visor 3D, medir, STEP y Visualizador de piezas", !!r && r.id > RELEASES.find((x) => x.id === 89).id && /3D/.test(r.title) && /Punto a Punto/.test(JSON.stringify(r)) && /Cara a Cara/.test(JSON.stringify(r)) && /Visualizador de piezas/.test(JSON.stringify(r)) && /\.STEP/.test(JSON.stringify(r)) && r.items.length >= 5, r.title);
   const rules = read("firestore.rules");
   check("firestore.rules: bloque meta/partsViewerAccess (lectura cuenta activa, escritura admin, forma exacta) y sin tocar el de Pedidos", /match \/meta\/partsViewerAccess \{[^}]*allow read: if isActiveUser\(\);[^}]*allow create, update: if isAdmin\(\)[^}]*hasOnly\(\['allowedDepartments', 'updatedBy', 'updatedAt'\]\)/s.test(rules) && /match \/meta\/ordersAccess \{/.test(rules));
   const css = [read("css/07-modals.css"), read("css/06-list-board.css")].join("\n");
   check("CSS: .cad-viewer-* y .parts-viewer-* (con variables de tema, sin colores de tema fijos en el cromo)", [".cad-viewer-overlay", ".cad-viewer-toolbar", ".cad-viewer-stage", ".cad-viewer-panel", ".cad-viewer-label", ".cad-viewer-marker", ".cad-assistant", ".parts-viewer-grid", ".parts-viewer-card", ".parts-viewer-badge--ok", ".parts-viewer-badge--warn"].every((c) => css.includes(c)) && /\.cad-viewer-window \{[^}]*var\(--color-panel\)/.test(css) && /data-theme="light"\] \.cad-viewer-stage/.test(css));
   const app = read("js/app.js");
   check("app.js: enruta «parts-viewer» (permiso, selección, restauración, vista, suscripción y limpieza al salir)", /canViewPartsViewer/.test(app) && /function selectPartsViewer/.test(app) && /saved\.mode === "parts-viewer"/.test(app) && /renderPartsViewerView/.test(app) && /subscribeToPartsViewerAccess/.test(app) && /unsubPartsViewerAccess = null/.test(app) && /partsViewerAccess: partsViewerAllowed/.test(app) && /indexUploadedCadParts/.test(app));
-  check("task-modal.js: pasa la ubicación, el proyecto y el pool de adjuntos CAD a los adjuntos", /getLocation: currentFolderLocation/.test(read("js/components/task-modal.js")) && /getAttachmentsPool/.test(read("js/components/task-modal.js")) && /getProjectAttachments: getProjectCadAttachments/.test(app));
+  check("task-modal.js: pasa el proyecto y el pool de adjuntos CAD a los adjuntos", /getProjectId/.test(read("js/components/task-modal.js")) && /getAttachmentsPool/.test(read("js/components/task-modal.js")) && /getProjectAttachments: getProjectCadAttachments/.test(app));
   const html = [read("js/cad-viewer.js"), read("js/cad-engine.js"), read("js/cad-model.js"), read("js/components/cad-viewer-modal.js"), read("js/components/cad-upload-assistant.js"), read("js/views/parts-viewer-view.js"), read("js/parts-viewer.js")].join("\n");
   check("sin TODO ni placeholders en los módulos nuevos", !/\bTODO\b|FIXME|XXX:|placeholder\(/.test(html.replace(/placeholder="[^"]*"/g, "")));
   check("los imports de los módulos nuevos son relativos y con extensión .js", [...html.matchAll(/from "(\.[^"]+)"/g)].every((m) => m[1].endsWith(".js")));

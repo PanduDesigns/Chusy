@@ -5,21 +5,20 @@
 //   2. ➕ Incluir el .STEP generado y subir todo — abre el selector para añadir el .STEP al lote;
 //   3. Subir solo el .ipt/.iam sin .STEP.
 //
-//   openCadUploadAssistant({ files, getLocation, deps }) → { addFiles(files), close(), result }
+//   openCadUploadAssistant({ files, deps }) → { addFiles(files), close(), result }
 //     (si ya hay un asistente abierto, los archivos se suman a ese y devuelve `{ merged: true, result: null }`)
 //     files        los File .ipt/.iam que esperan decisión
-//     getLocation  () => carpeta del proyecto (dónde buscará el ayudante el nombre exacto del archivo)
 //     result       promesa de `{ action: 'upload-with-step' | 'upload-native-only' | 'cancel', files: File[] }`, con los
 //                  archivos que hay que subir ahora (los .ipt/.iam y, en el primer caso, los .STEP añadidos)
 // ============================================================================
-import { el, escapeHtml, showToast } from "../utils.js";
+import { el, showToast } from "../utils.js";
 import { formatBytes } from "../drive-files.js";
-import { isDirect3dCadFile, isInventorNativeFile, getCadBaseReference } from "../cad-viewer.js";
+import { isDirect3dCadFile, getCadBaseReference } from "../cad-viewer.js";
 import { launchConvertStep, copyConvertStepCommand } from "./convert-step-launcher.js";
 
 let current = null;
 
-export function openCadUploadAssistant({ files = [], getLocation = () => "", deps = {} } = {}) {
+export function openCadUploadAssistant({ files = [], deps = {} } = {}) {
   if (current) { current.addFiles(files); return { merged: true, result: null }; }
   const launchConvert = deps.launchConvert || launchConvertStep;
   const copyCommand = deps.copyCommand || copyConvertStepCommand;
@@ -36,10 +35,7 @@ export function openCadUploadAssistant({ files = [], getLocation = () => "", dep
         <div class="modal__body">
           <p class="cad-assistant__lead">Para que el equipo pueda <strong>ver y medir la pieza en 3D</strong> dentro de Chusy hace falta el <strong>.STEP</strong> de cada archivo de Inventor. Se genera en tu PC convirtiendo <strong>solo ese archivo</strong> (nunca toda la carpeta).</p>
           <ul class="cad-assistant__list" data-cad="list"></ul>
-          <label class="cad-assistant__field">Carpeta del proyecto o ruta completa del archivo (opcional)
-            <input type="text" class="input" data-cad="location" placeholder="\\\\NASMARTECH\\…\\26001 - Cliente" spellcheck="false">
-          </label>
-          <p class="cad-assistant__hint">Al terminar la conversión se abre el Explorador con el .STEP generado. Luego pulsa <strong>➕ 2</strong> y elígelo.
+          <p class="cad-assistant__hint">El ayudante localiza en tu PC el archivo que estás subiendo (por nombre, tamaño y fecha) y lo convierte <strong>donde está</strong>; si no lo encuentra, te pide que lo elijas. Al terminar se abre el Explorador con el .STP generado: pulsa <strong>➕ 2</strong> y elígelo.
             <button type="button" class="cad-viewer-link" data-act="copy">Copiar comando de PowerShell</button></p>
         </div>
         <div class="modal__footer cad-assistant__foot">
@@ -52,16 +48,12 @@ export function openCadUploadAssistant({ files = [], getLocation = () => "", dep
     </div>`);
   const q = (n) => root.querySelector(`[data-cad="${n}"]`);
   const list = q("list");
-  const locationInput = q("location");
   const convertAll = root.querySelector('[data-act="convert"]');
-  try { locationInput.value = String(getLocation() || ""); } catch { /* sin ubicación */ }
   document.body.appendChild(root);
 
+  /** Lo que se sabe del archivo que se sube: el navegador no da su carpeta, pero sí nombre, tamaño y fecha, y con eso el ayudante lo reconoce en el PC. */
   function convertInputFor(file) {
-    const typed = locationInput.value.trim();
-    // Una ruta escrita que acaba en .ipt/.iam es la del propio archivo; cualquier otra es la carpeta donde buscarlo.
-    if (typed && isInventorNativeFile(typed)) return { filePath: typed, fileName: file.name };
-    return { fileName: file.name, projectLocation: typed };
+    return { fileName: file.name, size: file.size, lastModified: file.lastModified };
   }
 
   function render() {
@@ -122,7 +114,7 @@ export function openCadUploadAssistant({ files = [], getLocation = () => "", dep
       input.remove();
       if (!picked.length) { showToast("Elige el archivo .step o .stp generado.", "error"); return; }
       const wanted = new Set(natives.map((f) => getCadBaseReference(f.name)));
-      if (!picked.some((f) => wanted.has(getCadBaseReference(f.name)))) showToast("Ojo: el .STEP elegido no se llama igual que el .ipt/.iam; se sube igualmente.", "error");
+      if (!picked.some((f) => wanted.has(getCadBaseReference(f.name)))) showToast("Ojo: el .STEP/.STP elegido no se llama igual que el .ipt/.iam; se sube igualmente.", "error");
       settle("upload-with-step", picked);
     });
     document.body.appendChild(input);

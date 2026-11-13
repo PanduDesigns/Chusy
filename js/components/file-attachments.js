@@ -70,7 +70,6 @@ export function createFileAttachments({
   removeAttachment,
   currentUser,
   getTaskId,
-  getLocation, // v90: () => carpeta del proyecto (texto) — dónde buscará el ayudante «Convertir a .STEP» un .ipt/.iam por su nombre
   getProjectId, // v90: () => id del proyecto principal de la tarea (para emparejar un .ipt/.iam con su STEP gemelo del mismo proyecto)
   getAttachmentsPool, // v90: () => [{ ...adjunto, taskId, projectId }] — adjuntos de otras tareas del proyecto, para ese emparejamiento
   getOwner, // v70: () => ({ code, name, kind, folderId }) | ({ id, name }) | null — de quién es el archivo (puede devolver una promesa)
@@ -222,7 +221,7 @@ export function createFileAttachments({
   }
 
   function askForStep(natives) {
-    const handle = openCadUploadAssistant({ files: natives, getLocation: () => (getLocation ? getLocation() : "") });
+    const handle = openCadUploadAssistant({ files: natives });
     if (handle.merged) return;
     assistant = handle;
     handle.result.then(({ files: toUpload }) => {
@@ -361,7 +360,6 @@ export function createFileAttachments({
       attachment: { ...att, taskId, projectId },
       attachmentsPool: own.concat(extra),
       storage,
-      projectLocation: getLocation ? getLocation() : "",
       onUploadStep: (f) => addFiles([f]),
     });
   }
