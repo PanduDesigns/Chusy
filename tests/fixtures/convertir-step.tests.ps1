@@ -20,27 +20,33 @@ $ms = ([System.DateTimeOffset]$when).ToUnixTimeMilliseconds()
 . $Script -Size 4 -Modified $ms
 $q = Read-ChusyUrl 'chusy-step://convert/?file=Eje%5F26001.ipt&size=4&modified=123&searchRoot=C%3A%5CProy%20x'
 Check 'Read-ChusyUrl: file, size, modified y searchRoot (con la / que anade el navegador)' ($q['file'] -eq 'Eje_26001.ipt' -and $q['size'] -eq '4' -and $q['modified'] -eq '123' -and $q['searchroot'] -eq 'C:\Proy x')
-Check 'Test-SameFile: mismo tamano y fecha' (Test-SameFile $mine)
-Check 'Test-SameFile: otro tamano o fecha no vale' (-not (Test-SameFile $other))
-Check 'Test-SameFile: un archivo inexistente no vale' (-not (Test-SameFile (Join-Path $Work 'nada.ipt')))
+Check 'Test-SameFile: mismo tamano y fecha' (Test-SameFile $mine 4 $ms 3000)
+Check 'Test-SameFile: otro tamano o fecha no vale' (-not (Test-SameFile $other 4 $ms 3000))
+Check 'Test-SameFile: sin datos (0) no se comprueba nada mas que el archivo exista' (Test-SameFile $other 0 0 3000)
+Check 'Test-SameFile: un archivo inexistente no vale' (-not (Test-SameFile (Join-Path $Work 'nada.ipt') 0 0 3000))
 
 # --- Find-SourceFile: el orden y la comprobacion de identidad (Inventor y Recientes se simulan)
-function Get-InventorOpenPaths([string]$Name) { return @($script:FakeOpen) }
-function Get-RecentPaths([string]$Name) { return @($script:FakeRecent) }
-$script:FakeOpen = @(); $script:FakeRecent = @()
+# Los simulacros se definen como funciones AUTONOMAS (con las rutas incrustadas): Invoke-Guarded copia las funciones al hilo de vigilancia.
+function Set-Fakes([string[]]$Open, [string[]]$Recent) {
+    $o = ($Open | ForEach-Object { "'" + $_ + "'" }) -join ','
+    $r = ($Recent | ForEach-Object { "'" + $_ + "'" }) -join ','
+    Invoke-Expression ('function script:Get-InventorOpenPaths([string]$Name) { return @(' + $o + ') }')
+    Invoke-Expression ('function script:Get-RecentPaths([string]$Name) { return @(' + $r + ') }')
+}
+Set-Fakes @() @()
 
-$script:FakeOpen = @($mine)
+Set-Fakes @($mine) @()
 Check 'un documento abierto en Inventor con ese nombre, tamano y fecha: se usa ese' ((Find-SourceFile -Name 'Eje_26001.ipt' -Root '' -NoDialog) -eq $mine)
-$script:FakeOpen = @($other); $script:FakeRecent = @($mine)
+Set-Fakes @($other) @($mine)
 Check 'si el abierto no es el que se sube (otro tamano/fecha), se salta a los archivos recientes' ((Find-SourceFile -Name 'Eje_26001.ipt' -Root '' -NoDialog) -eq $mine)
-$script:FakeOpen = @(); $script:FakeRecent = @($other)
+Set-Fakes @() @($other)
 Check 'un reciente que no coincide no se convierte en silencio (sin dialogo: no se encuentra)' ((Find-SourceFile -Name 'Eje_26001.ipt' -Root '' -NoDialog) -eq '')
-$script:FakeRecent = @()
+Set-Fakes @() @()
 Check 'por carpeta: encuentra ESE archivo (no la copia OldVersions ni el homonimo de otra carpeta)' ((Find-SourceFile -Name 'Eje_26001.ipt' -Root $Work -NoDialog) -eq $mine)
 Check 'por carpeta de un proyecto sin el archivo: no se encuentra' ((Find-SourceFile -Name 'Eje_26001.ipt' -Root $otro -NoDialog) -eq '')
-$script:FakeOpen = @($mine)
+Set-Fakes @($mine) @()
 Check 'la ruta completa manda sobre todo lo demas' ((Find-SourceFile -ExplicitPath $other -Name '' -Root '' -NoDialog) -eq $other)
-$script:FakeOpen = @()
+Set-Fakes @() @()
 $threw = $false; try { Find-SourceFile -ExplicitPath (Join-Path $Work 'a.pdf') -Name '' -Root '' -NoDialog } catch { $threw = $true }
 Check 'una ruta que no es .ipt/.iam se rechaza' $threw
 $threw = $false; try { Find-SourceFile -ExplicitPath (Join-Path $Work 'noexiste.ipt') -Name '' -Root '' -NoDialog } catch { $threw = $true }
@@ -49,8 +55,8 @@ $threw = $false; try { Find-SourceFile -Name 'a.dwg' -Root '' -NoDialog } catch 
 Check 'un nombre que no es .ipt/.iam se rechaza' $threw
 
 # --- Sin datos de tamano/fecha (el .ipt ya subido a Drive solo trae el tamano)
-$Size = 0; $Modified = 0   # (no se vuelve a cargar el script: pisaria los simulacros)
-$script:FakeRecent = @($other)
+$script:Size = 0; $script:Modified = 0   # (no se vuelve a cargar el script: pisaria los simulacros)
+Set-Fakes @() @($other)
 Check 'sin tamano ni fecha se acepta el primero que haya con ese nombre (reciente)' ((Find-SourceFile -Name 'Eje_26001.ipt' -Root '' -NoDialog) -eq $other)
 
 
@@ -126,6 +132,24 @@ Check 'conversion: si Inventor falla al exportar, el error sube y el archivo se 
 $log = New-FakeInventor $false -Missing $true
 $msg = ''; try { [void](Convert-ToStep $mine) } catch { $msg = $_.Exception.Message }
 Check 'conversion: sin traductor de STEP, error claro y no se abre ningun archivo' ($msg -match 'traductor de STEP' -and -not ($log | Where-Object { $_ -like 'Open:*' }))
+
+# --- Vigilancia: un paso que se cuelga (Inventor ocupado, recurso de red caido) NO bloquea el script
+function Get-Colgado([string]$Name) { Start-Sleep -Seconds 30; return @('1|nunca') }
+function Get-InventorOpenPaths([string]$Name) { Start-Sleep -Seconds 30; return @('1|nunca') }
+$t0 = Get-Date
+$res = Invoke-Guarded -Label 'prueba de paso colgado' -Function 'Get-InventorOpenPaths' -Arguments @('x.ipt') -Seconds 2
+$secs = ((Get-Date) - $t0).TotalSeconds
+Check 'vigilancia: un paso que no responde se abandona a los 2 s y devuelve $null (no se queda esperando)' ($null -eq $res -and $secs -lt 10)
+Set-Fakes @() @($mine)
+$script:Size = 4; $script:Modified = $ms
+$t0 = Get-Date
+Set-Fakes @() @()
+function Get-InventorOpenPaths([string]$Name) { Start-Sleep -Seconds 30; return @() }
+Invoke-Expression ('function Get-RecentPaths([string]$Name) { return @(' + "'" + $mine + "'" + ') }')
+$found = Find-SourceFile -Name 'Eje_26001.ipt' -Root '' -NoDialog
+$secs = ((Get-Date) - $t0).TotalSeconds
+Check 'vigilancia: con Inventor colgado, los recientes se miran ANTES y el archivo se encuentra sin esperar a Inventor' ($found -eq $mine -and $secs -lt 20)
+Set-Fakes @() @()
 
 # --- El script entero en modo -ResolveOnly (proceso aparte, como lo lanza Windows)
 $env:CHUSY_CONVERT_STEP_NOMAIN = ''

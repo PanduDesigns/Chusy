@@ -40,10 +40,13 @@ El navegador no puede decir en que carpeta esta el archivo que subes: solo da su
 NOMBRE, su TAMANO y su FECHA de modificacion. Con esos tres datos el ayudante lo
 localiza en tu PC, por este orden, y solo acepta un archivo con ESE nombre, ese
 tamano y esa fecha (asi no convierte otro del mismo nombre que este en otra carpeta):
-  1. Un documento que ya tengas abierto en Inventor con ese nombre.
-  2. La lista de "archivos recientes" de Windows (lo que acabas de elegir en el
+  1. La lista de "archivos recientes" de Windows (lo que acabas de elegir en el
      selector de archivos del navegador).
+  2. Un documento que ya tengas abierto en Inventor con ese nombre.
   3. Si no aparece, abre una ventana para que elijas TU el archivo original.
+Cada paso tiene un limite de tiempo: si Inventor esta ocupado (por ejemplo, con un
+cuadro de dialogo abierto) o la red no responde, se salta ese paso y la ventana lo
+dice, en vez de quedarse esperando.
 Despues convierte ese archivo y deja el .stp en SU MISMA carpeta (la de origen, no la
 del proyecto de Chusy). Si arrastras el archivo desde el Explorador y no lo tienes
 abierto en Inventor, es normal que salga la ventana de eleccion.
@@ -65,6 +68,8 @@ Si algo falla
 - Error "E_FAIL": Inventor y el navegador tienen que estar al mismo nivel de
   permisos (los dos normales, o los dos como administrador). Lo mismo si pegas el
   comando en una ventana de PowerShell: que no sea de administrador si Inventor no lo es.
+- La ventana de PowerShell dice los permisos con que corre (normal o administrador).
+  Inventor y el navegador/PowerShell tienen que ir al mismo nivel.
 - Al pulsar el boton se abre una ventana de PowerShell con el progreso; si algo falla se
   queda abierta con el motivo, y todo queda en %LOCALAPPDATA%\Chusy\convertir-step.log
 - No ocurre nada al pulsar el boton: el ayudante no esta instalado (o es la version

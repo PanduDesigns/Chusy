@@ -30,7 +30,7 @@ export const RELEASES = [
     title: "El convertidor a .STP encuentra el archivo que subes y trabaja como Exportar-IPT",
     items: [
       "«Convertir a .STEP en mi PC» ya no busca el archivo en la carpeta del proyecto: localiza en tu PC el .ipt/.iam que estás subiendo (por su nombre, tamaño y fecha: lo que tengas abierto en Inventor o hayas elegido hace un momento) y deja el .stp en SU carpeta de origen. Si no lo encuentra, te abre una ventana para que lo elijas.",
-      "Corregido el ayudante, que se abría y no hacía nada: ahora trabaja como tu Exportar-IPT.ps1 (PowerShell 5.1 en STA, sin diálogos de referencias sin resolver, traductor STEP AP214), muestra una ventana con el progreso y el motivo si algo falla, y guarda un registro en %LOCALAPPDATA%\\Chusy\\convertir-step.log. Sigue convirtiendo SOLO ese archivo, nunca toda la carpeta.",
+      "Corregido el ayudante, que se abría y no hacía nada: ahora trabaja como tu Exportar-IPT.ps1 (PowerShell 5.1 en STA, sin diálogos de referencias sin resolver, traductor STEP AP214), muestra una ventana con el progreso y el motivo si algo falla, y guarda un registro en %LOCALAPPDATA%\\Chusy\\convertir-step.log. Sigue convirtiendo SOLO ese archivo, nunca toda la carpeta. Si Inventor está ocupado o la red no responde, ese paso se salta en vez de quedarse parado, y la ventana dice cuál ha sido.",
       "Importante: hay que volver a ejecutar Instalar-ConvertirStep.bat (en assets/convertir-step/) en cada PC para actualizar el ayudante.",
     ],
   },

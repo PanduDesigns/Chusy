@@ -17,10 +17,13 @@
     nombre, el tamano y la fecha de modificacion), asi que este script lo localiza en tu PC, por este orden, y solo
     da por bueno un archivo con ESE nombre y, si Chusy los envia, el MISMO tamano y la MISMA fecha:
       1. -FilePath, si se indica la ruta completa.
-      2. Un documento de Inventor ya abierto con ese nombre.
-      3. La lista de archivos recientes de Windows (los que acabas de elegir en el selector del navegador).
+      2. La lista de archivos recientes de Windows (los que acabas de elegir en el selector del navegador).
+      3. Un documento de Inventor ya abierto con ese nombre.
       4. -SearchRoot, si se indica una carpeta (busca solo ese nombre exacto; sin copias OldVersions).
       5. Si no aparece, te abre una ventana para que elijas el archivo original.
+    Cada paso corre en un hilo aparte con limite de tiempo: si Inventor esta ocupado (por ejemplo con un cuadro de
+    dialogo abierto) o un recurso de red no responde, se salta ese paso en vez de quedarse esperando, y la ventana
+    dice cual ha sido.
 
     QUE HACE CON INVENTOR (igual que Exportar-IPT.ps1): Windows PowerShell 5.1 en STA, abre el archivo con
     SkipAllUnresolvedFiles (sin dialogos), SilentOperation y ScreenUpdating apagados (se restauran), traductor STEP
@@ -65,14 +68,14 @@ function Test-InventorFile([string]$Path) {
     return ($e -eq '.ipt' -or $e -eq '.iam')
 }
 
-# Lo que dice Chusy del archivo (tamano y fecha); lo que no diga, no se comprueba.
-function Test-SameFile([string]$Path) {
+# Lo que dice Chusy del archivo (tamano y fecha); lo que no diga (0), no se comprueba. Autonoma: corre tambien en el hilo de vigilancia.
+function Test-SameFile([string]$Path, [long]$ExpectedSize, [long]$ExpectedModified, [long]$ToleranceMs) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
     $file = Get-Item -LiteralPath $Path
-    if ($Size -gt 0 -and $file.Length -ne $Size) { return $false }
-    if ($Modified -gt 0) {
+    if ($ExpectedSize -gt 0 -and $file.Length -ne $ExpectedSize) { return $false }
+    if ($ExpectedModified -gt 0) {
         $ms = ([System.DateTimeOffset]$file.LastWriteTimeUtc).ToUnixTimeMilliseconds()
-        if ([Math]::Abs($ms - $Modified) -gt $script:ModifiedToleranceMs) { return $false }
+        if ([Math]::Abs($ms - $ExpectedModified) -gt $ToleranceMs) { return $false }
     }
     return $true
 }
@@ -123,11 +126,58 @@ function Get-RecentPaths([string]$Name) {
 
 function Get-SearchRootPaths([string]$Name, [string]$Root) {
     if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) { return @() }
-    Write-Log "Buscando $Name en $Root ..." 'Cyan'
     # UN nombre exacto, sin comodines y sin las copias OldVersions de Inventor.
     $found = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Filter $Name -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ieq $Name -and $_.FullName -notmatch '[\\/]OldVersions[\\/]' })
     return @($found | ForEach-Object { $_.FullName })
+}
+
+# Los candidatos de UNA fuente, ya comprobados: devuelve cadenas "1|ruta" (coincide en tamano y fecha) o "0|ruta" (no coincide).
+function Get-Candidates([string]$Source, [string]$Name, [string]$Root, [long]$ExpectedSize, [long]$ExpectedModified, [long]$ToleranceMs) {
+    $paths = switch ($Source) {
+        'inventor' { Get-InventorOpenPaths $Name }
+        'recent' { Get-RecentPaths $Name }
+        'folder' { Get-SearchRootPaths $Name $Root }
+    }
+    foreach ($p in @($paths)) {
+        if ($p) { '{0}|{1}' -f [int](Test-SameFile $p $ExpectedSize $ExpectedModified $ToleranceMs), $p }
+    }
+}
+
+<#
+    Ejecuta una de las funciones de arriba en un HILO APARTE con limite de tiempo. Hablar con Inventor (ocupado, con un
+    cuadro de dialogo abierto...) o con un recurso de red caido puede quedarse esperando para siempre; asi el script sigue
+    (salta ese paso) y se ve en la ventana cual ha sido. Devuelve las cadenas que devuelva la funcion, o $null si se agoto.
+#>
+function Invoke-Guarded {
+    param([string]$Label, [string]$Function, [object[]]$Arguments = @(), [int]$Seconds = 15)
+    Write-Log $Label 'Cyan'
+    $names = @('Test-SameFile', 'Resolve-ShortcutTarget', 'Get-InventorOpenPaths', 'Get-RecentPaths', 'Get-SearchRootPaths', 'Get-Candidates')
+    $prelude = ($names | ForEach-Object { 'function ' + $_ + " {`n" + (Get-Command $_ -CommandType Function).Definition + "`n}`n" }) -join ''
+    $runspace = $null; $ps = $null
+    try {
+        $runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+        try { $runspace.ApartmentState = [System.Threading.ApartmentState]::STA } catch { }
+        $runspace.Open()
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        $ps.Runspace = $runspace
+        [void]$ps.AddScript($prelude + $Function + ' @args')
+        foreach ($a in $Arguments) { [void]$ps.AddArgument($a) }
+        $async = $ps.BeginInvoke()
+        if ($async.AsyncWaitHandle.WaitOne($Seconds * 1000)) {
+            $out = @($ps.EndInvoke($async) | ForEach-Object { [string]$_ })
+            foreach ($e in $ps.Streams.Error) { Write-Log "  Aviso: $($e.Exception.Message)" 'Yellow' }
+            $ps.Dispose(); $runspace.Dispose()
+            return , $out
+        }
+        # Se agoto: el hilo bloqueado se abandona (termina con el proceso); no se puede esperar a que acabe.
+        Write-Log "  Sin respuesta tras $Seconds s: se salta este paso." 'Yellow'
+        return $null
+    }
+    catch {
+        Write-Log "  No se pudo comprobar este paso: $($_.Exception.Message)" 'Yellow'
+        return $null
+    }
 }
 
 function Select-SourceFileDialog([string]$Name, [string]$StartDir) {
@@ -168,22 +218,26 @@ function Find-SourceFile {
     if (-not (Test-InventorFile $Name)) { throw "Solo se pueden convertir archivos .ipt o .iam de Inventor: $Name" }
 
     $sources = @(
-        @{ Label = 'abierto en Inventor'; Paths = (Get-InventorOpenPaths $Name) },
-        @{ Label = 'archivos recientes de Windows'; Paths = (Get-RecentPaths $Name) },
-        @{ Label = 'carpeta indicada'; Paths = (Get-SearchRootPaths $Name $Root) }
+        @{ Key = 'recent'; Label = 'Buscando en los archivos recientes de Windows...'; Where = 'archivos recientes de Windows'; Seconds = 15 },
+        @{ Key = 'inventor'; Label = 'Buscando entre los documentos abiertos en Inventor...'; Where = 'abierto en Inventor'; Seconds = 15 }
     )
+    if (-not [string]::IsNullOrWhiteSpace($Root)) {
+        $sources += @{ Key = 'folder'; Label = "Buscando $Name en $Root (puede tardar)..."; Where = 'carpeta indicada'; Seconds = 90 }
+    }
     $guessDir = ''
     foreach ($source in $sources) {
-        foreach ($candidate in @($source.Paths)) {
-            if (-not $candidate) { continue }
-            if (Test-SameFile $candidate) {
-                Write-Log "Encontrado ($($source.Label)): $candidate" 'Green'
-                return (Resolve-Path -LiteralPath $candidate).ProviderPath
+        $found = Invoke-Guarded -Label $source.Label -Function 'Get-Candidates' -Seconds $source.Seconds `
+            -Arguments @($source.Key, $Name, $Root, $script:Size, $script:Modified, $script:ModifiedToleranceMs)
+        if ($null -eq $found) { continue }
+        foreach ($item in @($found)) {
+            $isSame = $item.StartsWith('1|')
+            $candidate = $item.Substring(2)
+            if ($isSame) {
+                Write-Log "Encontrado ($($source.Where)): $candidate" 'Green'
+                return $candidate
             }
-            if (-not $guessDir -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-                $guessDir = [System.IO.Path]::GetDirectoryName($candidate)
-                Write-Log "Descartado ($($source.Label)), no coincide el tamano o la fecha: $candidate" 'Yellow'
-            }
+            if (-not $guessDir) { $guessDir = [System.IO.Path]::GetDirectoryName($candidate) }
+            Write-Log "Descartado ($($source.Where)), no coincide el tamano o la fecha: $candidate" 'Yellow'
         }
     }
     if ($NoDialog) { return '' }
@@ -218,6 +272,7 @@ function Convert-ToStep([string]$SourcePath) {
     $document = $null
     $openedByUs = $false
     try {
+        Write-Log 'Conectando con Inventor...' 'Cyan'
         $connection = Connect-Inventor
         $inventor = $connection.App
         $startedInventor = $connection.Started
@@ -227,6 +282,7 @@ function Convert-ToStep([string]$SourcePath) {
         $previousScreen = [bool]$inventor.ScreenUpdating
         $inventor.ScreenUpdating = $false
 
+        Write-Log '  Activando el traductor de STEP...' 'Cyan'
         $translator = $inventor.ApplicationAddIns.ItemById($script:StepTranslatorId)
         if ($null -eq $translator) { throw 'Este Inventor no tiene el traductor de STEP. Revisa que este instalado y activado.' }
         $translator.Activate()
@@ -317,6 +373,10 @@ function Invoke-Main {
         $what = if ($script:FilePath) { $script:FilePath } else { $script:FileName }
         if ([string]::IsNullOrWhiteSpace($what)) { throw 'Falta indicar el archivo .ipt o .iam que hay que convertir.' }
         Write-Log "Archivo: $what" 'White'
+        $isAdmin = $false
+        try { $isAdmin = ([System.Security.Principal.WindowsPrincipal][System.Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
+        Write-Log ("Permisos: {0} | PowerShell {1}" -f $(if ($isAdmin) { 'administrador' } else { 'normal' }), $PSVersionTable.PSVersion) 'DarkGray'
+        if ($script:Size -gt 0) { Write-Log "Tamano: $($script:Size) bytes" 'DarkGray' }
 
         $source = Find-SourceFile -ExplicitPath $script:FilePath -Name $script:FileName -Root $script:SearchRoot -NoDialog:$ResolveOnly
         if ($ResolveOnly) {
