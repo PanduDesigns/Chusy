@@ -33,7 +33,7 @@ const cad = await import("../js/cad-viewer.js");
   const fa = read("js/components/file-attachments.js"), tm = read("js/components/task-modal.js"), as = read("js/components/cad-upload-assistant.js");
   const vm = read("js/components/cad-viewer-modal.js"), pvv = read("js/views/parts-viewer-view.js");
   check("adjuntos, visor y vista de piezas ya no usan getLocation ni projectLocation", !/getLocation|projectLocation/.test(fa + vm + pvv + as) && !/currentFolderLocation/.test(tm));
-  check("el asistente no pide ninguna carpeta y manda nombre, tamaño y fecha del File", !/data-cad="location"/.test(as) && /size: file\.size, lastModified: file\.lastModified/.test(as));
+  check("el asistente no pide ninguna carpeta y la conversión manda nombre, tamaño y fecha del File", !/data-cad="location"/.test(as) && /fileName: file\.name, size: file\.size, lastModified: file\.lastModified/.test(fa));
   check("el visor manda el tamaño del adjunto al convertir", /fileName: nativeName, size: nativeAtt\.size/.test(vm));
 }
 
@@ -48,10 +48,10 @@ const ps = read("assets/convertir-step/convertir-step.ps1");
   check("… SilentOperation y ScreenUpdating apagados y restaurados", /SilentOperation = \$true/.test(code) && /ScreenUpdating = \$false/.test(code) && /SilentOperation = \$previousSilent/.test(code) && /ScreenUpdating = \$previousScreen/.test(code));
   check("… llamadas COM directas (sin reflexión), traductor STEP, AP214 y contexto 13059", !/InvokeMember/.test(code) && /\$translator\.SaveCopyAs\(\$document, \$context, \$options, \$medium\)/.test(code) && /\$translator\.HasSaveCopyAsOptions/.test(code) && /ApplicationProtocolType'\) = 3/.test(code) && /\{90AF7F40-0C01-11D5-8E83-0010B541CD80\}/.test(code) && /Type = 13059/.test(code));
   check("… salida .stp (como Exportar-IPT.ps1) en la carpeta del original", /\$script:Extension = '\.stp'/.test(code) && /ChangeExtension\(\$SourcePath, \$script:Extension\)/.test(code));
-  eq("… UN solo SaveCopyAs y NINGÚN bucle sobre una carpeta", [(code.match(/\.SaveCopyAs\(/g) || []).length, /foreach\s*\([^)]*Get-ChildItem/i.test(code) || /Get-ChildItem[^\n]*\|\s*(ForEach-Object|%)\s*\{[^}]*SaveCopyAs/i.test(code) || /Get-ChildItem[^\n]*\*\.(ipt|iam)/i.test(code)], [1, false]);
+  eq("… UN solo SaveCopyAs, UNA sola llamada a Convert-ToStep y NINGÚN bucle que convierta varios archivos", [(code.match(/\.SaveCopyAs\(/g) || []).length, (code.match(/= Convert-ToStep /g) || []).length, /foreach\s*\([^)]*\)\s*\{[^}]*Convert-ToStep/i.test(code) || /Get-ChildItem[^\n]*\|\s*(ForEach-Object|%)\s*\{[^}]*(SaveCopyAs|Convert-ToStep)/i.test(code) || /Get-ChildItem[^\n]*\*\.(ipt|iam)/i.test(code)], [1, 1, false]);
   check("… el archivo ya abierto por el diseñador no se cierra; el abierto por el script, sí y SIN guardar; Quit solo si lo abrió el script", /\$openedByUs = \$true/.test(code) && /if \(\$openedByUs -and \$null -ne \$document\)/.test(code) && /\$document\.Close\(\$true\)/.test(code) && /if \(\$startedInventor -and -not \$KeepInventorOpen/.test(code) && /ItemByName\(\$SourcePath\)/.test(code));
   check("… busca por nombre + tamaño + fecha, con archivos recientes de Windows e Inventor abierto, y ofrece elegir el archivo si no aparece", /function Test-SameFile/.test(code) && /Microsoft\\Windows\\Recent/.test(code) && /Get-InventorOpenPaths/.test(code) && /OpenFileDialog/.test(code) && /ModifiedToleranceMs = 3000/.test(code));
-  check("… ningún paso puede dejar el script esperando: cada fuente corre en un hilo aparte con límite de tiempo (Invoke-Guarded), los recientes antes que Inventor", /function Invoke-Guarded/.test(code) && /RunspaceFactory/.test(code) && /WaitOne\(\$Seconds \* 1000\)/.test(code) && code.indexOf("Key = 'recent'") < code.indexOf("Key = 'inventor'") && /Sin respuesta tras \$Seconds s/.test(code));
+  check("… ningún paso puede dejar el script esperando: cada fuente corre en un hilo aparte con límite de tiempo (Invoke-Guarded), los recientes antes que Inventor", /function Invoke-Guarded/.test(code) && /RunspaceFactory/.test(code) && /WaitOne\(\$Seconds \* 1000\)/.test(code) && code.indexOf("Key = 'recent'") < code.indexOf("Key = 'inventor'") && code.indexOf("Key = 'memory'") < code.indexOf("Key = 'recent'") && /Sin respuesta tras \$Seconds s/.test(code));
   check("… escribe un paso de progreso por fuente, los permisos (normal/administrador) y 'Conectando con Inventor'", /Buscando en los archivos recientes/.test(code) && /Buscando entre los documentos abiertos en Inventor/.test(code) && /Permisos: \{0\}/.test(code) && /Conectando con Inventor/.test(code));
   check("… registra en %LOCALAPPDATA%\\Chusy\\convertir-step.log y se queda abierto con el motivo si falla", /convertir-step\.log/.test(code) && /Read-Host 'Pulsa Intro para cerrar'/.test(code));
   const bat = read("assets/convertir-step/Instalar-ConvertirStep.bat");
@@ -84,12 +84,12 @@ const ps = read("assets/convertir-step/convertir-step.ps1");
 // ---------------------------------------------------------------- 5) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=91", (idx.match(/css\/[\w-]+\.css\?v=91/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en otra versión", !/\.css\?v=(?!91)\d+/.test(idx));
-  check("package.json y package-lock.json: 91.0.0", JSON.parse(read("package.json")).version === "91.0.0" && JSON.parse(read("package-lock.json")).version === "91.0.0");
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 91; la entrega actual la fija v92-conversion-automatica.test.mjs)", new Set([...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => m[1])).size + ":" + (idx.match(/css\/[\w-]+\.css\?v=\d+/g) || []).length, "1:14");
+  check("index.html: ningún <link> se ha quedado en una versión anterior a la 91", [...idx.matchAll(/\.css\?v=(\d+)/g)].every((m) => Number(m[1]) >= 91));
+  check("package.json y package-lock.json: versión ≥ 91", parseInt(JSON.parse(read("package.json")).version, 10) >= 91 && parseInt(JSON.parse(read("package-lock.json")).version, 10) >= 91);
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: entrada 91 la primera, mayor que la 90, sobre el ayudante .stp y el archivo que se sube", r.id === 91 && r.id > RELEASES[1].id && /\.stp|\.STP/i.test(r.title) && /Instalar-ConvertirStep\.bat/.test(JSON.stringify(r)) && /convertir-step\.log/.test(JSON.stringify(r)) && r.items.length >= 3, r.title);
+  const r = RELEASES.find((x) => x.id === 91);
+  check("Novedades: entrada 91, mayor que la 90, sobre el ayudante .stp y el archivo que se sube", !!r && r.id > RELEASES.find((x) => x.id === 90).id && /\.stp|\.STP/i.test(r.title) && /Instalar-ConvertirStep\.bat/.test(JSON.stringify(r)) && /convertir-step\.log/.test(JSON.stringify(r)) && r.items.length >= 3, r.title);
   const readme = read("README.md");
   check("README: historial v90 → v91, el ayudante localiza el archivo y se vuelve a ejecutar el instalador", /v90 → v91 \(Chusy-91\.zip\)/.test(readme) && /Find-SourceFile/.test(readme) && /Instalar-ConvertirStep\.bat/.test(readme) && /v91-convertir-step/.test(readme));
   check("tests/run-all.mjs menciona la v91", /v91/.test(read("tests/run-all.mjs")));

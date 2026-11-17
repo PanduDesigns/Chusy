@@ -1,4 +1,4 @@
-CHUSY - AYUDANTE DE "CONVERTIR A .STEP" (solo Windows, con Autodesk Inventor) - v91
+CHUSY - AYUDANTE DE "CONVERTIR A .STEP" (solo Windows, con Autodesk Inventor) - v92
 ===========================================================================
 
 Para que sirve
@@ -21,35 +21,49 @@ Instalar (una vez por ordenador y usuario de Windows)
 No hace falta ser administrador: solo escribe en %LOCALAPPDATA%\Chusy y en el
 registro del propio usuario (HKCU\Software\Classes\chusy-step).
 
-Como se usa
------------
-A) Al SUBIR un .ipt/.iam a una tarea, si su .STEP no esta ya en la tarea ni en el
-   lote, Chusy te lo avisa:
-     1. "Convertir a .STEP en mi PC"  -> Inventor genera el .STEP junto al .ipt/.iam
-        y se abre el Explorador con el archivo seleccionado.
-     2. "Incluir el .STEP generado y subir todo" -> eliges ese .STEP y se sube
-        junto al .ipt/.iam.
-     o bien "Subir solo el .ipt/.iam sin .STEP".
-B) Con el boton del ojo (Ver y medir en 3D) de un .ipt/.iam sin .STEP gemelo:
-   "Convertir este archivo a .STEP en mi PC (PowerShell)" o "Cargar archivo
-   .STEP/.STP local" para verlo al vuelo. Ahi Chusy solo conoce el nombre y el tamano.
+Como se usa (v92: sin tocar nada)
+---------------------------------
+Al SUBIR un .ipt/.iam a una tarea, si su .STP/.STEP no esta ya en la tarea ni en el lote,
+Chusy hace TODO solo:
+  1. Sube el .ipt/.iam al momento.
+  2. Lanza este ayudante, que localiza el archivo en tu PC, lo convierte con Inventor
+     y deja el .stp junto al original.
+  3. El ayudante se lo entrega a Chusy por un canal local (solo este PC) y Chusy sube el .stp a la tarea
+     (no hace falta elegir nada ni pulsar otro boton). Si algo falla, un aviso en la esquina lo dice y ofrece
+     "Reintentar" y "Subir el .STP a mano".
+La PRIMERA vez Chusy pregunta una sola vez si quieres la conversion automatica
+(o "No convertir nunca"). Tambien se puede convertir desde el ojo (Ver y medir en 3D)
+de un .ipt/.iam sin STP: "Convertir este archivo a .STEP en mi PC".
+La primera vez, el navegador puede pedir permiso para hablar con tu propio PC
+(localhost): hay que aceptarlo, es el canal por el que llega el .stp.
 
-Como encuentra el archivo
--------------------------
+El canal: el ayudante abre un puerto SOLO en 127.0.0.1 mientras trabaja, protegido por
+una clave de un solo uso que Chusy genera para ese archivo; entrega ese .stp y se cierra.
+Si Chusy no lo recoge en unos segundos, abre el Explorador con el .stp seleccionado.
+
+Como encuentra el archivo (y como lo recuerda)
+----------------------------------------------
 El navegador no puede decir en que carpeta esta el archivo que subes: solo da su
 NOMBRE, su TAMANO y su FECHA de modificacion. Con esos tres datos el ayudante lo
 localiza en tu PC, por este orden, y solo acepta un archivo con ESE nombre, ese
 tamano y esa fecha (asi no convierte otro del mismo nombre que este en otra carpeta):
-  1. La lista de "archivos recientes" de Windows (lo que acabas de elegir en el
+  1. SU MEMORIA: las carpetas y archivos que ya encontro otras veces (y hasta 3
+     niveles de subcarpetas de ellas). Asi un archivo NUEVO de una carpeta que ya
+     usaste se encuentra solo.
+  2. La lista de "archivos recientes" de Windows (lo que acabas de elegir en el
      selector de archivos del navegador).
-  2. Un documento que ya tengas abierto en Inventor con ese nombre.
-  3. Si no aparece, abre una ventana para que elijas TU el archivo original.
+  3. Las carpetas de las ventanas del Explorador que tengas abiertas (por si
+     arrastraste el archivo desde ahi) y la ultima carpeta del selector de archivos
+     de Chrome / Edge.
+  4. Un documento que ya tengas abierto en Inventor con ese nombre.
+  5. Si no aparece, abre una ventana para que elijas TU el archivo original; la
+     carpeta elegida SE RECUERDA y la proxima vez no pregunta.
 Cada paso tiene un limite de tiempo: si Inventor esta ocupado (por ejemplo, con un
 cuadro de dialogo abierto) o la red no responde, se salta ese paso y la ventana lo
 dice, en vez de quedarse esperando.
+La memoria esta en %LOCALAPPDATA%\Chusy\convertir-step-memoria.json (se puede borrar).
 Despues convierte ese archivo y deja el .stp en SU MISMA carpeta (la de origen, no la
-del proyecto de Chusy). Si arrastras el archivo desde el Explorador y no lo tienes
-abierto en Inventor, es normal que salga la ventana de eleccion.
+del proyecto de Chusy).
 
 Que hace con Inventor
 ---------------------

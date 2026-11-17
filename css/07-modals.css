@@ -456,3 +456,22 @@ textarea.modal__title-input {
 .cad-assistant__foot { flex-wrap: wrap; }
 .cad-assistant__foot [hidden] { display: none; }
 .cad-assistant-overlay { z-index: 170; }
+
+/* ===== v92: conversión automática a STP (components/step-convert-tray.js) ===== */
+.step-tray { position: fixed; right: 16px; bottom: 16px; z-index: 210; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 32px)); }
+.step-tray__item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--color-panel); color: var(--color-text-hi); border: 1px solid var(--color-line); border-left: 3px solid var(--color-signal); border-radius: var(--radius-sm); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.step-tray__item.is-ok { border-left-color: var(--color-success); }
+.step-tray__item.is-error { border-left-color: var(--color-danger); }
+.step-tray__spinner { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 2px solid var(--color-line); border-top-color: var(--color-signal); animation: cad-viewer-spin 0.9s linear infinite; }
+.step-tray__item.is-ok .step-tray__spinner, .step-tray__item.is-error .step-tray__spinner { animation: none; border-color: currentColor; }
+.step-tray__item.is-ok .step-tray__spinner { color: var(--color-success); }
+.step-tray__item.is-error .step-tray__spinner { color: var(--color-danger); }
+.step-tray__body { flex: 1; min-width: 0; }
+.step-tray__title { font-size: 12.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-tray__text { margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--color-text-lo); }
+.step-tray__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.step-tray__actions:empty { display: none; }
+.step-tray__close { flex: none; background: none; border: none; color: var(--color-text-faint); cursor: pointer; font-size: 13px; padding: 0 2px; }
+.step-tray__close:hover { color: var(--color-text-hi); }
+.cad-viewer-need__error { margin: 4px 0 0; padding: 8px 10px; font-size: 12.5px; color: var(--color-danger); background: var(--color-void-raised); border: 1px solid var(--color-line); border-radius: var(--radius-sm); }
+.cad-viewer-need__error[hidden] { display: none; }

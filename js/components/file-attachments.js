@@ -41,6 +41,9 @@ import { openFilePreview, downloadAttachment } from "./file-preview.js";
 import { isCadFileName, partitionUploadBatch } from "../cad-viewer.js";
 import { openCadViewerModal, closeCadViewerModal } from "./cad-viewer-modal.js";
 import { openCadUploadAssistant } from "./cad-upload-assistant.js";
+import { startStepConversion, describeStepStatus, getStepAutoMode, setStepAutoMode, isStepHelperPlatform } from "../step-bridge.js";
+import { createConversionNotice } from "./step-convert-tray.js";
+import { launchStepUrl } from "./convert-step-launcher.js";
 
 const MAX_PARALLEL = 2;
 
@@ -83,7 +86,8 @@ export function createFileAttachments({
   const thumbUrls = new Map(); // thumbId → dirección blob: ya descargada
   let active = 0;
   let destroyed = false;
-  let assistant = null; // v90: asistente de subida de .ipt/.iam abierto
+  let assistant = null; // v90: la pregunta de la primera vez (conversión automática) abierta
+  const conversions = new Set(); // v92: conversiones automáticas a STP en curso (se cancelan al cerrar)
 
   const driveItems = () => (getAttachments() || []).filter(isDriveAttachment);
 
@@ -213,21 +217,64 @@ export function createFileAttachments({
 
   function addFiles(files) {
     if (!storage.isEnabled()) return;
-    // v90: un .ipt/.iam sin su .STEP/.STP gemelo (ni en este lote ni ya adjunto) espera a que el asistente decida.
+    // v92: el .ipt/.iam sube YA; si le falta su .STEP/.STP gemelo (ni en este lote ni ya adjunto), el STP se crea solo en tu PC
+    // y se sube en cuanto está listo. La primera vez se pregunta una vez si se quiere así (o nunca).
     const known = driveItems().concat(uploads.map((u) => ({ name: u.name })));
     const { ready, needsStep } = partitionUploadBatch(files, known);
     ready.forEach((f) => enqueue(f));
-    if (needsStep.length) askForStep(needsStep);
+    if (!needsStep.length) return;
+    const mode = isStepHelperPlatform() ? getStepAutoMode() : "off";
+    if (mode === "ask") { askForStep(needsStep); return; }
+    needsStep.forEach((f) => { enqueue(f); if (mode === "on") convertAutomatically(f); });
   }
 
+  /** La pregunta de la primera vez: activar la conversión automática, subir solo el nativo esta vez, o no convertir nunca. */
   function askForStep(natives) {
     const handle = openCadUploadAssistant({ files: natives });
     if (handle.merged) return;
     assistant = handle;
-    handle.result.then(({ files: toUpload }) => {
+    handle.result.then(({ action, files: asked }) => {
       if (assistant === handle) assistant = null;
-      if (!destroyed) toUpload.forEach((f) => enqueue(f));
+      if (destroyed || action === "cancel") return;
+      if (action === "enable") setStepAutoMode("on");
+      if (action === "disable") setStepAutoMode("off");
+      asked.forEach((f) => { enqueue(f); if (action === "enable") convertAutomatically(f); });
     });
+  }
+
+  /** Crea el STP de un .ipt/.iam con el ayudante de Windows y, en cuanto llega, lo sube a la tarea. */
+  function convertAutomatically(file) {
+    const notice = createConversionNotice(file.name);
+    notice.update(describeStepStatus({ status: "launching" }));
+    const job = startStepConversion({
+      fileName: file.name, size: file.size, lastModified: file.lastModified, launch: launchStepUrl,
+      onStatus: (st) => notice.update(describeStepStatus(st)),
+    });
+    conversions.add(job);
+    job.promise.then((res) => {
+      conversions.delete(job);
+      if (res.ok) {
+        notice.success(`${res.file.name} creado: se sube a la tarea.`);
+        if (!destroyed) addFiles([res.file]);
+        return;
+      }
+      if (res.reason === "cancelled") { notice.close(); return; }
+      notice.fail(res.message, [
+        ...(res.reason === "unsupported" ? [] : [{ label: "Reintentar", onClick: () => { if (!destroyed) convertAutomatically(file); } }]),
+        { label: "Subir el .STP a mano", onClick: () => pickStepManually() },
+      ]);
+    });
+  }
+
+  function pickStepManually() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".step,.stp";
+    input.multiple = true;
+    input.style.display = "none";
+    input.addEventListener("change", () => { const picked = Array.from(input.files || []); input.remove(); if (!destroyed) addFiles(picked); });
+    document.body.appendChild(input);
+    input.click();
   }
 
   function pump() {
@@ -516,6 +563,8 @@ export function createFileAttachments({
     destroy() {
       destroyed = true;
       if (assistant) { assistant.close(); assistant = null; }
+      conversions.forEach((job) => job.cancel());
+      conversions.clear();
       closeCadViewerModal();
       container.removeEventListener("click", onContainerClick);
       container.removeEventListener("keydown", onContainerKeydown);

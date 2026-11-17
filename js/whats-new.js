@@ -25,6 +25,17 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 92,
+    date: "2026-11-14",
+    title: "Conversión automática: el STP se crea y se sube solo al subir un .ipt/.iam",
+    items: [
+      "Al subir un .ipt o .iam sin su .STP, Chusy lo convierte con tu Inventor sin preguntarte (la primera vez te pregunta una sola vez si quieres activarlo) y sube el .STP a la tarea en cuanto está creado. Ya no hay que elegir la ubicación ni pulsar otro botón: el .ipt sube al momento y el .STP aparece solo.",
+      "El ayudante recuerda de dónde venía cada archivo: la primera vez de una carpeta puede pedirte que elijas el .ipt; después lo encuentra solo, también los archivos nuevos de esa carpeta. Además mira los archivos recientes de Windows, las carpetas del Explorador que tengas abiertas y la última carpeta del selector del navegador.",
+      "En la esquina aparece un aviso con el progreso de cada conversión (buscando, convirtiendo, subido) y, si algo falla, con «Reintentar» y «Subir el .STP a mano». Si no quieres la conversión automática, elige «No convertir nunca» en la pregunta.",
+      "Importante: hay que volver a ejecutar Instalar-ConvertirStep.bat (en assets/convertir-step/) en cada PC para actualizar el ayudante. La primera vez, Chrome/Edge pueden pedir permiso para que Chusy hable con tu propio PC («Acceso a la red local»): acepta; si lo denegaste, el aviso te dice cómo permitirlo.",
+    ],
+  },
+  {
     id: 91,
     date: "2026-11-13",
     title: "El convertidor a .STP encuentra el archivo que subes y trabaja como Exportar-IPT",

@@ -369,7 +369,8 @@ if (real) {
 
 // ---------------------------------------------------------------- 6) interfaz con jsdom
 const launches = [], copies = [];
-const launchConvert = async (input) => { launches.push(input); return "launched"; };
+const conversionStarts = [];
+const startConversion = (opts) => { conversionStarts.push(opts); return { promise: new Promise(() => {}), cancel() {} }; }; // (la conversión real se prueba en v92-conversion-automatica.test.mjs)
 const copyCommand = async (input) => { copies.push(input); return true; };
 const NAS = "\\\\NASMARTECH\\Spanesi\\26001 - Cabina Talgo";
 const stepBytes = readBin("tests/fixtures/placa-100x50x3.step");
@@ -382,17 +383,16 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
 
 {
   const viewer = await import("../js/components/cad-viewer-modal.js");
-  const assistant = await import("../js/components/cad-upload-assistant.js");
-
+  
   // --- sin STEP gemelo: aviso y las dos salidas
-  let h = viewer.openCadViewerModal({ attachment: { id: "n1", name: "Eje_26001.ipt", taskId: "T1", projectId: "P1", size: 4096 }, attachmentsPool: [{ id: "o", name: "Otro.step", taskId: "T1" }], storage: {}, deps: { launchConvert, copyCommand } });
+  let h = viewer.openCadViewerModal({ attachment: { id: "n1", name: "Eje_26001.ipt", taskId: "T1", projectId: "P1", size: 4096 }, attachmentsPool: [{ id: "o", name: "Otro.step", taskId: "T1" }], storage: {}, deps: { startConversion, copyCommand } });
   await h.ready;
   const need = $(".cad-viewer-need");
   check("👁️ de un .ipt sin gemelo: el modal explica que hace falta el .STEP/.STP", need && /Falta el modelo 3D \(\.STEP\) de «Eje_26001\.ipt»/.test(need.textContent) && /gemelo/.test(need.textContent));
   const bConv = $('[data-act="convert"]', need), bLocal = $('[data-act="local"]', need);
   eq("… con los dos botones directos", [bConv.textContent, bLocal.textContent], ["⚙️ Convertir este archivo a .STEP en mi PC (PowerShell)", "📂 Cargar archivo .STEP/.STP local"]);
   click(bConv);
-  eq("… «Convertir» manda SOLO ese archivo (nombre y tamaño; el ayudante lo localiza en el PC)", launches, [{ fileName: "Eje_26001.ipt", size: 4096 }]);
+  check("… «Convertir» arranca la conversión automática de SOLO ese archivo (nombre y tamaño; el ayudante lo localiza en el PC) y enseña el progreso", conversionStarts.length === 1 && conversionStarts[0].fileName === "Eje_26001.ipt" && conversionStarts[0].size === 4096 && typeof conversionStarts[0].launch === "function" && /Abriendo el ayudante/.test($(".cad-viewer-message").textContent), conversionStarts);
   click($('[data-act="copy"]', need));
   eq("… «Copiar comando de PowerShell» copia el mismo encargo", copies, [{ fileName: "Eje_26001.ipt", size: 4096 }]);
   check("… la barra de herramientas 3D no se enseña aún", $('[data-cad="toolbar"]').hidden === true);
@@ -448,7 +448,7 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
     THREE.Material.prototype.dispose = function () { md++; return om.call(this); };
 
     const uploaded = [];
-    h = viewer.openCadViewerModal({ file: stepFile(), onUploadStep: (f) => uploaded.push(f), deps: { loadEngine, launchConvert, copyCommand } });
+    h = viewer.openCadViewerModal({ file: stepFile(), onUploadStep: (f) => uploaded.push(f), deps: { loadEngine, startConversion, copyCommand } });
     await h.ready;
     await tick(5);
     const ui = (n) => $(`[data-cad="${n}"]`);
@@ -561,7 +561,7 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
     h = viewer.openCadViewerModal({
       attachment: { id: "n1", name: "Placa.ipt", taskId: "T1", projectId: "P1", size: 100 },
       attachmentsPool: [{ id: "x1", name: "Otra.step", taskId: "T1", projectId: "P1" }, { id: "g1", name: "placa.STP", taskId: "T1", projectId: "P1", size: stepBytes.length }],
-      storage, deps: { loadEngine, launchConvert, copyCommand },
+      storage, deps: { loadEngine, startConversion, copyCommand },
     });
     await h.ready; await tick(40);
     eq("👁️ de un .ipt con gemelo: descarga el .STP gemelo (no el .ipt)", downloaded, ["g1"]);
@@ -570,7 +570,7 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
     check("… al cerrar de nuevo se libera todo (segundo renderer)", renderers[1].disposed && renderers[1].lost);
 
     // --- .ipt sin gemelo: cargar un STEP local al vuelo y subirlo a la tarea
-    h = viewer.openCadViewerModal({ attachment: { id: "n2", name: "Placa.ipt", taskId: "T1" }, attachmentsPool: [], storage, onUploadStep: (f) => uploaded.push(f), deps: { loadEngine, launchConvert, copyCommand } });
+    h = viewer.openCadViewerModal({ attachment: { id: "n2", name: "Placa.ipt", taskId: "T1" }, attachmentsPool: [], storage, onUploadStep: (f) => uploaded.push(f), deps: { loadEngine, startConversion, copyCommand } });
     await h.ready;
     let picker = null;
     const origClick = window.HTMLInputElement.prototype.click;
@@ -593,49 +593,7 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
   }
   clearBody();
 
-  // --- asistente de subida
-  const ipt = new File(["abc"], "Eje_26001.ipt"), iam = new File(["abcd"], "Conjunto.iam");
-  let a = assistant.openCadUploadAssistant({ files: [ipt], deps: { launchConvert, copyCommand } });
-  launches.length = 0;
-  check("asistente: título, lista del archivo y los tres botones del enunciado", /Falta el modelo 3D/.test($(".cad-assistant").textContent) && $$(".cad-assistant__row").length === 1 && $('[data-act="convert"]').textContent === "⚙️ 1. Convertir a .STEP en mi PC" && $('[data-act="include"]').textContent === "➕ 2. Incluir el .STEP generado y subir todo" && $('[data-act="native-only"]').textContent === "Subir solo el .ipt/.iam sin .STEP" && !$('[data-cad="location"]'));
-  click($('[data-act="convert"]'));
-  await tick(2);
-  eq("«1. Convertir» convierte SOLO ese archivo y manda su nombre, tamaño y fecha (no la carpeta del proyecto)", launches, [{ fileName: "Eje_26001.ipt", size: 3, lastModified: ipt.lastModified }]);
-  check("… y lo marca como enviado", /Orden enviada/.test($(".cad-assistant__state").textContent));
-  click($('[data-act="copy"]'));
-  eq("… «Copiar comando» pasa lo mismo", copies[copies.length - 1], { fileName: "Eje_26001.ipt", size: 3, lastModified: ipt.lastModified });
-  let picker2 = null;
-  const origClick2 = window.HTMLInputElement.prototype.click;
-  window.HTMLInputElement.prototype.click = function () { picker2 = this; };
-  click($('[data-act="include"]'));
-  check("«2. Incluir el .STEP» abre un selector múltiple de .step/.stp", picker2.type === "file" && picker2.multiple === true && picker2.accept === ".step,.stp");
-  const gen = new File(["step"], "Eje_26001.step");
-  Object.defineProperty(picker2, "files", { value: [gen] });
-  fire(picker2, "change");
-  let res = await a.result;
-  check("… entrega el .ipt y el .STEP elegido para subirlos juntos", res.action === "upload-with-step" && res.files.map((f) => f.name).join() === "Eje_26001.ipt,Eje_26001.step", res.files.map((f) => f.name));
-  check("… y cierra el asistente", !$(".cad-assistant-overlay"));
-  // varios archivos: un botón por archivo, sin conversión en bloque
-  a = assistant.openCadUploadAssistant({ files: [ipt, iam], deps: { launchConvert, copyCommand } });
-  launches.length = 0;
-  check("varios archivos: una fila con su botón por cada uno y sin botón global de conversión", $$(".cad-assistant__row").length === 2 && $('[data-act="convert"]').hidden === true && $$(".cad-assistant__row button").length === 2);
-  click($$(".cad-assistant__row button")[1]);
-  await tick(2);
-  eq("… cada botón convierte solo SU archivo", launches, [{ fileName: "Conjunto.iam", size: 4, lastModified: iam.lastModified }]);
-  const merged = assistant.openCadUploadAssistant({ files: [new File(["z"], "Tercero.ipt")], deps: {} });
-  check("si llega otro lote con el asistente abierto, se suma a la misma ventana", merged.merged === true && $$(".cad-assistant__row").length === 3 && $$(".cad-assistant-overlay").length === 1);
-  click($('[data-act="native-only"]'));
-  res = await a.result;
-  check("«Subir solo el .ipt/.iam sin .STEP» entrega solo los nativos (los 3)", res.action === "upload-native-only" && res.files.map((f) => f.name).join() === "Eje_26001.ipt,Conjunto.iam,Tercero.ipt");
-  a = assistant.openCadUploadAssistant({ files: [ipt], deps: {} });
-  click($('[data-act="cancel"]'));
-  res = await a.result;
-  eq("Cancelar no sube nada", [res.action, res.files.length], ["cancel", 0]);
-  a = assistant.openCadUploadAssistant({ files: [ipt], deps: {} });
-  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  res = await a.result;
-  check("Esc también cancela, y el asistente desaparece", res.action === "cancel" && !$(".cad-assistant-overlay"));
-  window.HTMLInputElement.prototype.click = origClick2;
+  // (la pregunta de la primera vez y la conversión automática al subir se prueban en v92-conversion-automatica.test.mjs)
   clearBody();
 
   // --- el 👁️ y la interceptación en los adjuntos de una tarea
@@ -681,34 +639,8 @@ Object.defineProperty(window.HTMLElement.prototype, "clientHeight", { configurab
   check("… que cierra la vista previa y abre el visor", !$(".fp-overlay") && !!$(".cad-viewer-overlay"));
   $(".cad-viewer-close").click();
 
-  // subida: el lote
-  const dropFiles = (files) => { const fileInput = $('input[type="file"]', box); Object.defineProperty(fileInput, "files", { value: files, configurable: true }); fire(fileInput, "change"); }; // se vuelve a buscar: render() rehace el DOM
-  uploads.length = 0;
-  dropFiles([new File(["1"], "Nuevo.ipt"), new File(["2"], "Nuevo.step"), new File(["3"], "Notas.txt"), new File(["4"], "Cojinete.iam")]);
-  await tick(20);
-  check("subida: .ipt con su .step en el lote y un .txt suben directos; el .iam sin gemelo espera al asistente", uploads.sort().join() === "Notas.txt,Nuevo.ipt,Nuevo.step" && !!$(".cad-assistant-overlay") && $$(".cad-assistant__name").map((n) => n.textContent).join() === "Cojinete.iam", uploads);
-  click($('[data-act="native-only"]'));
-  await tick(30);
-  check("… «Subir solo el .iam» lo sube", uploads.includes("Cojinete.iam") && !$(".cad-assistant-overlay"));
-  uploads.length = 0;
-  dropFiles([new File(["5"], "Tapa.ipt")]);
-  await tick(20);
-  check("subida de un .ipt cuyo .STEP/.STP gemelo YA está adjunto a la tarea: sube directo, sin asistente", uploads.join() === "Tapa.ipt" && !$(".cad-assistant-overlay"), uploads);
-  uploads.length = 0;
-  dropFiles([new File(["6"], "Cojinete.ipt")]);
-  await tick(5);
-  click($('[data-act="cancel"]'));
-  await tick(20);
-  check("cancelar el asistente no sube el .ipt", uploads.length === 0);
-  dropFiles([new File(["7"], "Cojinete.ipt")]);
-  await tick(5);
-  window.HTMLInputElement.prototype.click = function () { this.__picked = true; };
   ui2.destroy();
-  check("destroy() de los adjuntos cierra el asistente y el visor que hubiera abiertos", !$(".cad-assistant-overlay") && !$(".cad-viewer-overlay"));
-  window.HTMLInputElement.prototype.click = origClick2;
-  uploads.length = 0;
-  await tick(20);
-  check("… y lo que esperaba decisión no se sube", uploads.length === 0);
+  check("destroy() de los adjuntos cierra el visor que hubiera abierto", !$(".cad-viewer-overlay"));
   box.remove(); drop.remove();
 }
 

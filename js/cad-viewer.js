@@ -469,14 +469,19 @@ function cleanPathInput(raw) {
 }
 
 const positiveInt = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
+/** Puerto local (1024–65535) y clave (8–64 letras, cifras, `_` o `-`) del canal con el ayudante; lo demás se ignora. */
+const validPort = (p) => (Number.isInteger(Number(p)) && Number(p) >= 1024 && Number(p) <= 65535 ? Number(p) : 0);
+const validToken = (t) => (/^[A-Za-z0-9_-]{8,64}$/.test(String(t ?? "")) ? String(t) : "");
 
 /** `{ filePath, fileName, searchRoot, size, modified }` ya validados para el ayudante, o `null` si no hay un `.ipt`/`.iam` al que apuntar. */
-function resolveConvertTarget({ filePath, fileName, projectLocation, size, lastModified } = {}) {
+function resolveConvertTarget({ filePath, fileName, projectLocation, size, lastModified, port, token } = {}) {
+  const channel = { port: validPort(port), token: validPort(port) ? validToken(token) : "" };
+  if (!channel.token) channel.port = 0;
   const full = cleanPathInput(filePath);
-  if (full && isInventorNativeFile(full)) return { filePath: full, fileName: "", searchRoot: "", size: 0, modified: 0 };
+  if (full && isInventorNativeFile(full)) return { filePath: full, fileName: "", searchRoot: "", size: 0, modified: 0, ...channel };
   const name = cleanText(fileName).replace(/^.*[\\/]/, "");
   if (!name || !isInventorNativeFile(name)) return null;
-  return { filePath: "", fileName: name, searchRoot: cleanPathInput(projectLocation), size: positiveInt(size), modified: positiveInt(lastModified) };
+  return { filePath: "", fileName: name, searchRoot: cleanPathInput(projectLocation), size: positiveInt(size), modified: positiveInt(lastModified), ...channel };
 }
 
 /**
@@ -485,13 +490,13 @@ function resolveConvertTarget({ filePath, fileName, projectLocation, size, lastM
  * esos tres datos viajan para que el ayudante localice en el PC ESE archivo (Inventor abierto, archivos recientes de Windows…) y
  * no otro del mismo nombre. Con la ruta completa del `.ipt`/`.iam` solo va `file`. `searchRoot` es opcional (una carpeta donde
  * buscar ese nombre exacto) y Chusy ya no lo manda: la ubicación del proyecto no es la del archivo. Devuelve "" si no hay un
- * `.ipt`/`.iam` válido.
+ * `.ipt`/`.iam` válido. `port` y `token` (v92) abren el canal local por el que el ayudante entrega el `.stp` a Chusy (step-bridge.js).
  */
 export function buildConvertStepProtocolUrl(input) {
   const t = resolveConvertTarget(input);
   if (!t) return "";
   const file = t.filePath || t.fileName;
-  return `${CONVERT_STEP_PROTOCOL}://convert?file=${encodeURIComponent(file)}${t.size ? `&size=${t.size}` : ""}${t.modified ? `&modified=${t.modified}` : ""}${t.searchRoot ? `&searchRoot=${encodeURIComponent(t.searchRoot)}` : ""}`;
+  return `${CONVERT_STEP_PROTOCOL}://convert?file=${encodeURIComponent(file)}${t.size ? `&size=${t.size}` : ""}${t.modified ? `&modified=${t.modified}` : ""}${t.port ? `&port=${t.port}&token=${t.token}` : ""}${t.searchRoot ? `&searchRoot=${encodeURIComponent(t.searchRoot)}` : ""}`;
 }
 
 /** Un texto entre comillas simples para PowerShell (las comillas simples, también las «tipográficas», se duplican). */
@@ -509,7 +514,7 @@ export function buildConvertStepPowerShellCommand(input) {
   const script = '& "$env:LOCALAPPDATA\\Chusy\\convertir-step.ps1"';
   return t.filePath
     ? `${script} -FilePath ${psQuote(t.filePath)}`
-    : `${script} -FileName ${psQuote(t.fileName)}${t.size ? ` -Size ${t.size}` : ""}${t.modified ? ` -Modified ${t.modified}` : ""}${t.searchRoot ? ` -SearchRoot ${psQuote(t.searchRoot)}` : ""}`;
+    : `${script} -FileName ${psQuote(t.fileName)}${t.size ? ` -Size ${t.size}` : ""}${t.modified ? ` -Modified ${t.modified}` : ""}${t.port ? ` -Port ${t.port} -Token ${psQuote(t.token)}` : ""}${t.searchRoot ? ` -SearchRoot ${psQuote(t.searchRoot)}` : ""}`;
 }
 
 // ---------------------------------------------------------------------------

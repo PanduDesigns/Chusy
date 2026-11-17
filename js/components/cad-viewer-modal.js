@@ -8,7 +8,7 @@
 //     storage          el servicio de Drive (downloadBlob)
 //     file             un File local .step/.stp (se mide al vuelo, sin subirlo a ningún sitio)
 //     onUploadStep     (File) => void — si se pasa, un STEP cargado en local se puede subir a la tarea desde aquí
-//     deps             solo para pruebas: { loadEngine, launchConvert, copyCommand }
+//     deps             solo para pruebas: { loadEngine, startConversion, launch, copyCommand }
 //   Devuelve `{ close, ready }`; `ready` se resuelve cuando termina la carga inicial (con éxito o con un mensaje de error).
 //
 // Hay UN visor a la vez. Al cerrarlo se libera todo lo de WebGL: bucle de animación, listeners, controles, geometrías,
@@ -26,7 +26,8 @@ import {
   computeFaceToFaceMeasurement, cadViewDirection, cadUpVector, computeFitDistance, computeGridSpec, formatBoundingBoxMm, formatMm,
   describePointToPoint, describeFaceToFace, CAD_VIEW_LABELS,
 } from "../cad-viewer.js";
-import { launchConvertStep, copyConvertStepCommand } from "./convert-step-launcher.js";
+import { copyConvertStepCommand, launchStepUrl } from "./convert-step-launcher.js";
+import { startStepConversion, describeStepStatus } from "../step-bridge.js";
 
 const UP_AXIS_KEY = "chusy_cad_viewer_up_axis";
 const CLICK_MAX_MOVE_PX = 5;
@@ -63,7 +64,8 @@ export function openCadViewerModal(options = {}) {
     deps = {},
   } = options;
   const loadEngine = deps.loadEngine || ((o) => loadCadEngine(o));
-  const launchConvert = deps.launchConvert || launchConvertStep;
+  const startConversion = deps.startConversion || startStepConversion;
+  const launch = deps.launch || launchStepUrl;
   const copyCommand = deps.copyCommand || copyConvertStepCommand;
 
   const sourceName = (file && file.name) || (attachment && attachment.name) || title || "Pieza 3D";
@@ -146,7 +148,9 @@ export function openCadViewerModal(options = {}) {
   const toggles = { edges: true, wireframe: false, grid: false };
   let downPoint = null;
   let localStepFile = null;
-  let uploadBtn = null; // «Subir este .STEP a la tarea»: solo con un STEP cargado en local y dibujado
+  let uploadBtn = null; // «Subir este .STEP a la tarea»: solo con un STEP cargado en local y dibujado (y no subido ya)
+  let localStepUploaded = false;
+  let conversionJob = null; // v92: conversión automática en curso (ayudante de Windows)
   const scratch = {};
 
   const setHint = (text) => { hintEl.textContent = text; };
@@ -188,29 +192,51 @@ export function openCadViewerModal(options = {}) {
     setHint("");
   }
 
-  function showNeedStep(nativeAtt) {
+  function showNeedStep(nativeAtt, errorText = "") {
     const nativeName = nativeAtt.name;
     const node = el(`
       <div class="cad-viewer-need">
         <div class="cad-viewer-need__icon">🧩</div>
         <h3 data-cad="need-title"></h3>
         <p>Para ver y medir un archivo de Inventor (.ipt / .iam) en 3D hace falta su gemelo <strong>.STEP</strong> o <strong>.STP</strong> con el mismo nombre, y todavía no está adjunto a esta tarea ni al proyecto.</p>
+        <p class="cad-viewer-need__error" data-cad="need-error" hidden></p>
         <div class="cad-viewer-need__actions">
           <button type="button" class="btn btn--primary" data-act="convert">⚙️ Convertir este archivo a .STEP en mi PC (PowerShell)</button>
           <button type="button" class="btn" data-act="local">📂 Cargar archivo .STEP/.STP local</button>
         </div>
-        <p class="cad-viewer-need__hint">El ayudante busca el archivo en tu PC (Inventor abierto o archivos recientes) y, si no lo encuentra, te pide que lo elijas. Al terminar se abre el Explorador con el .STP generado: cárgalo aquí para verlo al vuelo o súbelo a la tarea para que todos lo vean.
+        <p class="cad-viewer-need__hint">El ayudante busca el archivo en tu PC, lo convierte con Inventor, <strong>sube el .STP a la tarea</strong> y lo abre aquí, sin que hagas nada más (la primera vez de una carpeta puede pedirte que elijas el archivo).
           <button type="button" class="cad-viewer-link" data-act="copy">Copiar comando de PowerShell</button></p>
       </div>`);
     node.querySelector('[data-cad="need-title"]').textContent = `Falta el modelo 3D (.STEP) de «${nativeName}»`;
     const convertInput = { fileName: nativeName, size: nativeAtt.size }; // el tamaño ayuda al ayudante a reconocer ESE archivo entre varios del mismo nombre
-    node.querySelector('[data-act="convert"]').addEventListener("click", () => launchConvert(convertInput));
+    node.querySelector('[data-act="convert"]').addEventListener("click", () => convertWithHelper(nativeAtt));
+    if (errorText) { const e = node.querySelector('[data-cad="need-error"]'); e.textContent = errorText; e.hidden = false; }
     node.querySelector('[data-act="local"]').addEventListener("click", pickLocalStep);
     node.querySelector('[data-act="copy"]').addEventListener("click", () => copyCommand(convertInput));
     setMessage(node);
     toolbar.hidden = true;
     bboxEl.textContent = "";
     setHint("");
+  }
+
+  /** v92: crea el STP con el ayudante de Windows, lo sube a la tarea (si hay donde) y lo abre en este mismo visor. */
+  function convertWithHelper(nativeAtt) {
+    showStatus("Abriendo el ayudante…");
+    const job = startConversion({
+      fileName: nativeAtt.name, size: nativeAtt.size, launch,
+      onStatus: (st) => { if (!closed && !model) showStatus(describeStepStatus(st)); },
+    });
+    conversionJob = job;
+    job.promise.then((res) => {
+      if (conversionJob === job) conversionJob = null;
+      if (closed || res.reason === "cancelled") return;
+      if (!res.ok) { showNeedStep(nativeAtt, res.message); return; }
+      localStepFile = res.file;
+      localStepUploaded = !!onUploadStep;
+      if (onUploadStep) { onUploadStep(res.file); showToast(`«${res.file.name}» creado: se sube a la tarea.`); }
+      subtitleEl.textContent = `${sourceName} · STP creado: ${res.file.name}`;
+      loadBuffer(() => res.file.arrayBuffer(), res.file.name, res.file.size);
+    });
   }
 
   function pickLocalStep() {
@@ -224,6 +250,7 @@ export function openCadViewerModal(options = {}) {
       if (!f) return;
       if (!isDirect3dCadFile(f.name)) { showToast("Elige un archivo .step o .stp.", "error"); return; }
       localStepFile = f;
+      localStepUploaded = false;
       subtitleEl.textContent = `${sourceName} · STEP local: ${f.name}`;
       loadBuffer(() => f.arrayBuffer(), f.name, f.size);
     });
@@ -669,13 +696,14 @@ export function openCadViewerModal(options = {}) {
     syncUploadButton();
   }
   function syncUploadButton() {
-    if (uploadBtn) uploadBtn.hidden = !(localStepFile && model);
+    if (uploadBtn) uploadBtn.hidden = !(localStepFile && model && !localStepUploaded);
   }
 
   function close() {
     if (closed) return;
     closed = true;
     if (abort) abort.abort();
+    if (conversionJob) { conversionJob.cancel(); conversionJob = null; }
     document.removeEventListener("keydown", onKeyDown, true);
     window.removeEventListener("resize", resize);
     disposeScene();

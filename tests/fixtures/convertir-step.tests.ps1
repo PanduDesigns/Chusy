@@ -3,6 +3,8 @@
 param([Parameter(Mandatory)][string]$Script, [Parameter(Mandatory)][string]$Work)
 $ErrorActionPreference = 'Stop'
 $env:CHUSY_CONVERT_STEP_NOMAIN = '1'
+$env:LOCALAPPDATA = Join-Path $Work 'appdata'   # la memoria y el registro de las pruebas, aparte de los de verdad
+[void](New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force)
 $results = [System.Collections.Generic.List[string]]::new()
 function Check([string]$Name, [bool]$Ok) { $results.Add(('{0}|{1}' -f $(if ($Ok) { 'OK' } else { 'FALLA' }), $Name)) }
 
@@ -32,6 +34,7 @@ function Set-Fakes([string[]]$Open, [string[]]$Recent) {
     $r = ($Recent | ForEach-Object { "'" + $_ + "'" }) -join ','
     Invoke-Expression ('function script:Get-InventorOpenPaths([string]$Name) { return @(' + $o + ') }')
     Invoke-Expression ('function script:Get-RecentPaths([string]$Name) { return @(' + $r + ') }')
+    Invoke-Expression 'function script:Get-LikelyFolders { return @() }'   # sin Explorador ni navegador reales
 }
 Set-Fakes @() @()
 
@@ -132,6 +135,92 @@ Check 'conversion: si Inventor falla al exportar, el error sube y el archivo se 
 $log = New-FakeInventor $false -Missing $true
 $msg = ''; try { [void](Convert-ToStep $mine) } catch { $msg = $_.Exception.Message }
 Check 'conversion: sin traductor de STEP, error claro y no se abre ningun archivo' ($msg -match 'traductor de STEP' -and -not ($log | Where-Object { $_ -like 'Open:*' }))
+
+
+# --- La memoria: donde se encontro un archivo se recuerda, y la proxima vez no hay que preguntar
+Set-Fakes @() @()
+$script:Size = 4; $script:Modified = $ms
+Save-Memory $mine
+$mem = Read-Memory
+Check 'memoria: Save-Memory guarda la carpeta y el archivo, y Read-Memory los devuelve' (@($mem.folders)[0] -eq $sub -and $mem.files['eje_26001.ipt'] -eq $mine)
+$memoryFile = Get-MemoryFilePath
+Check 'memoria: el archivo esta en %LOCALAPPDATA%\Chusy\convertir-step-memoria.json' ($memoryFile -like '*convertir-step-memoria.json' -and (Test-Path $memoryFile))
+$c = @(Get-Candidates 'memory' 'Eje_26001.ipt' '' 4 $ms 3000)
+Check 'memoria: el mismo archivo se reconoce sin buscar (1|ruta)' ($c.Count -ge 1 -and $c[0] -eq "1|$mine")
+# otro archivo de la MISMA carpeta (nunca visto) y otro en una subcarpeta profunda de ella
+$new1 = Join-Path $sub 'Otro_26001.ipt'; Set-Content -LiteralPath $new1 -Value 'CCC' -NoNewline; (Get-Item -LiteralPath $new1).LastWriteTimeUtc = $when
+$deepDir = Join-Path $sub 'a\b'; [void](New-Item -ItemType Directory -Path $deepDir -Force)
+$new2 = Join-Path $deepDir 'Hondo_26001.ipt'; Set-Content -LiteralPath $new2 -Value 'DDDDD' -NoNewline; (Get-Item -LiteralPath $new2).LastWriteTimeUtc = $when
+$script:Size = 3
+Check 'memoria: un archivo NUEVO de una carpeta recordada se encuentra sin preguntar' ((Find-SourceFile -Name 'Otro_26001.ipt' -Root '' -NoDialog) -eq $new1)
+$script:Size = 5
+Check 'memoria: y uno en una subcarpeta (hasta 3 niveles) de una carpeta recordada' ((Find-SourceFile -Name 'Hondo_26001.ipt' -Root '' -NoDialog) -eq $new2)
+$script:Size = 4
+Check 'memoria: no confunde un homonimo de otro tamano' ((Find-SourceFile -Name 'Eje_26001.ipt' -Root '' -NoDialog) -eq $mine)
+function Select-SourceFileDialog([string]$Name, [string]$StartDir) { throw 'no deberia preguntar' }
+$threw = $false; $got = ''
+try { $got = Find-SourceFile -Name 'Eje_26001.ipt' -Root '' } catch { $threw = $true }
+Check 'memoria: con el archivo recordado NO se abre la ventana de eleccion' (-not $threw -and $got -eq $mine)
+$asked = @{ dir = '' }
+function Select-SourceFileDialog([string]$Name, [string]$StartDir) { $script:Asked = $StartDir; return $other }
+$script:Size = 6
+$got = Find-SourceFile -Name 'Eje_26001.ipt' -Root ''
+Check 'sin ninguna pista se abre la ventana de eleccion, empezando por la carpeta recordada' ($got -eq $other -and $script:Asked -eq $sub)
+function Select-SourceFileDialog([string]$Name, [string]$StartDir) { throw 'no deberia preguntar' }
+Save-Memory $other
+$mem = Read-Memory
+Check 'memoria: lo elegido a mano tambien se recuerda (la carpeta pasa a ser la primera)' (@($mem.folders)[0] -eq $otro -and @($mem.folders)[1] -eq $sub -and $mem.files['eje_26001.ipt'] -eq $other)
+Save-Memory $mine
+Check 'memoria: recordar de nuevo sube la carpeta al principio y no duplica' (@(Read-Memory).Count -ge 0 -and @((Read-Memory).folders | Where-Object { $_ -eq $sub }).Count -eq 1 -and @((Read-Memory).folders)[0] -eq $sub)
+$script:Size = 4
+
+# --- El canal con Chusy: el servidor local (127.0.0.1 + clave) que ve el progreso y entrega el .stp
+$port = Get-Random -Minimum 47700 -Maximum 47990
+$tok = 'tok' + [guid]::NewGuid().ToString('N')
+$srv = Start-StepServer $port $tok
+Check 'canal: el servidor abre el puerto en 127.0.0.1' ($srv.State.ServerUp -eq $true)
+$base = "http://127.0.0.1:$port/$tok"
+function Get-Http([string]$u, [string]$method = 'GET') {
+    try { $r = Invoke-WebRequest -Uri $u -Method $method -UseBasicParsing -TimeoutSec 5; return @{ Code = [int]$r.StatusCode; Body = $r.Content; Headers = $r.Headers; Raw = $r } }
+    catch {
+        $resp = $null
+        if ($_.Exception.PSObject.Properties['Response']) { $resp = $_.Exception.Response }
+        if ($resp) { return @{ Code = [int]$resp.StatusCode; Body = ''; Headers = $resp.Headers } }
+        return @{ Code = 0; Body = ''; Headers = @{} }
+    }
+}
+$r = Get-Http "$base/status"
+$j = $r.Body | ConvertFrom-Json
+Check 'canal: /status al principio dice «searching»' ($r.Code -eq 200 -and $j.status -eq 'searching')
+Check 'canal: la respuesta lleva CORS (cualquier origen) y el permiso de red privada' (([string]$r.Headers['Access-Control-Allow-Origin']) -eq '*' -and ([string]$r.Headers['Access-Control-Allow-Private-Network']) -eq 'true')
+Set-StepState 'converting' 'Convirtiendo con Inventor...'
+$j = (Get-Http "$base/status").Body | ConvertFrom-Json
+Check 'canal: Set-StepState cambia lo que ve Chusy' ($j.status -eq 'converting' -and $j.message -eq 'Convirtiendo con Inventor...')
+Set-StepState 'dialog' 'Elige "el" archivo \ ahora'
+$j = (Get-Http "$base/status").Body | ConvertFrom-Json
+Check 'canal: el JSON escapa comillas y barras invertidas' ($j.status -eq 'dialog' -and $j.message -eq 'Elige "el" archivo \ ahora')
+Check 'canal: /file antes de terminar da 409 (no hay nada que entregar)' ((Get-Http "$base/file").Code -eq 409)
+Check 'canal: una clave equivocada da 404' ((Get-Http "http://127.0.0.1:$port/otraclave12345/status").Code -eq 404 -and (Get-Http "http://127.0.0.1:$port/status").Code -eq 404)
+Check 'canal: la peticion OPTIONS (comprobacion previa del navegador) se contesta 204 con los permisos' ((Get-Http "$base/status" 'Options').Code -eq 204 -and ([string](Get-Http "$base/status" 'Options').Headers['Access-Control-Allow-Private-Network']) -eq 'true')
+$stp = Join-Path $sub 'Eje_26001.stp'
+$bytes = [byte[]](0..255 + 0..255)
+[System.IO.File]::WriteAllBytes($stp, $bytes)
+Set-StepState 'done' 'Listo.' $stp
+$j = (Get-Http "$base/status").Body | ConvertFrom-Json
+Check 'canal: al terminar, /status trae el nombre y el tamano del .stp' ($j.status -eq 'done' -and $j.name -eq 'Eje_26001.stp' -and $j.size -eq 512)
+Check 'canal: aun sin recoger, Wait-StepServed no lo da por entregado' (-not (Wait-StepServed 1))
+$wc = New-Object System.Net.WebClient
+$got = $wc.DownloadData("$base/file")
+Check 'canal: /file entrega EXACTAMENTE los bytes del .stp' ($got.Length -eq 512 -and -not (Compare-Object $got $bytes))
+Check 'canal: al recogerlo queda marcado como entregado' (Wait-StepServed 3)
+Stop-StepServer
+Start-Sleep -Milliseconds 300
+Check 'canal: al cerrar, el puerto deja de contestar' ((Get-Http "$base/status").Code -eq 0)
+Check 'canal: sin servidor, Set-StepState y Wait-StepServed no hacen nada ni fallan' ((Set-StepState 'done' 'x') -eq $null -and -not (Wait-StepServed 1))
+$busy = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $port); $busy.Start()
+$srv2 = Start-StepServer $port $tok
+Check 'canal: con el puerto ocupado avisa del error (y no se cuelga)' (-not $srv2.State.ServerUp -and $srv2.State.ServerError)
+$busy.Stop(); Stop-StepServer
 
 # --- Vigilancia: un paso que se cuelga (Inventor ocupado, recurso de red caido) NO bloquea el script
 function Get-Colgado([string]$Name) { Start-Sleep -Seconds 30; return @('1|nunca') }
