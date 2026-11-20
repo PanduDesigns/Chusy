@@ -25,9 +25,10 @@ export const collection = (_db, path) => ({ __col: true, path });
 export const doc = (a, ...rest) => (a && a.__col ? { id: "auto" + ++autoId, path: a.path } : { id: rest[rest.length - 1], path: rest.join("/") });
 export const getDoc = async (...a) => { const h = hook("getDoc"); return h ? h(...a) : f(...a); };
 export const getDocs = async (ref) => { const h = hook("getDocs"); if (h) return h(ref); const list = store().collections[ref.path] || []; return { docs: list, size: list.length, forEach: (cb) => list.forEach((d) => cb({ id: d.id, data: () => d.data })) }; };
-export const writeBatch = () => ({ set: (ref, data) => store().sets.push({ ref, data }), update: (ref, fields) => (store().updates = store().updates || []).push({ ref, fields }), delete() {}, commit: async () => {} });
+export const writeBatch = () => ({ set: (ref, data) => store().sets.push({ ref, data }), update: (ref, fields) => (store().updates = store().updates || []).push({ ref, fields }), delete: (ref) => (store().deletes = store().deletes || []).push({ ref }), commit: async () => {} });
 export const serverTimestamp = () => "TS";
 // v82: también getDoc / getDocs / setDoc, y writeBatch().update se anota en globalThis.__fb.updates = [{ ref, fields }].
+// v93: writeBatch().delete se anota en globalThis.__fb.deletes = [{ ref }].
 // Ganchos opcionales para pruebas que necesitan controlar Firestore (v80: buzón de Outlook): una prueba pone
 // globalThis.__fb.hooks = { onSnapshot, runTransaction, updateDoc, deleteDoc, addDoc }. Sin gancho, todo se comporta como siempre.
 const hook = (name) => (store().hooks || {})[name];

@@ -28,12 +28,22 @@
 // orden en que se registraron, y este necesita ajustar el valor primero
 // para que el suyo ya lea el valor ajustado.
 //
+// v93 · Corregir y quitar sugerencias. Con `field` ("commercial" | "supplier") cada sugerencia lleva a la derecha dos botones:
+//   ✏️ «Corregir en todo Chusy»: pide el valor correcto y lo cambia por lotes en todas las tareas, ofertas y proyectos donde esté
+//       el antiguo (data/suggest-edit.js), y en el campo que se está rellenando si lo llevaba; el valor erróneo deja de sugerirse solo.
+//   🗑️ «Quitar sugerencia»: la oculta para esta persona (suggest-hygiene.js: localStorage por persona, que se purga sola cuando ya
+//       no queda ningún registro con ese valor) y, si aún lo llevan registros, pregunta si también se vacía en ellos.
+// Las sugerencias no se guardan: se recalculan con lo que está escrito ahora, así que corregir el último registro con un valor mal
+// escrito lo quita del desplegable sin más.
+//
 // El desplegable vive en <body> con posición fija (no dentro de la ventana
 // modal), así que no lo recorta el scroll interno del modal; se cierra al
 // hacer scroll o cambiar el tamaño de la ventana.
 // ============================================================================
-import { escapeHtml } from "../utils.js";
+import { escapeHtml, showToast } from "../utils.js";
 import { suggestionKey, cleanSuggestionText } from "../offers.js";
+import { visibleSuggestions, hideSuggestion, unhideSuggestion } from "../suggest-hygiene.js";
+import { previewSuggestedFieldReplacement, replaceSuggestedFieldValueEverywhere } from "../data/suggest-edit.js";
 
 // ----------------------------------------------------------------------------
 // v86 · Registro de fuentes de sugerencias. El campo Comercial recibe su lista por parámetro (task-modal.js la
@@ -50,6 +60,11 @@ export function setSuggestProvider(name, fn) {
   else providers.delete(name);
 }
 
+// v93 · Quién es la persona (lo que se quita de las sugerencias es por persona): app.js registra `() => uid`.
+let userProvider = () => null;
+export function setSuggestUserProvider(fn) { userProvider = typeof fn === "function" ? fn : () => null; }
+const currentUid = () => { try { return userProvider() || ""; } catch (e) { return ""; } };
+
 /** Las sugerencias de `name` ahora mismo (siempre un array; vacío si no hay fuente registrada o falla). */
 export function getSuggestOptions(name) {
   const fn = providers.get(name);
@@ -65,15 +80,16 @@ export function getSuggestOptions(name) {
 
 /** El campo «Proveedor» con memoria: engancha `attachTextSuggest` a la fuente `supplier` (ver app.js, getSupplierOptions). */
 export function attachSupplierSuggest(input) {
-  return attachTextSuggest(input, { getOptions: () => getSuggestOptions("supplier") });
+  return attachTextSuggest(input, { getOptions: () => getSuggestOptions("supplier"), field: "supplier" });
 }
 
 /**
  * @param {HTMLInputElement} input
- * @param {{ getOptions: () => string[] }} opts  `getOptions` se llama cada vez que hace falta (así ve siempre lo más reciente).
+ * @param {{ getOptions: () => string[], field?: "commercial" | "supplier" }} opts  `getOptions` se llama cada vez que hace falta (así ve
+ *        siempre lo más reciente). `field` (v93) activa los botones ✏️ corregir en todo Chusy y 🗑️ quitar sugerencia.
  * @returns {{ destroy: () => void }}
  */
-export function attachTextSuggest(input, { getOptions }) {
+export function attachTextSuggest(input, { getOptions, field = null }) {
   let list = null; // el desplegable, o null si está cerrado
   let matches = [];
   let active = -1;
@@ -84,7 +100,8 @@ export function attachTextSuggest(input, { getOptions }) {
 
   function options() {
     try {
-      return (getOptions && getOptions()) || [];
+      const raw = (getOptions && getOptions()) || [];
+      return field ? visibleSuggestions(field, raw, currentUid()) : raw; // v93: sin las que esta persona quitó (y purga las que ya no existen)
     } catch (e) {
       console.error("text-suggest:", e);
       return [];
@@ -122,8 +139,11 @@ export function attachTextSuggest(input, { getOptions }) {
       list.addEventListener("mousedown", onListMouseDown);
       document.body.appendChild(list);
     }
+    const actions = field
+      ? `<span class="text-suggest__actions"><button type="button" class="text-suggest__act" data-act="edit" tabindex="-1" title="Corregir en todo Chusy" aria-label="Corregir en todo Chusy">✏️</button><button type="button" class="text-suggest__act" data-act="del" tabindex="-1" title="Quitar sugerencia" aria-label="Quitar sugerencia">🗑️</button></span>`
+      : "";
     list.innerHTML = matches
-      .map((m, i) => `<div class="text-suggest__item${i === active ? " is-active" : ""}" role="option" data-i="${i}">${escapeHtml(m)}</div>`)
+      .map((m, i) => `<div class="text-suggest__item${i === active ? " is-active" : ""}${field ? " has-actions" : ""}" role="option" data-i="${i}"><span class="text-suggest__text">${escapeHtml(m)}</span>${actions}</div>`)
       .join("");
     position();
     const activeEl = list.querySelector(".is-active");
@@ -167,7 +187,66 @@ export function attachTextSuggest(input, { getOptions }) {
   function onListMouseDown(e) {
     e.preventDefault(); // conserva el foco del input
     const item = e.target.closest ? e.target.closest(".text-suggest__item") : null;
-    if (item) pick(matches[Number(item.dataset.i)]);
+    if (!item) return;
+    const value = matches[Number(item.dataset.i)];
+    const act = e.target.closest ? e.target.closest("[data-act]") : null;
+    if (act && field) {
+      close();
+      if (act.dataset.act === "edit") editSuggestion(value); else removeSuggestion(value);
+      return;
+    }
+    pick(value);
+  }
+
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  /** ✏️ El valor correcto se pide y se cambia en todos los registros; el campo que se está rellenando lo sigue si llevaba el antiguo. */
+  async function editSuggestion(value) {
+    const raw = window.prompt(`Corregir «${value}» en todo Chusy.\n\nEscribe el valor correcto: se cambiará en todas las tareas, ofertas y proyectos donde aparezca.`, value);
+    if (raw === null) return;
+    const next = cleanSuggestionText(raw);
+    if (!next || next === value) return;
+    try {
+      const preview = await previewSuggestedFieldReplacement(field, value, next);
+      const merge = options().some((o) => o !== value && suggestionKey(o) === suggestionKey(next));
+      const msg = preview.count
+        ? `«${value}» se cambiará por «${next}» en ${plural(preview.count, "registro", "registros")}${merge ? " (ya existía «" + next + "»: se unifican)" : ""}. ¿Continuar?`
+        : `«${value}» no está en ningún registro que se pueda cambiar desde aquí. ¿Dejar de sugerirlo y usar «${next}»?`;
+      if (!window.confirm(msg)) return;
+      const done = await replaceSuggestedFieldValueEverywhere(field, value, next);
+      unhideSuggestion(field, next, currentUid());
+      // Hasta que llegan los cambios de Firestore, el valor erróneo no debe seguir saliendo.
+      if (suggestionKey(value) !== suggestionKey(next)) hideSuggestion(field, value, currentUid());
+      if (input.isConnected && suggestionKey(input.value) === suggestionKey(value)) {
+        picking = true;
+        input.value = next;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        picking = false;
+      }
+      showToast(done.failedProjects ? `Corregido en ${plural(done.count, "registro", "registros")}; ${plural(done.failedProjects, "proyecto no se pudo cambiar", "proyectos no se pudieron cambiar")}.` : `«${value}» corregido en ${plural(done.count, "registro", "registros")}.`);
+    } catch (e) {
+      console.error("text-suggest:", e);
+      showToast("No se pudo corregir el valor.", "error");
+    }
+  }
+
+  /** 🗑️ Deja de sugerirlo; si aún hay registros con ese valor, se pregunta si también se vacía en ellos. */
+  async function removeSuggestion(value) {
+    try {
+      if (!window.confirm(`¿Quitar «${value}» de las sugerencias?`)) return;
+      hideSuggestion(field, value, currentUid());
+      const preview = await previewSuggestedFieldReplacement(field, value, "");
+      if (preview.count && window.confirm(`«${value}» sigue escrito en ${plural(preview.count, "registro", "registros")}. ¿Vaciarlo también en ellos?`)) {
+        const done = await replaceSuggestedFieldValueEverywhere(field, value, "");
+        showToast(`«${value}» quitado de las sugerencias y vaciado en ${plural(done.count, "registro", "registros")}.`);
+      } else {
+        showToast(`«${value}» ya no se sugiere.`);
+      }
+    } catch (e) {
+      console.error("text-suggest:", e);
+      showToast("No se pudo quitar la sugerencia.", "error");
+    }
   }
 
   function onInput() {
@@ -204,6 +283,8 @@ export function attachTextSuggest(input, { getOptions }) {
     if (!typed) return;
     const key = suggestionKey(typed);
     const canonical = options().find((o) => suggestionKey(o) === key);
+    // v93: si alguien escribe a propósito un valor que había quitado de las sugerencias, vuelve a ser una opción válida.
+    if (field && !canonical) unhideSuggestion(field, typed, currentUid());
     const finalValue = canonical || typed;
     if (finalValue !== input.value) input.value = finalValue;
   }

@@ -3,10 +3,12 @@
 // todos los archivos CAD (.step, .stp, .ipt, .iam) subidos a las tareas, para abrirlos y medirlos en 3D sin entrar en cada
 // tarea. La lógica (indexado, emparejamiento .ipt/.iam ↔ STEP y filtros) es pura y vive en js/parts-viewer.js.
 //
-//   renderPartsViewerView(container, { parts, state, onStateChange, onOpenTask, storage })
+//   renderPartsViewerView(container, { parts, state, onStateChange, onOpenTask, storage, onUpload, canManagePart, onDeletePart })
 //     parts   las piezas ya indexadas (indexUploadedCadParts), sin filtrar; esta vista aplica los filtros del estado
 //     state   { search, projectId, sector, availability } — de sesión; `onStateChange` lo recibe SIN repintar la pantalla
 //             entera (al teclear no se pierde el foco: solo se repinta la lista de resultados)
+//     onUpload        (v93) abre «Subir piezas»: archivos CAD directos, sin tarea (js/components/parts-upload-modal.js)
+//     canManagePart   (v93) (pieza) => boolean — si la persona puede borrar esa subida directa; `onDeletePart(pieza)` la borra
 // ============================================================================
 import { escapeHtml, showToast } from "../utils.js";
 import { formatBytes } from "../drive-files.js";
@@ -28,7 +30,7 @@ function fileChipHtml(f, i, kind) {
   return `<button type="button" class="parts-viewer-file parts-viewer-file--${kind}" data-dl="${kind}:${i}" title="Descargar «${escapeHtml(f.name)}»${f.size ? ` (${escapeHtml(formatBytes(f.size))})` : ""}"><span class="parts-viewer-file__ext">${escapeHtml(ext)}</span><span class="parts-viewer-file__name">${escapeHtml(f.name)}</span></button>`;
 }
 
-function cardHtml(p) {
+function cardHtml(p, canManage = false) {
   const badge = p.has3d
     ? `<span class="parts-viewer-badge parts-viewer-badge--ok" title="Hay un .STEP/.STP: se puede ver y medir en 3D">3D STEP listo${p.stepSource === "project" ? " · en otra tarea" : ""}</span>`
     : `<span class="parts-viewer-badge parts-viewer-badge--warn" title="Solo está el archivo de Inventor: falta su .STEP para verlo en 3D">Solo .IPT/.IAM</span>`;
@@ -45,18 +47,21 @@ function cardHtml(p) {
         ${p.projectCode ? `<span class="parts-viewer-card__code">${escapeHtml(p.projectCode)}</span>` : ""}
         <span class="parts-viewer-card__pname">${escapeHtml(p.projectName)}</span>${sector}
       </div>
-      <div class="parts-viewer-card__task" title="Tarea">📋 ${escapeHtml(p.taskTitle || "(sin título)")}${p.isComplete ? ` <span class="parts-viewer-card__done">completada</span>` : ""}</div>
+      ${p.source === "library"
+        ? `<div class="parts-viewer-card__task" title="Subida directa al visualizador">📤 ${escapeHtml(p.taskTitle || "Subida directa")}${p.uploadedByName ? ` <span class="parts-viewer-card__by">· ${escapeHtml(p.uploadedByName)}</span>` : ""}</div>`
+        : `<div class="parts-viewer-card__task" title="Tarea">📋 ${escapeHtml(p.taskTitle || "(sin título)")}${p.isComplete ? ` <span class="parts-viewer-card__done">completada</span>` : ""}</div>`}
       ${both}
       <div class="parts-viewer-card__files">${files}</div>
       <div class="parts-viewer-card__actions">
         <button type="button" class="btn btn--primary btn--sm" data-act="view">👁️ Ver y medir 3D</button>
-        <button type="button" class="btn btn--ghost btn--sm" data-act="task">Abrir tarea</button>
+        ${p.taskId ? `<button type="button" class="btn btn--ghost btn--sm" data-act="task">Abrir tarea</button>` : ""}
         <button type="button" class="btn btn--ghost btn--sm" data-act="download" title="Descargar ${p.has3d ? "el STEP" : "el archivo de Inventor"}">⬇ Descargar</button>
+        ${canManage ? `<button type="button" class="btn btn--ghost btn--sm parts-viewer-card__del" data-act="delete" title="Eliminar esta subida (los archivos van a la papelera de Drive)">🗑 Eliminar</button>` : ""}
       </div>
     </article>`;
 }
 
-export function renderPartsViewerView(container, { parts = [], state, onStateChange, onOpenTask, storage } = {}) {
+export function renderPartsViewerView(container, { parts = [], state, onStateChange, onOpenTask, storage, onUpload, canManagePart, onDeletePart } = {}) {
   const st = { ...emptyPartsState(), ...(state || {}) };
   st.sector = normalizeSectorFilter(st.sector);
   st.availability = normalizePartsAvailability(st.availability);
@@ -69,7 +74,8 @@ export function renderPartsViewerView(container, { parts = [], state, onStateCha
   container.innerHTML = `
     <div class="orders-view parts-viewer">
       <div class="parts-viewer-head">
-        <p class="parts-viewer-head__lead">Busca una referencia entre todos los archivos CAD subidos a las tareas y ábrela para verla y medirla en 3D.</p>
+        <p class="parts-viewer-head__lead">Busca una referencia entre los archivos CAD de las tareas y los subidos aquí, y ábrela para verla y medirla en 3D.</p>
+        ${onUpload ? `<button type="button" class="btn btn--primary btn--sm" id="pv-upload" title="Sube archivos CAD directamente, sin crear una tarea">⬆ Subir piezas</button>` : ""}
         <button type="button" class="btn btn--ghost btn--sm" id="pv-local">📂 Abrir .STEP/.STP local</button>
       </div>
       <div class="orders-filters">
@@ -100,14 +106,14 @@ export function renderPartsViewerView(container, { parts = [], state, onStateCha
     $("#pv-search-clear").hidden = !st.search;
     if (!parts.length) {
       count.textContent = "";
-      results.innerHTML = `<div class="parts-viewer-empty">Todavía no hay archivos CAD (.step, .stp, .ipt, .iam) subidos a las tareas. Súbelos desde cualquier tarea y aparecerán aquí.</div>`;
+      results.innerHTML = `<div class="parts-viewer-empty">Todavía no hay archivos CAD (.step, .stp, .ipt, .iam). Súbelos con «Subir piezas» o desde cualquier tarea y aparecerán aquí.</div>`;
       return;
     }
     count.textContent = list.length === parts.length
       ? `${list.length} ${list.length === 1 ? "pieza" : "piezas"}`
       : `${list.length} de ${parts.length} piezas`;
     if (!list.length) { results.innerHTML = `<div class="parts-viewer-empty">Ninguna pieza coincide con la búsqueda y los filtros.</div>`; return; }
-    results.innerHTML = shown.map(cardHtml).join("") + (list.length > shown.length ? `<div class="parts-viewer-empty">Mostrando ${shown.length} de ${list.length}: escribe más de la referencia o usa los filtros para acotar.</div>` : "");
+    results.innerHTML = shown.map((p) => cardHtml(p, p.source === "library" && !!canManagePart && canManagePart(p))).join("") + (list.length > shown.length ? `<div class="parts-viewer-empty">Mostrando ${shown.length} de ${list.length}: escribe más de la referencia o usa los filtros para acotar.</div>` : "");
   }
 
   function change(patch) {
@@ -140,6 +146,9 @@ export function renderPartsViewerView(container, { parts = [], state, onStateCha
     change(blank);
   });
 
+  const uploadBtn = $("#pv-upload");
+  if (uploadBtn) uploadBtn.addEventListener("click", () => onUpload());
+
   $("#pv-local").addEventListener("click", () => {
     const input = document.createElement("input");
     input.type = "file";
@@ -168,7 +177,8 @@ export function renderPartsViewerView(container, { parts = [], state, onStateCha
     const act = e.target.closest("[data-act]");
     if (!act) return;
     if (act.dataset.act === "view") openPart(p);
-    else if (act.dataset.act === "task") { if (onOpenTask) onOpenTask(p.taskId); }
+    else if (act.dataset.act === "task") { if (onOpenTask && p.taskId) onOpenTask(p.taskId); }
+    else if (act.dataset.act === "delete") { if (onDeletePart && canManagePart && canManagePart(p)) onDeletePart(p); }
     else if (act.dataset.act === "download") {
       const att = p.primaryStep || p.primaryNative;
       if (att) downloadAttachment(att, storage); else showToast("No hay ningún archivo que descargar.", "error");

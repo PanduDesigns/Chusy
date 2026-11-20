@@ -111,7 +111,10 @@ import { getWorkCalendar } from "../data/work-calendar.js";
 import { describeDay, nextWorkingDay, dateKey, formatDayMonth } from "../work-calendar.js";
 import { createOpenLocationButton, createSuggestLocationControls } from "./open-location.js";
 import { localFolderName } from "../location.js";
-import { upsertTag, TAG_COLOR_PALETTE } from "../data/tags.js";
+import {
+  upsertTag, TAG_COLOR_PALETTE, tagKey, tagEntryMatches, holdTagId, releaseHeldTags, renameOrMergeTagEverywhere, deleteTagEverywhere,
+  countTagUsageMap, loadTasksForTags, planTagRename,
+} from "../data/tags.js";
 import { createRichTextEditor } from "./rich-text-editor.js";
 import { wireTitleField } from "./title-field.js";
 import { driveService, renameDriveFolder } from "../drive-service.js";
@@ -329,6 +332,7 @@ export function openTaskModal({
     document.querySelectorAll(".project-add-popover").forEach((p) => p.remove());
     document.removeEventListener("keydown", onKeydown);
     overlay.remove();
+    releaseHeldTags(); // v93: las etiquetas creadas en esta edición vuelven a poder purgarse si no acabaron en ninguna tarea
     if (!skipCallback) onClosed();
   }
 
@@ -405,6 +409,8 @@ export function openTaskModal({
               <input class="field__input" id="t-new-tag" placeholder="Añadir etiqueta…" autocomplete="off">
               <div id="t-tag-suggest"></div>
             </div>
+            <button type="button" class="tag-manage-toggle" id="t-manage-tags" aria-expanded="false" title="Corregir, fusionar o eliminar etiquetas en todas las tareas">✏️ Gestionar etiquetas</button>
+            <div class="tag-manage" id="t-tag-manage" hidden></div>
           </div>
 
           <div id="t-customfields"></div>
@@ -705,7 +711,7 @@ export function openTaskModal({
       // (ver la cabecera de text-suggest.js): así ese listener ya lee el
       // valor ajustado a la forma existente ("juan perez" → "Juan Pérez").
       if (commercialDef && elm.tagName === "INPUT" && elm.type === "text" && elm.dataset.customField === commercialDef.id) {
-        suggestHandles.push(attachTextSuggest(elm, { getOptions: getCommercialOptions }));
+        suggestHandles.push(attachTextSuggest(elm, { getOptions: getCommercialOptions, field: "commercial" }));
       }
       elm.addEventListener("change", (e) => {
         draft.customFields = { ...draft.customFields, [elm.dataset.customField]: e.target.value || null };
@@ -1351,6 +1357,13 @@ export function openTaskModal({
       });
     }
 
+    overlay.querySelector("#t-manage-tags").addEventListener("click", () => {
+      manageOpen = !manageOpen;
+      editingTagId = null;
+      renderTagManager();
+      if (manageOpen && !tagUsage) refreshTagUsage();
+    });
+
     const tagInput = overlay.querySelector("#t-new-tag");
     tagInput.addEventListener("input", () => renderTagSuggestions(tagInput.value));
     tagInput.addEventListener("focus", () => renderTagSuggestions(tagInput.value));
@@ -1472,12 +1485,168 @@ export function openTaskModal({
       markDirty();
     }
     lastPickedTagColor = color;
+    holdTagId(tagKey(name)); // v93: hasta que se guarde la tarea, esta etiqueta no está en ninguna y no debe purgarse como huérfana
     upsertTag({ name, color });
     renderTagChips();
     const input = overlay.querySelector("#t-new-tag");
     input.value = "";
     overlay.querySelector("#t-tag-suggest").innerHTML = "";
     input.focus();
+  }
+
+  // --- v93: gestionar etiquetas (✏️ corregir / fusionar · 🗑️ eliminar), con cuántas tareas usa cada una ---------------------------
+  let manageOpen = false;
+  let tagUsage = null; // { [idDeEtiqueta]: nº de tareas } — se calcula con TODAS las tareas activas al abrir el panel
+  let editingTagId = null;
+  let editColor = null;
+  let manageBusy = false;
+
+  async function refreshTagUsage() {
+    try {
+      const tasks = await loadTasksForTags();
+      tagUsage = countTagUsageMap(tagsRegistry || [], tasks);
+    } catch (e) {
+      console.warn("etiquetas: no se pudo contar el uso", e);
+      tagUsage = tagUsage || {};
+    }
+    if (manageOpen) renderTagManager();
+  }
+
+  function usageLabel(id) {
+    if (!tagUsage) return "…";
+    const n = tagUsage[id];
+    return n === undefined ? "?" : String(n);
+  }
+
+  function renderTagManager() {
+    const box = overlay.querySelector("#t-tag-manage");
+    const btn = overlay.querySelector("#t-manage-tags");
+    if (!box || !btn) return;
+    btn.setAttribute("aria-expanded", String(manageOpen));
+    box.hidden = !manageOpen;
+    if (!manageOpen) { box.innerHTML = ""; return; }
+    const list = [...(tagsRegistry || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "", "es", { sensitivity: "base" }));
+    if (!list.length) { box.innerHTML = `<p class="tag-manage__empty">Todavía no hay etiquetas.</p>`; return; }
+    box.innerHTML = list.map((t) => {
+      if (t.id === editingTagId) {
+        const color = editColor || t.color;
+        return `
+        <div class="tag-manage__row is-editing" data-tag-id="${escapeHtml(t.id)}">
+          <input class="field__input tag-manage__input" value="${escapeHtml(t.name)}" maxlength="40" aria-label="Nuevo nombre de la etiqueta">
+          <div class="tag-color-row tag-manage__colors">${TAG_COLOR_PALETTE.map((c) => `<span class="tag-color-swatch${c === color ? " is-selected" : ""}" data-color="${c}" style="background:${c};"></span>`).join("")}</div>
+          <div class="tag-manage__hint" data-hint></div>
+          <div class="tag-manage__actions">
+            <button type="button" class="btn btn--primary btn--sm" data-save>Corregir en todo Chusy</button>
+            <button type="button" class="btn btn--ghost btn--sm" data-cancel>Cancelar</button>
+          </div>
+        </div>`;
+      }
+      return `
+        <div class="tag-manage__row" data-tag-id="${escapeHtml(t.id)}">
+          <span class="tag-suggest__dot" style="background:${t.color}"></span>
+          <span class="tag-manage__name">${escapeHtml(t.name)}</span>
+          <span class="tag-manage__count" title="Tareas que la usan">(${usageLabel(t.id)})</span>
+          <button type="button" class="tag-manage__btn" data-edit title="Corregir el nombre o el color en todas las tareas (si ya existe otra con ese nombre, se fusionan)" aria-label="Editar etiqueta ${escapeHtml(t.name)}">✏️</button>
+          <button type="button" class="tag-manage__btn" data-del title="Eliminar la etiqueta de todas las tareas" aria-label="Eliminar etiqueta ${escapeHtml(t.name)}">🗑️</button>
+        </div>`;
+    }).join("");
+
+    box.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => {
+      editingTagId = b.closest("[data-tag-id]").dataset.tagId;
+      editColor = null;
+      renderTagManager();
+      const input = box.querySelector(".tag-manage__input");
+      if (input) { input.focus(); input.select(); }
+    }));
+    box.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => deleteTagFromManager(b.closest("[data-tag-id]").dataset.tagId)));
+    const editRow = box.querySelector(".tag-manage__row.is-editing");
+    if (editRow) {
+      const input = editRow.querySelector(".tag-manage__input");
+      const hint = editRow.querySelector("[data-hint]");
+      const src = (tagsRegistry || []).find((t) => t.id === editingTagId);
+      const updateHint = () => {
+        const key = tagKey(input.value);
+        const other = (tagsRegistry || []).find((t) => t.id !== editingTagId && tagKey(t.id) === key);
+        hint.textContent = other ? `Ya existe «${other.name}»: las dos etiquetas se fusionarán en una.` : "";
+        hint.hidden = !other;
+      };
+      input.addEventListener("input", updateHint);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); saveTagEdit(input.value); }
+        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); editingTagId = null; renderTagManager(); }
+      });
+      editRow.querySelectorAll(".tag-color-swatch").forEach((sw) => sw.addEventListener("click", () => {
+        editColor = sw.dataset.color;
+        editRow.querySelectorAll(".tag-color-swatch").forEach((x) => x.classList.toggle("is-selected", x === sw));
+      }));
+      editRow.querySelector("[data-save]").addEventListener("click", () => saveTagEdit(input.value));
+      editRow.querySelector("[data-cancel]").addEventListener("click", () => { editingTagId = null; renderTagManager(); });
+      updateHint();
+      if (!src) { editingTagId = null; renderTagManager(); }
+    }
+  }
+
+  /** El borrador de esta ventana sigue la corrección: la etiqueta cambia de nombre (o desaparece) también en lo que se está editando. */
+  function applyTagChangeToDraft(sourceId, newName) {
+    const next = [];
+    draft.tags.forEach((entry) => {
+      const value = tagEntryMatches(entry, sourceId) ? newName : entry;
+      if (value && !next.some((x) => tagKey(x) === tagKey(value))) next.push(value);
+    });
+    draft.tags = next;
+    renderTagChips();
+  }
+
+  async function saveTagEdit(rawName) {
+    if (manageBusy) return;
+    const id = editingTagId;
+    const source = (tagsRegistry || []).find((t) => t.id === id);
+    if (!source) return;
+    manageBusy = true;
+    try {
+      const plan = planTagRename(tagsRegistry || [], id, rawName, { newColor: editColor, tasks: [] });
+      if (plan.mode === "noop") { editingTagId = null; return; }
+      if (plan.mode === "merge" && !confirm(`Ya existe la etiqueta «${plan.targetName}». Se fusionarán: todas las tareas con «${source.name}» pasarán a llevar «${plan.targetName}» y «${source.name}» se borrará. ¿Continuar?`)) return;
+      const done = await renameOrMergeTagEverywhere(id, rawName, { newColor: editColor });
+      // Registro local de la ventana (la lista de etiquetas con la que se abrió no se actualiza sola).
+      const rest = (tagsRegistry || []).filter((t) => t.id !== id && t.id !== done.targetId);
+      tagsRegistry = [...rest, { id: done.targetId, name: done.targetName, color: done.color }];
+      applyTagChangeToDraft(id, done.targetName);
+      editingTagId = null;
+      const n = done.taskRewrites.length;
+      showToast(done.mode === "merge" ? `Etiquetas fusionadas en «${done.targetName}» (${n} ${n === 1 ? "tarea" : "tareas"}).` : `Etiqueta corregida en ${n} ${n === 1 ? "tarea" : "tareas"}.`, "success");
+    } catch (e) {
+      console.error("etiquetas:", e);
+      showToast(e && e.message ? e.message : "No se pudo corregir la etiqueta.", "error");
+    } finally {
+      manageBusy = false;
+      renderTagManager();
+      setTimeout(refreshTagUsage, 1200); // deja que lleguen los cambios de las tareas antes de volver a contar
+    }
+  }
+
+  async function deleteTagFromManager(id) {
+    if (manageBusy) return;
+    const tag = (tagsRegistry || []).find((t) => t.id === id);
+    if (!tag) return;
+    const n = tagUsage && tagUsage[id] !== undefined ? tagUsage[id] : null;
+    const where = n === null ? "de todas las tareas donde esté" : `de ${n} ${n === 1 ? "tarea" : "tareas"}`;
+    if (!confirm(`Se quitará «${tag.name}» ${where} y se borrará la etiqueta. ¿Continuar?`)) return;
+    manageBusy = true;
+    try {
+      const done = await deleteTagEverywhere(id);
+      tagsRegistry = (tagsRegistry || []).filter((t) => t.id !== id);
+      applyTagChangeToDraft(id, null);
+      const k = done.taskRewrites.length;
+      showToast(`Etiqueta «${tag.name}» eliminada (${k} ${k === 1 ? "tarea" : "tareas"}).`, "success");
+    } catch (e) {
+      console.error("etiquetas:", e);
+      showToast("No se pudo eliminar la etiqueta.", "error");
+    } finally {
+      manageBusy = false;
+      renderTagManager();
+      setTimeout(refreshTagUsage, 1200);
+    }
   }
 
   function renderSubtasks() {

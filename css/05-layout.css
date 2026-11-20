@@ -134,7 +134,9 @@
 }
 .project-badge--sm { width: 16px; height: 16px; font-size: 10px; border-radius: 5px; }
 .project-badge--lg { width: 40px; height: 40px; font-size: 19px; border-radius: 10px; }
-.sidebar__item-icon { font-size: 13px; flex-shrink: 0; }
+.sidebar__item-icon { font-size: 13px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+/* v93: el icono del visor 3D es un <svg> en línea (los demás, emojis): al ir sobre la línea base del texto quedaba más alto en la tira de iconos. */
+.sidebar__item-icon > svg { display: block; }
 .sidebar__item-count {
   font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-faint);
   background: var(--color-void); border: 1px solid var(--color-line);

@@ -378,12 +378,14 @@ function clearBodyAll() { $$(".cad-viewer-overlay, .cad-assistant-overlay, .moda
 // ---------------------------------------------------------------- 6) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=92", (idx.match(/css\/[\w-]+\.css\?v=92/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en otra versión", !/\.css\?v=(?!92)\d+/.test(idx));
-  check("package.json y package-lock.json: 92.0.0", JSON.parse(read("package.json")).version === "92.0.0" && JSON.parse(read("package-lock.json")).version === "92.0.0");
+  // (la entrega actual la fija v93-tags-suggest-and-mytasks-columns.test.mjs: aquí basta con que sea ≥ 92 y esté bien puesta en los 14)
+  const linkVersions = [...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => Number(m[1]));
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 92)", new Set(linkVersions).size + ":" + linkVersions.length + ":" + (linkVersions[0] >= 92), "1:14:true");
+  const pkgVersion = (f) => Number(String(JSON.parse(read(f)).version).split(".")[0]);
+  check("package.json y package-lock.json: versión ≥ 92 y la misma", pkgVersion("package.json") >= 92 && pkgVersion("package.json") === pkgVersion("package-lock.json"));
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: entrada 92 la primera, mayor que la 91, sobre la conversión automática y la subida del STP", r.id === 92 && r.id > RELEASES[1].id && /automátic/i.test(r.title) && /STP/.test(JSON.stringify(r)) && /Instalar-ConvertirStep\.bat/.test(JSON.stringify(r)) && r.items.length >= 3, r.title);
+  const r = RELEASES.find((x) => x.id === 92);
+  check("Novedades: entrada 92, mayor que la 91, sobre la conversión automática y la subida del STP", !!r && r.id > RELEASES.find((x) => x.id === 91).id && /automátic/i.test(r.title) && /STP/.test(JSON.stringify(r)) && /Instalar-ConvertirStep\.bat/.test(JSON.stringify(r)) && r.items.length >= 3, r.title);
   const css = read("css/07-modals.css");
   check("CSS: la bandeja de avisos (.step-tray) con variables de tema", [".step-tray", ".step-tray__item", ".step-tray__spinner", ".step-tray__actions", ".cad-viewer-need__error"].every((c) => css.includes(c)) && /\.step-tray__item \{[^}]*var\(--color-panel\)/.test(css));
   const readme = read("README.md");

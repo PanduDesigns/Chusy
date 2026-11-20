@@ -1,6 +1,8 @@
 // ============================================================================
 // Visor 3D industrial (v90): abre un .step/.stp (o el .ipt/.iam de Inventor, a través de su STEP gemelo) en una ventana
-// con rotación orbital, vistas rápidas, aristas CAD, cotas envolventes y medición Punto a Punto y Cara a Cara.
+// con rotación orbital, vistas rápidas, aristas CAD, cotas envolventes y medición Punto a Punto, Cara a Cara y (v93) Diámetro.
+// v93: ⌀ Diámetro mide agujeros, ejes, redondeos y caras circulares; en Cara a Cara, un círculo (agujero, eje, disco) se puede
+// elegir como una cara más y se mide DESDE SU CENTRO hasta la otra cara (o hasta el centro de otro círculo).
 //
 //   openCadViewerModal({ attachment, attachmentsPool, storage, file, title, onUploadStep, deps })
 //     attachment       adjunto de Drive `{ name, driveId, size, taskId?, projectId? }` (.step/.stp o .ipt/.iam)
@@ -25,6 +27,7 @@ import {
   isDirect3dCadFile, isInventorNativeFile, getCadDisplayName, findCompanionStepAttachment, computePointToPointMeasurement,
   computeFaceToFaceMeasurement, cadViewDirection, cadUpVector, computeFitDistance, computeGridSpec, formatBoundingBoxMm, formatMm,
   describePointToPoint, describeFaceToFace, CAD_VIEW_LABELS,
+  fitCircularFace, computeDiameterMeasurement, computeCircleToFaceMeasurement, computeCircleToCircleMeasurement, describeDiameter, describeAxisToFace,
 } from "../cad-viewer.js";
 import { copyConvertStepCommand, launchStepUrl } from "./convert-step-launcher.js";
 import { startStepConversion, describeStepStatus } from "../step-bridge.js";
@@ -36,6 +39,7 @@ const SNAP_PIXELS = 12;
 const COLOR_FACE_A = 0xff9f1c;
 const COLOR_FACE_B = 0x2ec4b6;
 const COLOR_HOVER = 0x6ea8fe;
+const COLOR_CIRCLE = 0xb388ff; // v93: las caras circulares (agujeros, ejes, discos) se iluminan en violeta: son las que se pueden medir desde su centro
 const COLOR_LINE = 0xffd23f;
 
 let active = null;
@@ -96,6 +100,7 @@ export function openCadViewerModal(options = {}) {
           <div class="cad-viewer-group" role="group" aria-label="Medir">
             <button type="button" class="cad-viewer-btn" data-mode="point-to-point" aria-pressed="false">📏 Punto a Punto</button>
             <button type="button" class="cad-viewer-btn" data-mode="face-to-face" aria-pressed="false">📐 Cara a Cara</button>
+            <button type="button" class="cad-viewer-btn" data-mode="diameter" aria-pressed="false">⌀ Diámetro</button>
             <button type="button" class="cad-viewer-btn" data-cad="clear">🗑️ Limpiar medidas</button>
           </div>
         </div>
@@ -107,7 +112,7 @@ export function openCadViewerModal(options = {}) {
           <aside class="cad-viewer-panel" data-cad="panel" hidden>
             <div class="cad-viewer-panel__title">Medidas</div>
             <ol class="cad-viewer-measures" data-cad="measures"></ol>
-            <p class="cad-viewer-panel__empty" data-cad="measures-empty">Elige 📏 Punto a Punto o 📐 Cara a Cara y haz clic sobre la pieza.</p>
+            <p class="cad-viewer-panel__empty" data-cad="measures-empty">Elige 📏 Punto a Punto, 📐 Cara a Cara o ⌀ Diámetro y haz clic sobre la pieza.</p>
           </aside>
         </div>
         <footer class="cad-viewer-foot">
@@ -141,7 +146,8 @@ export function openCadViewerModal(options = {}) {
   let upAxis = readUpAxis();
   let mode = "none";
   let pending = null; // { kind: 'p2p', point, overlay } | { kind: 'f2f', faceId, highlight }
-  let hover = { faceId: -1, mesh: null, at: 0 };
+  let hover = { faceId: -1, mesh: null, overlay: null, at: 0 };
+  const faceCache = new Map(); // v93: faceId → { face, circle } (la geometría no cambia: se describe y se ajusta una sola vez)
   let measureSeq = 0;
   const measurements = [];
   const overlays = [];
@@ -462,6 +468,7 @@ export function openCadViewerModal(options = {}) {
   function setMode(next) {
     mode = mode === next ? "none" : next;
     cancelPending();
+    clearHover();
     root.querySelectorAll("[data-mode]").forEach((b) => {
       const on = b.dataset.mode === mode;
       b.classList.toggle("is-active", on);
@@ -477,7 +484,10 @@ export function openCadViewerModal(options = {}) {
 
   function refreshHint() {
     if (mode === "point-to-point") setHint(pending ? "Punto a Punto: haz clic en el punto B (se ajusta a vértices y aristas). Esc cancela." : "Punto a Punto: haz clic en el punto A (se ajusta a vértices y aristas).");
-    else if (mode === "face-to-face") setHint(pending ? "Cara a Cara: haz clic en la segunda cara. Esc cancela." : "Cara a Cara: haz clic en la primera cara de la pieza.");
+    else if (mode === "face-to-face") {
+      if (pending && pending.circle) setHint(`Cara a Cara: círculo ⌀ ${formatMm(round2(pending.circle.radius * 2))} elegido. Haz clic en una cara (o en otro círculo) para medir desde su centro. Esc cancela.`);
+      else setHint(pending ? "Cara a Cara: haz clic en la segunda cara. Esc cancela." : "Cara a Cara: haz clic en la primera cara. Los círculos (violeta) se miden desde su centro.");
+    } else if (mode === "diameter") setHint("Diámetro: haz clic en un agujero, un eje, un redondeo o una cara circular (se iluminan en violeta).");
     else setHint("Arrastra para girar · rueda para acercar · botón derecho para desplazar.");
   }
 
@@ -491,9 +501,23 @@ export function openCadViewerModal(options = {}) {
 
   function clearHover() {
     if (hover.mesh) disposeObject3D(hover.mesh);
-    hover = { faceId: -1, mesh: null, at: hover.at };
+    if (hover.overlay) removeOverlay(hover.overlay);
+    hover = { faceId: -1, mesh: null, overlay: null, at: hover.at };
     requestRender();
   }
+
+  /** La cara descrita y, si es un agujero, un eje, un redondeo o un disco, su círculo (con caché: el modelo no cambia). */
+  function faceInfo(faceId) {
+    let info = faceCache.get(faceId);
+    if (!info) {
+      const face = describeModelFace(model, faceId);
+      info = { face, circle: fitCircularFace(face) };
+      faceCache.set(faceId, info);
+    }
+    return info;
+  }
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const circleLabel = (c) => `⌀ ${formatMm(round2(c.radius * 2))}`;
 
   function pick(ev) {
     const rect = renderer.domElement.getBoundingClientRect();
@@ -508,7 +532,7 @@ export function openCadViewerModal(options = {}) {
     if (!hit) { setHint("Haz clic sobre la pieza."); return; }
     let customHint = false; // el clic dejó un aviso propio («elige otra cara…»): no se pisa con la ayuda genérica
     try {
-      customHint = (mode === "point-to-point" ? clickPointToPoint(hit) : clickFaceToFace(hit)) === true;
+      customHint = (mode === "point-to-point" ? clickPointToPoint(hit) : mode === "diameter" ? clickDiameter(hit) : clickFaceToFace(hit)) === true;
     } catch (e) {
       console.error("cad-viewer medida:", e);
       showToast("No se pudo calcular la medida.", "error");
@@ -546,31 +570,88 @@ export function openCadViewerModal(options = {}) {
       const highlight = createFaceHighlight(engine.THREE, model, faceId, COLOR_FACE_A);
       scene.add(highlight);
       clearHover();
-      pending = { kind: "f2f", faceId, highlight };
+      // v93: si es un círculo (agujero, eje, disco) se marca su centro: es desde donde se medirá.
+      const { circle } = faceInfo(faceId);
+      const overlay = circle ? addOverlay("cad-viewer-marker cad-viewer-marker--center", circleLabel(circle), circle.center) : null;
+      pending = { kind: "f2f", faceId, highlight, circle, overlay };
       requestRender();
       return;
     }
     if (pending.faceId === faceId) { setHint("Elige una cara distinta de la primera."); return true; }
-    const faceA = describeModelFace(model, pending.faceId);
-    const faceB = describeModelFace(model, faceId);
+    const infoA = faceInfo(pending.faceId);
+    const infoB = faceInfo(faceId);
+    const faceA = infoA.face;
+    const faceB = infoB.face;
     const m = computeFaceToFaceMeasurement(faceA, faceB);
-    const group = lineGroup(m.lineStart, m.lineEnd);
+    const circleA = infoA.circle;
+    const circleB = infoB.circle;
+    const owned = [];
+    if (pending.overlay) owned.push(pending.overlay); // el marcador del centro del primer círculo pasa a formar parte de la medida
+    const normalLines = [
+      `Distancia normal: ${formatMm(m.normalDistanceMm)}`,
+      `Distancia mínima: ${formatMm(m.minDistanceMm)}${m.approximate ? " (aprox.)" : ""}`,
+      `Ángulo entre caras: ${m.angleDeg.toFixed(1)}° (0°–90°) · ${m.isParallel ? "Paralelas" : "No paralelas"}`,
+    ];
+    if (!faceA.isPlanar || !faceB.isPlanar) normalLines.push("Alguna cara es curva: la distancia válida es la mínima.");
+
+    // v93: con un círculo de por medio la medida principal es DESDE SU CENTRO (hasta la otra cara o hasta el centro del otro círculo).
+    let title = describeFaceToFace(m).label;
+    let sub = describeFaceToFace(m).angle;
+    let lines = normalLines;
+    let a = m.lineStart;
+    let b = m.lineEnd;
+    if (circleA || circleB) {
+      if (circleA && circleB) {
+        const cc = computeCircleToCircleMeasurement(circleA, circleB);
+        title = `${cc.axesParallel ? "Entre ejes" : "Entre centros"}: ${formatMm(cc.distanceMm)}`;
+        sub = `${circleLabel(circleA)} ↔ ${circleLabel(circleB)}`;
+        lines = [
+          `Distancia entre centros: ${formatMm(cc.centerDistanceMm)}`,
+          ...(cc.axesParallel ? [`Distancia entre ejes (paralelos): ${formatMm(cc.axisDistanceMm)}`] : ["Los ejes no son paralelos."]),
+          `Diámetros: ${circleLabel(circleA)} y ${circleLabel(circleB)}`,
+        ];
+        a = cc.lineStart; b = cc.lineEnd;
+        owned.push(addOverlay("cad-viewer-marker cad-viewer-marker--center", circleLabel(circleB), circleB.center));
+      } else {
+        const circle = circleA || circleB;
+        const otherFace = circleA ? faceB : faceA;
+        const cf = computeCircleToFaceMeasurement(circle, otherFace);
+        title = `Centro → Cara: ${formatMm(cf.distanceMm)}`;
+        sub = `${circleLabel(circle)} · ${cf.isPlanarTarget ? "cara plana" : "cara curva (mínima)"}`;
+        lines = [
+          `Desde el centro del círculo (${circleLabel(circle)}) a la cara: ${formatMm(cf.distanceMm)}`,
+          ...(cf.normalDistanceMm !== null && cf.minDistanceMm !== cf.normalDistanceMm ? [`Mínima del centro al borde de la cara: ${formatMm(cf.minDistanceMm)}`] : []),
+          ...(describeAxisToFace(cf) ? [describeAxisToFace(cf)] : []),
+        ];
+        a = cf.lineStart; b = cf.lineEnd;
+        if (!pending.overlay) owned.push(addOverlay("cad-viewer-marker cad-viewer-marker--center", circleLabel(circle), circle.center));
+      }
+    }
+    const group = lineGroup(a, b);
     group.add(pending.highlight);
     const highlightB = createFaceHighlight(engine.THREE, model, faceId, COLOR_FACE_B);
     group.add(highlightB);
     scene.remove(pending.highlight);
     pending = null;
     clearHover();
-    const text = describeFaceToFace(m);
-    const mid = m.lineStart.map((v, i) => (v + m.lineEnd[i]) / 2);
-    const label = addOverlay("cad-viewer-label--dim", [text.label, text.angle], mid);
-    const lines = [
-      `Distancia normal: ${formatMm(m.normalDistanceMm)}`,
-      `Distancia mínima: ${formatMm(m.minDistanceMm)}${m.approximate ? " (aprox.)" : ""}`,
-      `Ángulo entre caras: ${m.angleDeg.toFixed(1)}° (0°–90°) · ${m.isParallel ? "Paralelas" : "No paralelas"}`,
-    ];
-    if (!faceA.isPlanar || !faceB.isPlanar) lines.push("Alguna cara es curva: la distancia válida es la mínima.");
-    addMeasurement({ title: text.label, lines, group, overlays: [label] });
+    const mid = a.map((v, i) => (v + b[i]) / 2);
+    owned.push(addOverlay("cad-viewer-label--dim", [title, sub], mid));
+    addMeasurement({ title, lines, group, overlays: owned });
+  }
+
+  /** ⌀ Diámetro: un clic en un agujero, un eje, un redondeo o una cara circular. */
+  function clickDiameter(hit) {
+    const faceId = faceIdFromIntersection(model, hit);
+    if (faceId < 0) { setHint("Esa zona no pertenece a ninguna cara."); return true; }
+    const { face } = faceInfo(faceId);
+    const m = computeDiameterMeasurement(face, { toward: [hit.point.x, hit.point.y, hit.point.z] });
+    if (!m) { setHint("Esa cara no es circular. Haz clic en un agujero, un eje, un redondeo o una cara circular (se iluminan en violeta)."); return true; }
+    const text = describeDiameter(m);
+    const group = lineGroup(m.lineStart, m.lineEnd);
+    group.add(createFaceHighlight(engine.THREE, model, faceId, COLOR_FACE_A));
+    clearHover();
+    const label = addOverlay("cad-viewer-label--dim", text.label, m.center);
+    addMeasurement({ title: text.title, lines: text.lines, group, overlays: [label] });
   }
 
   function lineGroup(a, b) {
@@ -625,7 +706,7 @@ export function openCadViewerModal(options = {}) {
     if (Math.hypot(ev.clientX - d.x, ev.clientY - d.y) <= CLICK_MAX_MOVE_PX && Date.now() - d.t <= CLICK_MAX_MS) onCanvasClick(ev);
   }
   function onPointerMove(ev) {
-    if (mode !== "face-to-face" || !model || ev.buttons) return;
+    if ((mode !== "face-to-face" && mode !== "diameter") || !model || ev.buttons) return;
     const now = Date.now();
     if (now - hover.at < 60) return;
     hover.at = now;
@@ -635,13 +716,15 @@ export function openCadViewerModal(options = {}) {
     const at = hover.at;
     clearHover();
     hover.at = at;
-    if (id >= 0 && !(pending && pending.faceId === id)) {
-      hover.faceId = id;
-      hover.mesh = createFaceHighlight(engine.THREE, model, id, COLOR_HOVER);
-      hover.mesh.material.opacity = 0.35;
-      scene.add(hover.mesh);
-      requestRender();
-    }
+    if (id < 0 || (pending && pending.faceId === id)) return;
+    const { circle } = faceInfo(id);
+    if (mode === "diameter" && !circle) return; // en Diámetro solo se iluminan las caras que se pueden medir
+    hover.faceId = id;
+    hover.mesh = createFaceHighlight(engine.THREE, model, id, circle ? COLOR_CIRCLE : COLOR_HOVER);
+    hover.mesh.material.opacity = 0.35;
+    scene.add(hover.mesh);
+    if (circle) hover.overlay = addOverlay("cad-viewer-marker cad-viewer-marker--center", circleLabel(circle), circle.center);
+    requestRender();
   }
   function onPointerLeave() {
     if (hover.mesh) clearHover();

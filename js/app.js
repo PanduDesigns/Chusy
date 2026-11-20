@@ -13,7 +13,7 @@ import { convertOfferToProject, conversionMessage } from "./data/offer-conversio
 import { getTask, subscribeToProjectTasks, subscribeToMyTasks, subscribeToOrdersPending } from "./data/tasks.js";
 import { createTaskLoader } from "./task-loader.js";
 import { store } from "./store.js";
-import { subscribeToAllTags } from "./data/tags.js";
+import { subscribeToAllTags, registerTagTasksProvider, pruneOrphanTags, setTagsReleasedHook } from "./data/tags.js";
 import { setSortPref } from "./data/users.js";
 import { subscribeToNotifications, announceNews, NOTIF_TYPE_NEWS } from "./data/notifications.js";
 import { RELEASES, releasesBetween } from "./whats-new.js";
@@ -39,7 +39,8 @@ import { renderListView } from "./views/list-view.js";
 import { renderBoardView } from "./views/board-view.js";
 import { renderCalendarView } from "./views/calendar-view.js";
 import { renderTimelineView } from "./views/timeline-view.js";
-import { renderMyTasksView } from "./views/my-tasks-view.js";
+import { renderMyTasksView, getMyTasksViewFilters, resetMyTasksViewFilters } from "./views/my-tasks-view.js";
+import { filterMyTasksItems } from "./my-tasks-columns.js";
 import { renderTrashView, visibleTrashItems } from "./views/trash-view.js";
 import { renderArchiveView } from "./views/archive-view.js";
 import { renderMetricsView } from "./views/metrics-view.js";
@@ -52,10 +53,13 @@ import { collectOrderRows, pendingOrdersCount, collectSupplierOptions, emptyOrde
 // views/parts-viewer-view.js, permiso por departamento en meta/partsViewerAccess (data/parts-viewer-access.js)
 import { renderPartsViewerView } from "./views/parts-viewer-view.js";
 import { subscribeToPartsViewerAccess } from "./data/parts-viewer-access.js";
-import { indexUploadedCadParts, emptyPartsState } from "./parts-viewer.js";
+import { emptyPartsState } from "./parts-viewer.js";
+import { buildPartsCatalog, canManageLibraryEntry } from "./parts-library.js";
+import { subscribeToCadParts, deleteCadPart } from "./data/cad-parts.js";
+import { openPartsUploadModal } from "./components/parts-upload-modal.js";
 import { isCadFileName } from "./cad-viewer.js";
 import { isDriveAttachment } from "./drive-files.js";
-import { setSuggestProvider } from "./components/text-suggest.js";
+import { setSuggestProvider, setSuggestUserProvider } from "./components/text-suggest.js";
 import { resolveTimelineGroupBy } from "./workload.js"; // v81
 import { openProjectModal } from "./components/project-modal.js";
 import { openTaskModal } from "./components/task-modal.js";
@@ -96,6 +100,7 @@ let trashItems = null; // v67: la papelera de esta persona (o de todos, si es ad
 let teamMembers = [];
 let myTasks = [];
 let tagsRegistry = [];
+let myTasksLoaded = false; // v93: llegó ya la primera tanda de «Mis tareas» (condición para poder borrar etiquetas huérfanas con seguridad)
 let currentProjectId = null;
 let currentProject = null;
 let currentTasks = [];
@@ -114,6 +119,9 @@ let unsubOrdersPending = null;
 let partsViewerAllowed = [...DEFAULT_PARTS_VIEWER_GROUPS];
 let partsViewerState = emptyPartsState();
 let unsubPartsViewerAccess = null;
+// v93 · subidas directas al visualizador (colección cadParts): la suscripción se abre al entrar por primera vez en la sección.
+let cadPartsEntries = [];
+let unsubCadParts = null;
 let ordersPendingSubscribed = false;
 let calendarViewDate = new Date();
 let timelineZoom = "day"; // 'day' | 'week' | 'month'
@@ -144,6 +152,7 @@ const taskLoader = createTaskLoader({
   onChange: (projectId) => {
     const isCurrent = projectId === currentProjectId;
     if (isCurrent) syncCurrentTasks();
+    schedulePruneOrphanTags(); // v93
     if (mode === "timeline" || mode === "metrics" || mode === "orders" || mode === "parts-viewer" || (mode === "project" && isCurrent)) renderShell();
   },
 });
@@ -452,18 +461,18 @@ onAuthChange((profile, message) => {
 });
 
 function cleanup() {
-  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig, unsubWorkCalendar, unsubOrdersAccess, unsubOrdersPending, unsubPartsViewerAccess].forEach((fn) => fn && fn());
+  [unsubProjects, unsubArchivedProjects, unsubTrash, unsubUsers, unsubMyTasks, unsubTags, unsubCurrentProject, unsubNotifications, unsubQuickCreateConfig, unsubDriveConfig, unsubWorkCalendar, unsubOrdersAccess, unsubOrdersPending, unsubPartsViewerAccess, unsubCadParts].forEach((fn) => fn && fn());
   taskLoader.stopAll();
   store.stopAll(); // v73: por si acaso, que no quede en memoria nada de la cuenta que sale
-  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = unsubWorkCalendar = unsubOrdersAccess = unsubOrdersPending = unsubPartsViewerAccess = null;
+  unsubProjects = unsubArchivedProjects = unsubTrash = unsubUsers = unsubMyTasks = unsubTags = unsubCurrentProject = unsubNotifications = unsubQuickCreateConfig = unsubDriveConfig = unsubWorkCalendar = unsubOrdersAccess = unsubOrdersPending = unsubPartsViewerAccess = unsubCadParts = null; cadPartsEntries = [];
   ordersAllowed = [...DEFAULT_ORDERS_GROUPS]; ordersViewState = emptyOrdersState(); ordersPendingTasks = []; ordersPendingSubscribed = false; // v86
   partsViewerAllowed = [...DEFAULT_PARTS_VIEWER_GROUPS]; partsViewerState = emptyPartsState(); // v90
   resetDriveService(); // v68: fuera el permiso de Drive y las miniaturas de la cuenta que sale
   resetWorkCalendar(); // v78: y el calendario laboral de la cuenta que sale
-  projects = []; rawProjects = []; prevActiveProjectIds = null; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; tagsRegistry = []; notifications = [];
+  projects = []; rawProjects = []; prevActiveProjectIds = null; projectsLoaded = false; archivedProjects = []; archivedProjectsLoaded = false; trashItems = null; teamMembers = []; myTasks = []; myTasksLoaded = false; tagsRegistry = []; notifications = [];
   sessionUid = null; searchLoadPending = false; metricsDepartmentFilter = "";
   currentProjectId = null; currentProject = null; currentTasks = []; mode = "project";
-  activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" };
+  activeFilters = {}; searchText = ""; sortState = { column: null, direction: "asc" }; resetMyTasksViewFilters(); // v93
   quickCreateEnabled = false;
   hasRestoredLocation = false; // si otra persona inicia sesión en este navegador, que recupere SU última sección, no la de quien salió
   hasSeededExclusiveProjects = false;
@@ -548,7 +557,7 @@ function bootstrap() {
   }
 
   if (unsubTags) unsubTags();
-  unsubTags = subscribeToAllTags((tags) => { tagsRegistry = tags; renderShell(); });
+  unsubTags = subscribeToAllTags((tags) => { tagsRegistry = tags; renderShell(); schedulePruneOrphanTags(); });
 
   if (unsubQuickCreateConfig) unsubQuickCreateConfig();
   unsubQuickCreateConfig = subscribeToQuickCreateConfig((cfg) => { quickCreateEnabled = !!cfg.enabled; renderShell(); });
@@ -574,7 +583,7 @@ function bootstrap() {
   unsubPartsViewerAccess = subscribeToPartsViewerAccess((groups) => { partsViewerAllowed = groups; renderShell(); });
 
   if (unsubMyTasks) unsubMyTasks();
-  unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; renderShell(); });
+  unsubMyTasks = subscribeToMyTasks(currentUser.uid, (tasks) => { myTasks = tasks; myTasksLoaded = true; renderShell(); schedulePruneOrphanTags(); });
 
   if (unsubProjects) unsubProjects();
   unsubProjects = subscribeToAllProjects((allProjects) => {
@@ -763,6 +772,7 @@ function getSupplierOptions() {
   return collectSupplierOptions([...getKnownProjectTasks(), ...myTasks, ...currentTasks]);
 }
 setSuggestProvider("supplier", getSupplierOptions);
+setSuggestUserProvider(() => (currentUser ? currentUser.uid : null)); // v93: lo que cada persona quita de las sugerencias es suyo
 
 /** v86: contador de la barra lateral = pedidos «Pendientes de pedir» de los proyectos activos. */
 function getOrdersPendingCount() {
@@ -1131,19 +1141,25 @@ function renderShell() {
       mainContentEl.innerHTML = loadingStateHtml("Cargando las tareas de todos los proyectos…");
       return;
     }
-    const cadParts = indexUploadedCadParts(getKnownProjectTasks(), projects);
+    if (!unsubCadParts) unsubCadParts = subscribeToCadParts((entries) => { cadPartsEntries = entries; if (mode === "parts-viewer") renderShell(); });
+    const cadParts = buildPartsCatalog(getKnownProjectTasks(), projects, cadPartsEntries);
     topbarEl.innerHTML = `<span class="topbar__title">Visualizador de piezas</span><span class="topbar__count">${cadParts.length} ${cadParts.length === 1 ? "pieza" : "piezas"} con archivos CAD</span>`;
     renderPartsViewerView(mainContentEl, {
       parts: cadParts, state: partsViewerState,
       onStateChange: (st) => { partsViewerState = st; }, // solo guarda: la vista repinta por su cuenta (no se pierde el foco al buscar)
       onOpenTask: openTask, storage: driveService,
+      // v93: subir piezas directamente (sin tarea) y borrar las propias (o cualquiera, si eres admin)
+      onUpload: () => openPartsUploadModal({ storage: driveService, currentUser, projects }),
+      canManagePart: (p) => canManageLibraryEntry({ createdBy: p.createdBy }, currentUser),
+      onDeletePart: deleteLibraryPart,
     });
     return;
   }
 
   if (mode === "mytasks") {
     const filterDefs = buildFilterDefs({ teamMembers, tagsRegistry, projects, includeProject: true, customFieldDefs: currentUser.personalCustomFieldDefs, tasks: myTasks });
-    renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange, searchText, onSearchChange: handleSearchTextChange });
+    // v93: «Mis tareas» tiene su propio buscador (en la vista, junto a los filtros nuevos); el de esta barra se quita para no tener dos.
+    renderFilterBar(filterbarEl, { filterDefs, activeFilters, onChange: handleFilterChange });
     renderMyTasksContent();
     return;
   }
@@ -1186,7 +1202,10 @@ function renderShell() {
  * foco.
  */
 function renderMyTasksContent() {
-  const filteredMyTasks = sortTasks(applyTaskFilters(myTasks, activeFilters, searchText), sortState, { teamMembers, projects });
+  // v93: además de los chips de la barra, los filtros ampliados de la propia vista (texto, tipo/proyecto, sector, comercial, etapa, proveedor, etiqueta).
+  const offersProjectId = (getOffersProject() || {}).id;
+  const chipFiltered = applyTaskFilters(myTasks, activeFilters, "");
+  const filteredMyTasks = sortTasks(filterMyTasksItems(chipFiltered, getMyTasksViewFilters(), { projects, offersProjectId }), sortState, { teamMembers, projects });
   const countLabel = filteredMyTasks.length === myTasks.length
     ? `${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}`
     : `${filteredMyTasks.length} de ${myTasks.length} ${myTasks.length === 1 ? "tarea" : "tareas"}`;
@@ -1199,7 +1218,10 @@ function renderMyTasksContent() {
     <button class="btn btn--primary btn--sm" id="btn-new-personal-task" style="margin-left:auto;">+ Tarea personal</button>`;
   topbarEl.querySelector("#btn-new-personal-task").addEventListener("click", openNewPersonalTask);
 
-  renderMyTasksView(mainContentEl, { tasks: filteredMyTasks, teamMembers, projects, tagsRegistry, sortState, onSortChange: handleSortChange, onOpenTask: openTask, currentUser });
+  renderMyTasksView(mainContentEl, {
+    tasks: filteredMyTasks, allTasks: myTasks, totalCount: myTasks.length, teamMembers, projects, tagsRegistry, sortState,
+    onSortChange: handleSortChange, onOpenTask: openTask, currentUser, onFiltersChange: renderMyTasksContent,
+  });
 }
 
 /** Igual que renderMyTasksContent() pero para la línea de tiempo global — el topbar de este modo es estático, así que aquí solo hace falta la vista. */
@@ -1496,6 +1518,51 @@ function getAllProjectTasksDeduped() {
   const seen = new Map();
   Object.values(globalTasksByProject).flat().forEach((t) => seen.set(t.id, t));
   return [...seen.values()];
+}
+
+// v93 · Etiquetas huérfanas. `pruneOrphanTags` (data/tags.js) borra del registro las etiquetas que ya no está en ninguna tarea,
+// pero SOLO cuando sabe que ve todas las tareas activas: aquí se le dice qué tareas hay y cuándo están todas cargadas. Solo
+// actúa quien ve todos los proyectos (un admin): quien no ve «Ofertas», por ejemplo, vería huérfanas las etiquetas que solo
+// usan las ofertas. Espera unos segundos tras el último cambio para no actuar a mitad de una racha de datos.
+function allKnownTasksForTags() {
+  const seen = new Map();
+  [...getAllProjectTasksDeduped(), ...myTasks].forEach((t) => seen.set(t.id, t));
+  return [...seen.values()];
+}
+function seesEveryProject() {
+  return rawProjects.every((p) => projects.some((v) => v.id === p.id));
+}
+registerTagTasksProvider({
+  getTasks: allKnownTasksForTags,
+  isComplete: () => !!currentUser && projectsLoaded && myTasksLoaded && taskLoader.isAllLoaded(),
+  // Para contar usos o corregir una etiqueta hay que tener TODAS las tareas activas: se piden (una vez por sesión) y se espera.
+  ensureComplete: () => new Promise((resolve) => { taskLoader.ensureAll(); taskLoader.whenAllLoaded(() => resolve()); }),
+});
+let pruneTagsTimer = null;
+function schedulePruneOrphanTags() {
+  clearTimeout(pruneTagsTimer);
+  pruneTagsTimer = setTimeout(async () => {
+    if (!currentUser || !tagsRegistry.length || !projectsLoaded || !myTasksLoaded || !seesEveryProject()) return;
+    try { await pruneOrphanTags(); } catch (e) { console.warn("pruneOrphanTags:", e); }
+  }, 4000);
+}
+setTagsReleasedHook(schedulePruneOrphanTags);
+
+/** v93: borra una subida directa del visualizador: el documento y (a la papelera de Drive) todos sus archivos. */
+async function deleteLibraryPart(part) {
+  const entry = cadPartsEntries.find((e) => e.id === part.libraryId);
+  if (!entry || !canManageLibraryEntry(entry, currentUser)) return;
+  const n = (entry.attachments || []).length;
+  if (!confirm(`¿Eliminar esta subida (${n} ${n === 1 ? "archivo" : "archivos"}) del visualizador? Los archivos irán a la papelera de Drive.`)) return;
+  try {
+    await deleteCadPart(entry.id);
+    const ids = (entry.attachments || []).flatMap((a) => [a.driveId, a.thumbId]).filter(Boolean);
+    if (ids.length) driveService.trashFiles(ids);
+    showToast("Subida eliminada.");
+  } catch (e) {
+    console.error("cadParts:", e);
+    showToast("No se pudo eliminar la subida.", "error");
+  }
 }
 
 function goToPersonFilter(uid) {

@@ -501,6 +501,15 @@ service cloud.firestore {
       allow create: if isActiveUser() && request.resource.data.fromUserId == request.auth.uid;
     }
 
+    // ---- v93: subidas directas del «Visualizador de piezas» (archivos CAD sin tarea) ----
+    // Cualquiera con la cuenta activa las ve (el permiso por departamento de la sección es de interfaz, como en «Pedidos»);
+    // cada una la crea quien la sube, y solo él o un admin la modifica o la borra.
+    match /cadParts/{partId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isActiveUser() && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+
     // ---- Etiquetas (vocabulario compartido: nombre + color) ----
     match /tags/{tagId} {
       allow read: if isActiveUser();

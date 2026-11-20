@@ -159,7 +159,7 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
   // ajuste a la forma ya existente ("juan perez" → "Juan Pérez") ocurre
   // primero y `state.comercial` guarda el valor ya ajustado (ver la
   // cabecera de text-suggest.js).
-  if (getCommercialOptions) suggestHandle = attachTextSuggest(comercialInput, { getOptions: getCommercialOptions });
+  if (getCommercialOptions) suggestHandle = attachTextSuggest(comercialInput, { getOptions: getCommercialOptions, field: "commercial" });
   const syncComercial = (e) => { state.comercial = e.target.value; markDirty(); };
   comercialInput.addEventListener("input", syncComercial);
   comercialInput.addEventListener("change", syncComercial);

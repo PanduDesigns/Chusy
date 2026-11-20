@@ -475,3 +475,9 @@ textarea.modal__title-input {
 .step-tray__close:hover { color: var(--color-text-hi); }
 .cad-viewer-need__error { margin: 4px 0 0; padding: 8px 10px; font-size: 12.5px; color: var(--color-danger); background: var(--color-void-raised); border: 1px solid var(--color-line); border-radius: var(--radius-sm); }
 .cad-viewer-need__error[hidden] { display: none; }
+
+/* ---- v93 · Visor 3D: marcador del centro de un círculo (⌀ Diámetro y Cara a Cara desde el centro) ---- */
+.cad-viewer-marker--center {
+  width: auto; height: auto; padding: 2px 7px; border-radius: 10px; background: #8E5BFF; border-color: #fff; font-weight: 600;
+  white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}

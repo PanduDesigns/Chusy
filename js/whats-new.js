@@ -25,6 +25,21 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 93,
+    date: "2026-11-19",
+    title: "Mis tareas a tu medida, etiquetas y sugerencias limpias, y diámetros en el visor 3D",
+    items: [
+      "Mis tareas: el nuevo botón «⚙️ Columnas» te deja elegir qué ver (proyecto u oferta, código, sector, cliente, comercial, tipo, sección, etapa de flujo, proveedor, nº de pedido, estado, fechas, etiquetas y los campos personalizados de los proyectos). Cada persona conserva su propia elección en su navegador, y «Restablecer» vuelve a las de siempre.",
+      "Mis tareas: filtros nuevos debajo de la barra — búsqueda instantánea (título, código 26001, proyecto, cliente, proveedor, nº de pedido, etiqueta), tipo o proyecto concreto, sector, comercial, etapa de flujo, proveedor y etiqueta. Solo salen las opciones que hay en TUS tareas.",
+      "Etiquetas: en la ventana de la tarea, «✏️ Gestionar etiquetas» muestra cuántas tareas usa cada una (N). Con ✏️ corriges el nombre o el color en todas las tareas a la vez (si ya existe otra con ese nombre, se fusionan sin duplicarse) y con 🗑️ la quitas de todas. Las etiquetas que se quedan sin ninguna tarea desaparecen solas.",
+      "Sugerencias al escribir (Comercial y Proveedor): junto a cada sugerencia, ✏️ «Corregir en todo Chusy» cambia el valor mal escrito en todas las tareas, ofertas y proyectos donde esté, y 🗑️ «Quitar sugerencia» deja de proponértelo (y te pregunta si también lo vacía donde aún aparece). Al corregir el último registro con un valor erróneo, deja de sugerirse solo.",
+      "Visualizador de piezas: nuevo «⬆ Subir piezas» para subir archivos CAD (.step, .stp, .ipt, .iam) directamente, sin crear una tarea, y enseñárselos al resto del equipo. Quien las sube (o un admin) puede eliminarlas.",
+      "Visor 3D: nueva medida «⌀ Diámetro» para agujeros, ejes, redondeos y caras circulares. En «Cara a Cara», los círculos (se iluminan en violeta) se pueden elegir y se mide desde su centro hasta una cara o hasta el centro de otro círculo (distancia entre ejes).",
+      "Arreglo: el icono del visor de piezas en la barra lateral queda a la misma altura que el resto.",
+      "Importante para el administrador: hay que volver a publicar las reglas de Firestore (firestore.rules) para que funcione «Subir piezas».",
+    ],
+  },
+  {
     id: 92,
     date: "2026-11-14",
     title: "Conversión automática: el STP se crea y se sube solo al subir un .ipt/.iam",

@@ -395,6 +395,312 @@ export function groupCoplanarTriangles(positions, indices, { tolerance = 1e-4, p
 }
 
 // ---------------------------------------------------------------------------
+// 2b. Círculos y diámetros (v93)
+// ---------------------------------------------------------------------------
+// El STEP llega al navegador ya triangulado (occt-import-js no da el tipo de superficie), así que un agujero, un eje o un
+// redondeo se RECONOCEN por su geometría:
+//   · cilindro (cara curva): todas sus normales son perpendiculares al eje → el eje es el autovector de menor autovalor de la
+//     matriz de covarianza de las normales; los vértices proyectados sobre el plano perpendicular caen en un círculo (ajuste de
+//     mínimos cuadrados de Kåsa) y se comprueba que el error es mínimo;
+//   · disco/arandela (cara plana): su borde son uno o dos círculos concéntricos alrededor del centroide.
+// Cualquier otra cara (plana normal, cónica, esférica…) devuelve `null`: no es un círculo medible.
+
+/** Autovalores y autovectores de una matriz simétrica 3×3 (Jacobi). Devuelve `[{ value, vector }]` de menor a mayor valor. */
+export function eigenSymmetric3(m) {
+  const a = m.map((r) => r.slice());
+  const v = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (let sweep = 0; sweep < 60; sweep++) {
+    if (Math.abs(a[0][1]) + Math.abs(a[0][2]) + Math.abs(a[1][2]) < 1e-15) break;
+    for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+      if (Math.abs(a[p][q]) < 1e-20) continue;
+      const theta = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+      const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+      const c = 1 / Math.sqrt(t * t + 1);
+      const sn = t * c;
+      for (let k = 0; k < 3; k++) { const akp = a[k][p], akq = a[k][q]; a[k][p] = c * akp - sn * akq; a[k][q] = sn * akp + c * akq; }
+      for (let k = 0; k < 3; k++) { const apk = a[p][k], aqk = a[q][k]; a[p][k] = c * apk - sn * aqk; a[q][k] = sn * apk + c * aqk; }
+      for (let k = 0; k < 3; k++) { const vkp = v[k][p], vkq = v[k][q]; v[k][p] = c * vkp - sn * vkq; v[k][q] = sn * vkp + c * vkq; }
+    }
+  }
+  return [0, 1, 2].map((i) => ({ value: a[i][i], vector: [v[0][i], v[1][i], v[2][i]] })).sort((x, y) => x.value - y.value);
+}
+
+/** Círculo por mínimos cuadrados (Kåsa) de puntos 2D: `{ cx, cy, r, rms }` o `null` si no hay círculo (puntos alineados o muy pocos). */
+export function fitCircle2D(points) {
+  const n = points ? points.length : 0;
+  if (n < 3) return null;
+  let mx = 0, my = 0;
+  points.forEach(([x, y]) => { mx += x; my += y; });
+  mx /= n; my /= n;
+  let sxx = 0, sxy = 0, syy = 0, sx = 0, sy = 0, r1 = 0, r2 = 0, r3 = 0;
+  points.forEach(([px, py]) => {
+    const x = px - mx, y = py - my, z = x * x + y * y;
+    sxx += x * x; sxy += x * y; syy += y * y; sx += x; sy += y;
+    r1 -= z * x; r2 -= z * y; r3 -= z;
+  });
+  const M = [[sxx, sxy, sx, r1], [sxy, syy, sy, r2], [sx, sy, n, r3]];
+  for (let c = 0; c < 3; c++) { // eliminación gaussiana con pivote parcial
+    let piv = c;
+    for (let r = c + 1; r < 3; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (Math.abs(M[piv][c]) < 1e-12) return null;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = c + 1; r < 3; r++) { const f = M[r][c] / M[c][c]; for (let k = c; k < 4; k++) M[r][k] -= f * M[c][k]; }
+  }
+  const F = M[2][3] / M[2][2];
+  const E = (M[1][3] - M[1][2] * F) / M[1][1];
+  const D = (M[0][3] - M[0][1] * E - M[0][2] * F) / M[0][0];
+  const cx = -D / 2, cy = -E / 2;
+  const r2v = cx * cx + cy * cy - F;
+  if (!(r2v > 0)) return null;
+  const r = Math.sqrt(r2v);
+  let acc = 0;
+  points.forEach(([px, py]) => { const d = Math.hypot(px - mx - cx, py - my - cy) - r; acc += d * d; });
+  return { cx: cx + mx, cy: cy + my, r, rms: Math.sqrt(acc / n) };
+}
+
+/** Dos vectores perpendiculares al eje `a` (unitario). */
+function basisPerpendicular(a) {
+  const e = Math.abs(a[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const u = unit(cross(a, e));
+  return [u, cross(a, u)];
+}
+
+/** La cobertura angular (grados) de unos puntos 2D alrededor de un centro: 360° menos el mayor hueco entre ellos. */
+function arcCoverageDeg(points, cx, cy) {
+  const ang = points.map(([x, y]) => Math.atan2(y - cy, x - cx)).sort((p, q) => p - q);
+  if (ang.length < 2) return 0;
+  let gap = ang[0] + 2 * Math.PI - ang[ang.length - 1];
+  for (let i = 1; i < ang.length; i++) gap = Math.max(gap, ang[i] - ang[i - 1]);
+  return Math.max(0, 360 - (gap * 180) / Math.PI);
+}
+
+/** Normales y áreas de los triángulos de una cara descrita con buildFaceDescriptor. */
+function faceTriangleNormals(face) {
+  const out = [];
+  (face.triangles || []).forEach((t) => {
+    const A = face.vertices[t[0]], B = face.vertices[t[1]], C = face.vertices[t[2]];
+    if (!A || !B || !C) return;
+    const cr = cross(sub(B, A), sub(C, A));
+    const l = len(cr);
+    if (l > 1e-12) out.push({ n: scale(cr, 1 / l), w: l / 2, g: scale(add(add(A, B), C), 1 / 3) });
+  });
+  return out;
+}
+
+function fitCylinderFace(face) {
+  const tris = faceTriangleNormals(face);
+  if (tris.length < 6 || face.vertices.length < 6) return null;
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  let total = 0;
+  tris.forEach(({ n, w }) => { total += w; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] += w * n[i] * n[j]; });
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] /= total;
+  const [e0, e1] = eigenSymmetric3(C);
+  if (e0.value > 0.02 || e1.value < 0.004) return null; // sin eje claro: una cara plana, esférica o un arco casi recto
+  const axis = unit(e0.vector);
+  if (!axis) return null;
+  const meanAbsDot = tris.reduce((acc, { n, w }) => acc + w * Math.abs(dot(n, axis)), 0) / total;
+  if (meanAbsDot > 0.05) return null;
+  const mean = scale(face.vertices.reduce(add, [0, 0, 0]), 1 / face.vertices.length);
+  const [u, v] = basisPerpendicular(axis);
+  const pts = face.vertices.map((p) => { const d = sub(p, mean); return [dot(d, u), dot(d, v)]; });
+  const fit = fitCircle2D(pts);
+  if (!fit || fit.r < 1e-3 || !Number.isFinite(fit.r) || fit.rms > 0.01 * fit.r + 0.003) return null;
+  const ts = face.vertices.map((p) => dot(sub(p, mean), axis));
+  const tMin = Math.min(...ts), tMax = Math.max(...ts);
+  const center = add(add(add(mean, scale(u, fit.cx)), scale(v, fit.cy)), scale(axis, (tMin + tMax) / 2));
+  // ¿Agujero (las normales apuntan al eje) o eje/saliente (apuntan hacia fuera)? Solo se afirma si es claro.
+  let radialSign = 0;
+  tris.forEach(({ n, w, g }) => {
+    const d = sub(g, center);
+    const radial = sub(d, scale(axis, dot(d, axis)));
+    const l = len(radial);
+    if (l > 1e-9) radialSign += w * (dot(n, radial) / l);
+  });
+  radialSign /= total;
+  return {
+    type: "cylinder",
+    center,
+    axis,
+    radius: fit.r,
+    lengthMm: tMax - tMin,
+    arcDeg: arcCoverageDeg(pts, fit.cx, fit.cy),
+    kind: radialSign > 0.3 ? "shaft" : radialSign < -0.3 ? "hole" : "unknown",
+    rms: fit.rms,
+  };
+}
+
+function fitDiskFace(face) {
+  if (!face.isPlanar || !face.triangles || face.triangles.length < 6) return null;
+  const edgeCount = new Map();
+  face.triangles.forEach((t) => {
+    for (let e = 0; e < 3; e++) {
+      const a = t[e], b = t[(e + 1) % 3];
+      const k = a < b ? `${a}|${b}` : `${b}|${a}`;
+      edgeCount.set(k, (edgeCount.get(k) || 0) + 1);
+    }
+  });
+  const boundary = new Set();
+  edgeCount.forEach((count, k) => { if (count === 1) k.split("|").forEach((i) => boundary.add(Number(i))); });
+  if (boundary.size < 8) return null;
+  const center = face.centroid;
+  const axis = face.normal;
+  const items = [...boundary].map((i) => ({ i, d: dist(face.vertices[i], center) })).sort((p, q) => p.d - q.d);
+  const dMax = items[items.length - 1].d;
+  if (!(dMax > 1e-3)) return null;
+  const clusters = [[items[0]]];
+  for (let i = 1; i < items.length; i++) {
+    if (items[i].d - items[i - 1].d > 0.02 * dMax) clusters.push([]);
+    clusters[clusters.length - 1].push(items[i]);
+  }
+  if (clusters.length > 2) return null;
+  const stats = clusters.map((c) => {
+    const mean = c.reduce((acc, x) => acc + x.d, 0) / c.length;
+    const spread = c[c.length - 1].d - c[0].d;
+    return { c, mean, ok: c.length >= 8 && spread <= 0.01 * mean + 0.003 };
+  });
+  if (!stats.every((s) => s.ok)) return null;
+  const outer = stats[stats.length - 1];
+  const [u, v] = basisPerpendicular(axis);
+  const pts = outer.c.map((x) => { const d = sub(face.vertices[x.i], center); return [dot(d, u), dot(d, v)]; });
+  if (arcCoverageDeg(pts, 0, 0) < 300) return null; // un sector o semicírculo no es un disco
+  return {
+    type: "disk",
+    center,
+    axis,
+    radius: outer.mean,
+    innerRadius: stats.length === 2 ? stats[0].mean : null,
+    lengthMm: 0,
+    arcDeg: 360,
+    kind: stats.length === 2 ? "washer" : "disk",
+    rms: 0,
+  };
+}
+
+/**
+ * ¿Es esta cara un círculo medible? `face` es una cara descrita con buildFaceDescriptor. Devuelve
+ * `{ type: 'cylinder' | 'disk', kind: 'hole' | 'shaft' | 'unknown' | 'disk' | 'washer', center, axis, radius, innerRadius?, lengthMm, arcDeg }`
+ * (en mm y coordenadas de mundo) o `null` si la cara no es cilíndrica ni un disco.
+ */
+export function fitCircularFace(face) {
+  if (!face || !Array.isArray(face.vertices) || !Array.isArray(face.triangles)) return null;
+  try {
+    return face.isPlanar ? fitDiskFace(face) : fitCylinderFace(face);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Medida de DIÁMETRO de una cara circular (ver fitCircularFace). `toward` (opcional) es el punto donde se hizo clic: la línea de
+ * cota se dibuja hacia ese lado. Devuelve `null` si la cara no es un círculo.
+ *   { diameterMm, radiusMm, innerDiameterMm|null, lengthMm, kind, type, arcDeg, isFullCircle, center, axis, lineStart, lineEnd }
+ */
+export function computeDiameterMeasurement(face, { toward = null } = {}) {
+  const circle = fitCircularFace(face);
+  if (!circle) return null;
+  const [u] = basisPerpendicular(circle.axis);
+  let dir = u;
+  if (toward) {
+    const d = sub(toVec(toward, "el punto del clic"), circle.center);
+    const radial = unit(sub(d, scale(circle.axis, dot(d, circle.axis))));
+    if (radial) dir = radial;
+  }
+  return {
+    diameterMm: round2(circle.radius * 2),
+    radiusMm: round2(circle.radius),
+    innerDiameterMm: circle.innerRadius ? round2(circle.innerRadius * 2) : null,
+    lengthMm: round2(circle.lengthMm),
+    kind: circle.kind,
+    type: circle.type,
+    arcDeg: round2(circle.arcDeg),
+    isFullCircle: circle.arcDeg >= 300,
+    center: circle.center,
+    axis: circle.axis,
+    lineStart: sub(circle.center, scale(dir, circle.radius)),
+    lineEnd: add(circle.center, scale(dir, circle.radius)),
+  };
+}
+
+/**
+ * DESDE EL CENTRO de un círculo (ver fitCircularFace) HASTA una cara. Si la cara es plana, la distancia perpendicular del centro a su
+ * plano; si no, la mínima a sus triángulos. `{ distanceMm, normalDistanceMm|null, minDistanceMm, isPlanarTarget, lineStart, lineEnd }`.
+ */
+export function computeCircleToFaceMeasurement(circle, face) {
+  const c = toVec(circle && circle.center, "el centro del círculo");
+  const f = readFace(face, "la cara");
+  let minD = Infinity;
+  let minPoint = f.centroid;
+  if (f.triangles && f.triangles.length) {
+    const stride = Math.max(1, Math.ceil(f.triangles.length / 400000));
+    for (let i = 0; i < f.triangles.length; i += stride) {
+      const t = f.triangles[i];
+      const q = closestPointOnTriangle(c, f.vertices[t[0]], f.vertices[t[1]], f.vertices[t[2]]);
+      const d = dist(c, q);
+      if (d < minD) { minD = d; minPoint = q; }
+    }
+  } else {
+    f.vertices.forEach((q) => { const d = dist(c, q); if (d < minD) { minD = d; minPoint = q; } });
+  }
+  const planar = f.isPlanar;
+  const signed = dot(sub(c, f.centroid), f.normal);
+  const foot = sub(c, scale(f.normal, signed));
+  // Cómo está el eje del círculo respecto a la cara plana: 90° = perpendicular a ella (un agujero que la atraviesa), 0° = paralelo.
+  const axis = circle && circle.axis ? unit(toVec(circle.axis, "el eje del círculo")) : null;
+  const axisAngleDeg = planar && axis ? round2(90 - (Math.acos(Math.min(1, Math.abs(dot(axis, f.normal)))) * 180) / Math.PI) : null;
+  return {
+    axisAngleDeg,
+    distanceMm: round2(planar ? Math.abs(signed) : minD),
+    normalDistanceMm: planar ? round2(Math.abs(signed)) : null,
+    minDistanceMm: round2(Number.isFinite(minD) ? minD : dist(c, f.centroid)),
+    isPlanarTarget: planar,
+    lineStart: c,
+    lineEnd: planar ? foot : minPoint,
+  };
+}
+
+/** Entre los centros de dos círculos; si sus ejes son paralelos, también la distancia entre ejes (la «entre centros» de un plano). */
+export function computeCircleToCircleMeasurement(circleA, circleB) {
+  const a = toVec(circleA && circleA.center, "el centro del círculo 1");
+  const b = toVec(circleB && circleB.center, "el centro del círculo 2");
+  const axisA = unit(toVec(circleA.axis, "el eje del círculo 1"));
+  const axisB = unit(toVec(circleB.axis, "el eje del círculo 2"));
+  const d = sub(b, a);
+  const parallel = !!axisA && !!axisB && Math.abs(dot(axisA, axisB)) >= PARALLEL_DOT;
+  const between = parallel ? len(sub(d, scale(axisA, dot(d, axisA)))) : null;
+  return {
+    centerDistanceMm: round2(len(d)),
+    axisDistanceMm: between === null ? null : round2(between),
+    axesParallel: parallel,
+    distanceMm: round2(parallel ? between : len(d)),
+    lineStart: a,
+    lineEnd: b,
+  };
+}
+
+/** Los textos de una medida de diámetro: etiqueta del dibujo y líneas del panel. */
+export function describeDiameter(m) {
+  const kind = m.kind === "hole" ? "Agujero" : m.kind === "shaft" ? "Eje / saliente" : m.kind === "washer" ? "Arandela" : m.kind === "disk" ? "Disco" : m.isFullCircle ? "Círculo" : "Arco / redondeo";
+  const lines = [`Radio: R ${formatMm(m.radiusMm)}`];
+  if (m.innerDiameterMm) lines.push(`Diámetro interior: ⌀ ${formatMm(m.innerDiameterMm)}`);
+  if (m.lengthMm > 0) lines.push(`Longitud a lo largo del eje: ${formatMm(m.lengthMm)}`);
+  if (!m.isFullCircle && m.type === "cylinder") lines.push(`Arco de ${m.arcDeg.toFixed(0)}°: el diámetro es el del círculo al que pertenece.`);
+  return { label: `⌀ ${formatMm(m.diameterMm)}`, title: `${kind} ⌀ ${formatMm(m.diameterMm)}`, lines };
+}
+
+/** «El eje es perpendicular a la cara», «paralelo» o «inclinado 35°»; "" si la cara no es plana. */
+export function describeAxisToFace(m) {
+  if (m.axisAngleDeg === null || m.axisAngleDeg === undefined) return "";
+  if (m.axisAngleDeg >= 89) return "El eje del círculo es perpendicular a la cara";
+  if (m.axisAngleDeg <= 1) return "El eje del círculo es paralelo a la cara";
+  return `El eje del círculo está inclinado ${m.axisAngleDeg.toFixed(1)}° respecto a la cara`;
+}
+
+/** El texto de una medida de un círculo a una cara u otro círculo. */
+export function describeCircleDistance(m, { toCircle = false } = {}) {
+  return { label: `${toCircle ? "Entre centros" : "Centro → Cara"}: ${formatMm(m.distanceMm)}` };
+}
+
+// ---------------------------------------------------------------------------
 // 3. Vistas, encuadre y textos
 // ---------------------------------------------------------------------------
 

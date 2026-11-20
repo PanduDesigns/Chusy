@@ -364,3 +364,38 @@ body.is-col-resizing * { cursor: col-resize !important; }
 .parts-viewer-file__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parts-viewer-card__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .parts-viewer-empty { grid-column: 1 / -1; padding: 28px 12px; text-align: center; font-size: 13px; color: var(--color-text-faint); }
+
+/* ---- v93 · «Mis tareas»: menú ⚙️ Columnas, barra de filtros ampliada y celdas nuevas (views/my-tasks-view.js) ----
+   Todo con las variables de tema (--color-*): vale igual en oscuro, claro y clásico. */
+.columns-menu--mytasks { min-width: 250px; max-width: 320px; display: flex; flex-direction: column; }
+.columns-menu--mytasks .columns-menu__scroll { overflow-y: auto; max-height: min(60vh, 440px); padding-right: 2px; }
+.columns-menu__group {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--color-text-faint); padding: 8px 8px 2px; border-top: 1px solid var(--color-line); margin-top: 4px;
+}
+.columns-menu__group:first-child { border-top: 0; margin-top: 0; }
+.columns-menu__foot { padding: 6px 4px 2px; border-top: 1px solid var(--color-line); margin-top: 6px; }
+
+.mt-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 4px 0 10px; }
+.mt-filters__search { flex: 1 1 280px; max-width: 420px; }
+.mt-filter { display: flex; flex-direction: column; gap: 3px; min-width: 120px; }
+.mt-filter__label {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-faint);
+}
+.mt-filter .field__select { min-width: 120px; max-width: 220px; }
+@media (max-width: 720px) { .mt-filters__search { max-width: none; flex-basis: 100%; } .mt-filter { flex: 1 1 130px; } }
+
+.mt-code { width: fit-content; justify-self: start; align-self: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--color-text-lo); background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+.mt-sector--ind { background: rgba(110, 168, 254, 0.18); color: var(--color-text-hi); }
+.mt-sector--auto { background: rgba(255, 159, 28, 0.2); color: var(--color-text-hi); }
+.mt-type--oferta { background: rgba(155, 107, 255, 0.2); color: var(--color-text-hi); }
+.mt-type--proyecto { background: var(--color-panel); color: var(--color-text-hi); border: 1px solid var(--color-line); }
+.mt-type--personal { background: transparent; color: var(--color-text-lo); border: 1px dashed var(--color-line-bright); }
+.mt-status--open { background: var(--color-panel); color: var(--color-text-hi); border: 1px solid var(--color-line); }
+.mt-status--late { background: var(--color-danger-soft); color: var(--color-danger); }
+.mt-status--done { background: rgba(46, 196, 182, 0.18); color: var(--color-text-hi); }
+
+/* ---- v93 · Visualizador de piezas: subir piezas directamente ---- */
+.parts-viewer-head .btn--primary { margin-left: auto; }
+.parts-viewer-card__by { color: var(--color-text-faint); }
+.parts-viewer-card__del { margin-left: auto; color: var(--color-danger); }

@@ -4,6 +4,7 @@
 // personalizados usan la clave "cf:<id>" tanto en filtros como en orden.
 // ============================================================================
 import { getTaskProjectIds, normalizeForSearch, stripHtmlToText, plainTitleText, effectiveProjectIcon } from "./utils.js";
+import { myTaskSortValue } from "./my-tasks-columns.js";
 
 /**
  * `searchText` (opcional): cuadro de texto de la barra de filtros — filtra
@@ -206,7 +207,11 @@ export function sortTasks(tasks, sort, { teamMembers = [], projects = [] } = {})
       case "orderNumber":
       case "supplierCode": // v86: columnas de compras de la Lista
         return typeof t[sort.column] === "string" && t[sort.column] ? t[sort.column].toLowerCase() : null;
-      default:
+      default: {
+        // v93: las columnas nuevas de «Mis tareas» (código, sector, cliente, comercial, tipo, sección, etapa, estado, fecha de
+        // inicio y campos personalizados de proyecto `pf:`) se ordenan con la misma lógica que las pinta (my-tasks-columns.js).
+        const extra = myTaskSortValue(t, sort.column, { projects });
+        if (extra !== undefined) return extra;
         if (sort.column.startsWith("cf:")) {
           const fieldId = sort.column.slice(3);
           const v = t.customFields ? t.customFields[fieldId] : null;
@@ -215,6 +220,7 @@ export function sortTasks(tasks, sort, { teamMembers = [], projects = [] } = {})
           return Number.isNaN(n) ? String(v).toLowerCase() : n;
         }
         return null;
+      }
     }
   };
 

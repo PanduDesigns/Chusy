@@ -175,7 +175,7 @@ export function filterCadPartsCatalog(parts, filters = {}) {
 /** Los proyectos que aparecen en el catálogo, para el desplegable del filtro: `[{ id, name, code }]` por código y nombre. */
 export function collectPartsProjects(parts) {
   const map = new Map();
-  (parts || []).forEach((p) => { if (!map.has(p.projectId)) map.set(p.projectId, { id: p.projectId, name: p.projectName, code: p.projectCode }); });
+  (parts || []).forEach((p) => { if (p.projectId && !map.has(p.projectId)) map.set(p.projectId, { id: p.projectId, name: p.projectName, code: p.projectCode }); });
   return [...map.values()].sort((a, b) => clean(a.code).localeCompare(clean(b.code), "es") || clean(a.name).localeCompare(clean(b.name), "es"));
 }
 
