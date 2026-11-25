@@ -400,7 +400,7 @@ textarea.modal__title-input {
 .cad-viewer-select { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-faint); }
 .cad-viewer-select select { font-size: 12.5px; padding: 4px 6px; color: var(--color-text-hi); background: var(--color-panel); border: 1px solid var(--color-line); border-radius: var(--radius-sm); }
 .cad-viewer-body { display: flex; flex: 1; min-height: 0; }
-.cad-viewer-stage { position: relative; flex: 1; min-width: 0; min-height: 320px; overflow: hidden; background: #1a1d21; }
+.cad-viewer-stage { position: relative; flex: 1; min-width: 0; min-height: 320px; overflow: hidden; background: #e9edf1; } /* v94: fondo claro en TODOS los temas (el visor 3D lo pinta igual) */
 .cad-viewer-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .cad-viewer-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .cad-viewer-label {
@@ -441,7 +441,6 @@ textarea.modal__title-input {
   .cad-viewer-body { flex-direction: column; }
   .cad-viewer-panel { width: auto; max-height: 150px; border-left: none; border-top: 1px solid var(--color-line); }
 }
-:root[data-theme="light"] .cad-viewer-stage, :root[data-theme="classic"] .cad-viewer-stage { background: #e9edf1; }
 
 .cad-assistant { max-width: 640px; }
 .cad-assistant__lead { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--color-text-lo); }
@@ -481,3 +480,16 @@ textarea.modal__title-input {
   width: auto; height: auto; padding: 2px 7px; border-radius: 10px; background: #8E5BFF; border-color: #fff; font-weight: 600;
   white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
+
+/* ---- v94 · Visor 3D: aviso de «vista simplificada» / «malla simplificada» y nota de la lectura en segundo plano ---- */
+.cad-viewer-status__note { max-width: 440px; font-size: 12px; line-height: 1.45; color: var(--color-text-faint); }
+.cad-viewer-status__note[hidden] { display: none; }
+.cad-viewer-notice { position: absolute; top: 10px; left: 10px; z-index: 3; max-width: min(580px, calc(100% - 20px)); display: flex; flex-direction: column; gap: 6px; }
+.cad-viewer-notice[hidden] { display: none; }
+.cad-viewer-notice__row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px; font-size: 12px; line-height: 1.35; color: #fff;
+  background: rgba(26, 29, 33, 0.9); border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.cad-viewer-notice__btn { flex-shrink: 0; padding: 4px 9px; font-size: 12px; font-weight: 600; color: #1a1d21; background: #FFD23F; border: 0; border-radius: 6px; cursor: pointer; }
+.cad-viewer-notice__btn:hover { background: #ffdf6b; }
+.cad-viewer-notice__btn:disabled { opacity: 0.7; cursor: progress; }

@@ -25,7 +25,7 @@ export const MY_TASKS_COLUMNS_KEY = "chusy_my_tasks_columns";
 
 /** Las columnas del catálogo, en el orden en que se enseñan en el menú. `group` solo sirve para agruparlas en él. */
 export const MY_TASKS_AVAILABLE_COLUMNS = Object.freeze([
-  Object.freeze({ key: "project", label: "Proyecto / Oferta", group: "Proyecto u oferta", defaultWidth: 150, minWidth: 80 }),
+  Object.freeze({ key: "project", label: "Proyecto", group: "Proyecto u oferta", defaultWidth: 150, minWidth: 80 }), // v94: solo el proyecto; su código es la columna «Código» (antes salía en las dos)
   Object.freeze({ key: "code", label: "Código (YYXXX)", group: "Proyecto u oferta", defaultWidth: 84, minWidth: 64 }),
   Object.freeze({ key: "sector", label: "Sector", group: "Proyecto u oferta", defaultWidth: 92, minWidth: 64 }),
   Object.freeze({ key: "client", label: "Cliente", group: "Proyecto u oferta", defaultWidth: 120, minWidth: 70 }),
@@ -47,6 +47,11 @@ export const MY_TASKS_AVAILABLE_COLUMNS = Object.freeze([
 export const DEFAULT_MY_TASKS_COLUMNS = Object.freeze(["project", "workflowStage", "status", "priority", "dueDate"]);
 
 const STANDARD_KEYS = MY_TASKS_AVAILABLE_COLUMNS.map((c) => c.key);
+// v94 · Un campo personalizado de proyecto cuyo NOMBRE es el de una columna del catálogo (el «Comercial» o el «Sector» de las
+// ofertas, el «Cliente» de un proyecto…) no es una columna más: es la misma información, y ofrecerla en dos sitios creaba dos
+// columnas iguales. Esas se quedan solo en el catálogo (que ya lee ese campo en ofertas y proyectos) y desaparecen de la lista de
+// «Campos de los proyectos»; si alguien ya había marcado la de campo personalizado (v93), se convierte en la del catálogo.
+const FIELD_NAME_TO_CATALOG = Object.freeze({ comercial: "commercial", sector: "sector", cliente: "client", proveedor: "supplier" });
 const CF_PERSONAL = "cf:";
 const CF_PROJECT = "pf:";
 export const MY_TASKS_MAX_CUSTOM_COLUMNS = 30;
@@ -54,6 +59,12 @@ export const MY_TASKS_CUSTOM_WIDTH = 120;
 
 const clean = (v) => cleanSuggestionText(v);
 const norm = (v) => normalizeForSearch(clean(v)).replace(/\s+/g, " ").trim();
+
+/** Si `key` es la columna de un campo de proyecto que duplica una del catálogo (`pf:comercial`), la clave del catálogo; si no, la misma. */
+function catalogKeyForDuplicate(key) {
+  if (typeof key !== "string" || !key.startsWith(CF_PROJECT)) return key;
+  return FIELD_NAME_TO_CATALOG[key.slice(CF_PROJECT.length)] || key;
+}
 
 /** La clave de la columna de un campo personalizado de PROYECTO: por NOMBRE normalizado. "" si no hay nombre. */
 export function projectFieldColumnKey(name) {
@@ -70,6 +81,7 @@ export function normalizeMyTasksColumns(raw) {
   let list = raw;
   if (typeof raw === "string") { try { list = JSON.parse(raw); } catch (e) { list = null; } }
   if (!Array.isArray(list)) return [...DEFAULT_MY_TASKS_COLUMNS];
+  list = list.map(catalogKeyForDuplicate); // v94: `pf:comercial` → `commercial` (misma columna, no dos)
   const wanted = new Set(list.filter((k) => typeof k === "string"));
   const standard = STANDARD_KEYS.filter((k) => wanted.has(k));
   const custom = [];
@@ -240,7 +252,8 @@ export function myTasksProjectFieldColumns(projects) {
     if (!p || p.archived) continue;
     for (const def of p.customFieldDefs || []) {
       const key = projectFieldColumnKey(def && def.name);
-      if (key && !labels.has(key)) labels.set(key, clean(def.name));
+      if (!key || catalogKeyForDuplicate(key) !== key) continue; // v94: ya es una columna del catálogo (Comercial, Sector, Cliente, Proveedor)
+      if (!labels.has(key)) labels.set(key, clean(def.name));
     }
   }
   return [...labels.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label, "es", { sensitivity: "base" }));

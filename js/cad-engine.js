@@ -39,6 +39,32 @@ export const CAD_OCCT_PROVIDERS = Object.freeze([
 /** Por encima de este tamaño el STEP no se abre en el navegador (la memoria de WebAssembly se agota). */
 export const CAD_MAX_FILE_BYTES = 150 * 1024 * 1024;
 
+// ---------------------------------------------------------------------------
+// v94 · Teselado según el tamaño del archivo. occt-import-js convierte el STEP en triángulos con una desviación lineal (fracción de la
+// caja envolvente) y una angular (radianes). Los valores por defecto de la librería (0,001 y 0,5) están pensados para piezas sueltas:
+// un ensamblaje de 20 MB con decenas de miles de caras puede salir en 3 millones de triángulos y tardar minutos en abrirse. Con un teselado
+// más grueso salen muchos menos triángulos, y NO se pierde exactitud en las medidas: todos los vértices están sobre la superficie real, así
+// que los planos, los cilindros y los diámetros se calculan igual de bien (solo el contorno de las curvas se ve más «poligonal»).
+//   normal   los valores de siempre (`null`): piezas pequeñas
+//   medium   piezas medianas
+//   fast     ensamblajes y piezas muy pesadas: «vista simplificada»
+// ---------------------------------------------------------------------------
+const preset = (linearDeflection, angularDeflection) => Object.freeze({ linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio", linearDeflection, angularDeflection });
+export const CAD_TESSELLATION = Object.freeze({ normal: null, medium: preset(0.004, 0.7), fast: preset(0.015, 1.0) });
+export const CAD_MEDIUM_FROM_BYTES = 3 * 1024 * 1024;
+export const CAD_FAST_FROM_BYTES = 10 * 1024 * 1024;
+
+/** El teselado que se usa para un STEP de `byteLength` bytes: `'normal' | 'medium' | 'fast'`. */
+export function tessellationFor(byteLength) {
+  const n = Number(byteLength) || 0;
+  return n >= CAD_FAST_FROM_BYTES ? "fast" : n >= CAD_MEDIUM_FROM_BYTES ? "medium" : "normal";
+}
+
+/** Los parámetros de `ReadStepFile` de un teselado (`null` = los de la librería). */
+export function tessellationParams(name) {
+  return Object.prototype.hasOwnProperty.call(CAD_TESSELLATION, name) ? CAD_TESSELLATION[name] : null;
+}
+
 const defaultImport = (url) => import(/* @vite-ignore */ url);
 
 function defaultLoadScript(url) {
@@ -57,6 +83,7 @@ let enginePromise = null;
 /** Olvida el motor cargado (las pruebas lo usan para empezar de cero). */
 export function resetCadEngine() {
   enginePromise = null;
+  threePromise = null;
 }
 
 async function loadThree(importModule, errors) {
@@ -88,6 +115,26 @@ async function loadOcct(loadScript, getFactory, errors) {
   throw new Error(`No se pudo cargar el lector de STEP (${errors.join(" · ")}). Comprueba la conexión a Internet.`);
 }
 
+let threePromise = null;
+
+/**
+ * v94 · Solo Three.js + OrbitControls (sin el lector de STEP): el STEP se lee en un Worker (cad-parse.js), así que el hilo principal no
+ * necesita cargar ni compilar el WebAssembly. Devuelve `{ THREE, OrbitControls, occt: null }`.
+ */
+export function loadCadThree({ onStatus, importModule = defaultImport } = {}) {
+  if (enginePromise) return enginePromise.then((e) => e); // si el motor completo ya está cargado, sirve
+  if (threePromise) return threePromise;
+  const promise = (async () => {
+    const errors = [];
+    if (onStatus) onStatus("Cargando el motor 3D…");
+    const { THREE, OrbitControls } = await loadThree(importModule, errors);
+    return { THREE, OrbitControls, occt: null };
+  })();
+  threePromise = promise;
+  promise.catch(() => { if (threePromise === promise) threePromise = null; });
+  return promise;
+}
+
 /**
  * Carga (una sola vez por sesión) el motor y devuelve `{ THREE, OrbitControls, occt }`. Si falla, el siguiente intento
  * vuelve a probar. `onStatus(texto)` avisa de en qué paso va. Los demás parámetros son para pruebas.
@@ -111,13 +158,13 @@ export function loadCadEngine({ onStatus, importModule = defaultImport, loadScri
  * Lee un STEP (ArrayBuffer o Uint8Array) con occt-import-js y devuelve su resultado (`{ success, meshes: [...] }`).
  * Lanza un error en castellano si el archivo no se puede leer o no trae geometría.
  */
-export function parseStepBuffer(occt, buffer) {
+export function parseStepBuffer(occt, buffer, params = null) {
   if (!occt || typeof occt.ReadStepFile !== "function") throw new Error("El lector de STEP no está listo.");
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   if (!bytes.length) throw new Error("El archivo está vacío.");
   let result;
   try {
-    result = occt.ReadStepFile(bytes, null);
+    result = occt.ReadStepFile(bytes, params || null); // v94: `params` = teselado (cad-engine.js, CAD_TESSELLATION)
   } catch (e) {
     throw new Error(`No se pudo leer el archivo STEP${e && e.message ? `: ${e.message}` : "."}`);
   }

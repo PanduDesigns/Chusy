@@ -340,10 +340,10 @@ export function renderMyTasksView(container, opts) {
             return `<span class="tag-pill" style="background:var(--color-signal-soft);color:var(--color-signal);">🔒 Personal</span>`;
           }
           const primary = projects.find((p) => p.id === taskProjectIds[0]);
-          // v93: junto al nombre, el código YYXXX (el del proyecto o el de la propia oferta).
-          const codeChip = ctx.code ? `<span class="mt-code" title="Código de ${ctx.kind === "oferta" ? "la oferta" : "el proyecto"}">${escapeHtml(ctx.code)}</span>` : "";
+          // v94: la columna «Proyecto» enseña SOLO el proyecto; el código YYXXX tiene su propia columna («Código»), así cada persona
+          // decide si quiere verlo (en la v93 salía en las dos).
           const primaryBadge = primary
-            ? `<span class="list-table__tags-cell"><span class="tag-pill" style="background:${primary.color};color:${textColorFor(primary.color)};">${escapeHtml(projectIcon(primary))} ${escapeHtml(primary.name)}</span>${codeChip}</span>`
+            ? `<span class="tag-pill" style="background:${primary.color};color:${textColorFor(primary.color)};">${escapeHtml(projectIcon(primary))} ${escapeHtml(primary.name)}</span>`
             : `<span class="list-table__cell-text">—</span>`;
           const extraIds = taskProjectIds.slice(1);
           if (!extraIds.length) return primaryBadge;

@@ -75,7 +75,7 @@ c = render({ uid: "viejo", role: "member", name: "Viejo", department: "tecnicos"
 eq("v81: una cuenta anterior, sin marca de Responsable, no ve la carga", people(c), []);
 c = render(admin);
 const sel = c.querySelector("#tl-dept-filter");
-check("el admin tiene el selector de departamento con todos los grupos", !!sel && [...sel.options].map((o) => o.value).join() === ",diseno,diseno-industria,diseno-automocion,tecnicos,produccion,none", sel && [...sel.options].map((o) => o.value));
+check("el admin tiene el selector de departamento con todos los grupos", !!sel && [...sel.options].map((o) => o.value).join() === ",diseno,diseno-industria,diseno-automocion,tecnicos,produccion,almacen,none", sel && [...sel.options].map((o) => o.value));
 sel.value = "produccion"; sel.dispatchEvent(new window.Event("change", { bubbles: true }));
 eq("cambiar el selector avisa a la app", calls.dept, ["produccion"]);
 

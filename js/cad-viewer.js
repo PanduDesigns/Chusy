@@ -467,11 +467,21 @@ function basisPerpendicular(a) {
 
 /** La cobertura angular (grados) de unos puntos 2D alrededor de un centro: 360° menos el mayor hueco entre ellos. */
 function arcCoverageDeg(points, cx, cy) {
+  return arcSpan(points, cx, cy).deg;
+}
+
+/** El arco que cubren unos puntos 2D alrededor de un centro: `{ deg, start, end }` (radianes; `end` ≥ `start`; el hueco más grande queda fuera). */
+function arcSpan(points, cx, cy) {
   const ang = points.map(([x, y]) => Math.atan2(y - cy, x - cx)).sort((p, q) => p - q);
-  if (ang.length < 2) return 0;
+  if (ang.length < 2) return { deg: 0, start: 0, end: 0 };
   let gap = ang[0] + 2 * Math.PI - ang[ang.length - 1];
-  for (let i = 1; i < ang.length; i++) gap = Math.max(gap, ang[i] - ang[i - 1]);
-  return Math.max(0, 360 - (gap * 180) / Math.PI);
+  let after = 0; // índice del primer ángulo tras el hueco más grande
+  for (let i = 1; i < ang.length; i++) {
+    if (ang[i] - ang[i - 1] > gap) { gap = ang[i] - ang[i - 1]; after = i; }
+  }
+  const start = ang[after];
+  const end = start + (2 * Math.PI - gap);
+  return { deg: Math.max(0, 360 - (gap * 180) / Math.PI), start, end };
 }
 
 /** Normales y áreas de los triángulos de una cara descrita con buildFaceDescriptor. */
@@ -517,15 +527,23 @@ function fitCylinderFace(face) {
     if (l > 1e-9) radialSign += w * (dot(n, radial) / l);
   });
   radialSign /= total;
+  const span = arcSpan(pts, fit.cx, fit.cy);
+  const base = add(add(mean, scale(u, fit.cx)), scale(v, fit.cy)); // centro del círculo en el plano de `mean`
+  const atT = (t) => add(base, scale(axis, t));
   return {
     type: "cylinder",
     center,
     axis,
     radius: fit.r,
     lengthMm: tMax - tMin,
-    arcDeg: arcCoverageDeg(pts, fit.cx, fit.cy),
+    arcDeg: span.deg,
     kind: radialSign > 0.3 ? "shaft" : radialSign < -0.3 ? "hole" : "unknown",
     rms: fit.rms,
+    // v94: lo necesario para dibujar y buscar los BORDES del círculo (los dos extremos del cilindro)
+    basis: [u, v],
+    arcStart: span.start,
+    arcEnd: span.end,
+    rimCenters: [atT(tMin), atT(tMax)],
   };
 }
 
@@ -573,6 +591,10 @@ function fitDiskFace(face) {
     arcDeg: 360,
     kind: stats.length === 2 ? "washer" : "disk",
     rms: 0,
+    basis: [u, v], // v94
+    arcStart: 0,
+    arcEnd: 2 * Math.PI,
+    rimCenters: [center],
   };
 }
 
@@ -588,6 +610,151 @@ export function fitCircularFace(face) {
   } catch (e) {
     return null;
   }
+}
+
+/** Puntos de un círculo (o de un arco) de centro, base (u, v) y radio dados, de `start` a `end` radianes. */
+export function circlePolyline(center, basis, radius, start = 0, end = 2 * Math.PI, segments = 48) {
+  const n = Math.max(2, Math.round((segments * Math.abs(end - start)) / (2 * Math.PI)));
+  const out = [];
+  for (let k = 0; k <= n; k++) {
+    const th = start + ((end - start) * k) / n;
+    const c = Math.cos(th) * radius, s = Math.sin(th) * radius;
+    out.push([center[0] + basis[0][0] * c + basis[1][0] * s, center[1] + basis[0][1] * c + basis[1][1] * s, center[2] + basis[0][2] * c + basis[1][2] * s]);
+  }
+  return out;
+}
+
+/**
+ * Los BORDES (círculos) de una cara circular, para poder elegirla haciendo clic cerca de ellos y no solo en su pared:
+ *   un cilindro (agujero, eje, redondeo) tiene el de cada extremo; un disco, su borde exterior y, si es una arandela, también el
+ *   interior (que es un agujero). Cada uno: `{ type, kind, center, axis, radius, lengthMm, arcDeg, isFullCircle, points }`.
+ * Devuelve `[]` si la cara no es un círculo medible.
+ */
+export function circleRimLoops(face) {
+  return rimLoopsFromCircle(fitCircularFace(face));
+}
+
+/** Lo mismo que circleRimLoops pero a partir de un círculo ya ajustado (fitCircularFace): evita ajustar la cara dos veces. */
+export function rimLoopsFromCircle(c) {
+  if (!c) return [];
+  const full = c.arcDeg >= 300;
+  const common = { type: c.type, axis: c.axis, lengthMm: c.lengthMm, arcDeg: c.arcDeg, isFullCircle: full };
+  if (c.type === "cylinder") {
+    return c.rimCenters.map((center) => ({ ...common, kind: c.kind, center, radius: c.radius, points: circlePolyline(center, c.basis, c.radius, c.arcStart, c.arcEnd) }));
+  }
+  const loops = [{ ...common, kind: c.kind, center: c.center, radius: c.radius, points: circlePolyline(c.center, c.basis, c.radius) }];
+  if (c.innerRadius) loops.push({ ...common, kind: "hole", center: c.center, radius: c.innerRadius, points: circlePolyline(c.center, c.basis, c.innerRadius) });
+  return loops;
+}
+
+/** La distancia de un punto 3D a una polilínea (lista de puntos), y el punto más cercano de ella: `{ distance, point }`. */
+export function pointToPolyline(p, points) {
+  let best = { distance: Infinity, point: null };
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = points[i], b = points[i + 1];
+    const ab = sub(b, a);
+    const l2 = dot(ab, ab);
+    const t = l2 > 0 ? Math.max(0, Math.min(1, dot(sub(p, a), ab) / l2)) : 0;
+    const q = add(a, scale(ab, t));
+    const d = dist(p, q);
+    if (d < best.distance) best = { distance: d, point: q };
+  }
+  return best;
+}
+
+/**
+ * El borde circular más cercano a un punto 3D (el del clic) entre varios candidatos: `{ loop, distance, point }` o `null` si ninguno
+ * está a `tolerance` mm o menos. `candidates` = `[{ faceId, loops }]`; el resultado trae también el `faceId` del que salió.
+ */
+export function nearestRim(point, candidates, tolerance) {
+  const p = toVec(point, "el punto del clic");
+  let best = null;
+  (candidates || []).forEach(({ faceId, loops }) => {
+    (loops || []).forEach((loop) => {
+      const r = pointToPolyline(p, loop.points);
+      if (r.distance <= tolerance && (!best || r.distance < best.distance)) best = { faceId, loop, distance: r.distance, point: r.point };
+    });
+  });
+  return best;
+}
+
+/**
+ * La medida de DIÁMETRO de un borde elegido (ver circleRimLoops): misma forma que computeDiameterMeasurement. `toward` orienta la
+ * línea de cota (punto donde se hizo clic).
+ */
+export function diameterFromRim(loop, { toward = null } = {}) {
+  const [u] = basisPerpendicular(loop.axis);
+  let dir = u;
+  if (toward) {
+    const d = sub(toVec(toward, "el punto del clic"), loop.center);
+    const radial = unit(sub(d, scale(loop.axis, dot(loop.axis, d))));
+    if (radial) dir = radial;
+  }
+  return {
+    diameterMm: round2(loop.radius * 2),
+    radiusMm: round2(loop.radius),
+    innerDiameterMm: null,
+    lengthMm: round2(loop.lengthMm || 0),
+    kind: loop.kind,
+    type: loop.type,
+    arcDeg: round2(loop.arcDeg),
+    isFullCircle: loop.isFullCircle,
+    center: loop.center,
+    axis: loop.axis,
+    lineStart: sub(loop.center, scale(dir, loop.radius)),
+    lineEnd: add(loop.center, scale(dir, loop.radius)),
+  };
+}
+
+/**
+ * v94 · Prefiltro BARATO de «¿podría esta cara ser un círculo medible?»: recorre los triángulos de la cara una sola vez, sobre los arrays
+ * tipados del modelo (sin construir el descriptor, que deduplica vértices y cuesta 10–50 veces más). Descarta casi todas las caras (placas,
+ * esferas, conos, superficies libres) y deja pasar solo las que podrían ser un cilindro (normales perpendiculares a un eje) o un disco /
+ * arandela (plana y con la misma extensión en las dos direcciones). Que pase NO significa que lo sea: después se ajusta de verdad
+ * (fitCircularFace); lo que garantiza es que lo que descarta nunca habría pasado ese ajuste.
+ *   position: Float32Array|number[] (xyz)   index: Uint32Array|number[]   triangles: lista de índices de triángulo de la cara
+ */
+export function couldBeCircularFace(position, index, triangles, { maxTriangles = 6000 } = {}) {
+  const n = triangles ? triangles.length : 0;
+  if (n < 6 || n > maxTriangles) return false;
+  let sxx = 0, sxy = 0, sxz = 0, syy = 0, syz = 0, szz = 0, total = 0;
+  let n0x = 0, n0y = 0, n0z = 0, planar = true, have = false;
+  for (let i = 0; i < n; i++) {
+    const t = triangles[i] * 3;
+    const a = index[t] * 3, b = index[t + 1] * 3, c = index[t + 2] * 3;
+    const ux = position[b] - position[a], uy = position[b + 1] - position[a + 1], uz = position[b + 2] - position[a + 2];
+    const vx = position[c] - position[a], vy = position[c + 1] - position[a + 1], vz = position[c + 2] - position[a + 2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    const l = Math.hypot(cx, cy, cz);
+    if (l < 1e-12) continue;
+    const nx = cx / l, ny = cy / l, nz = cz / l, w = l / 2;
+    if (!have) { n0x = nx; n0y = ny; n0z = nz; have = true; }
+    else if (planar && nx * n0x + ny * n0y + nz * n0z < 0.9995) planar = false;
+    sxx += w * nx * nx; sxy += w * nx * ny; sxz += w * nx * nz; syy += w * ny * ny; syz += w * ny * nz; szz += w * nz * nz; total += w;
+  }
+  if (!have || total <= 0) return false;
+  if (planar) {
+    // plana: ¿disco o arandela? Extensión (mm) en dos direcciones perpendiculares de su plano: un círculo mide lo mismo en las dos.
+    const ex = Math.abs(n0x) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    let ux = n0y * ex[2] - n0z * ex[1], uy = n0z * ex[0] - n0x * ex[2], uz = n0x * ex[1] - n0y * ex[0];
+    const ul = Math.hypot(ux, uy, uz); ux /= ul; uy /= ul; uz /= ul;
+    const vx = n0y * uz - n0z * uy, vy = n0z * ux - n0x * uz, vz = n0x * uy - n0y * ux;
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const t = triangles[i] * 3;
+      for (let k = 0; k < 3; k++) {
+        const p = index[t + k] * 3;
+        const du = position[p] * ux + position[p + 1] * uy + position[p + 2] * uz;
+        const dv = position[p] * vx + position[p + 1] * vy + position[p + 2] * vz;
+        if (du < u0) u0 = du; if (du > u1) u1 = du;
+        if (dv < v0) v0 = dv; if (dv > v1) v1 = dv;
+      }
+    }
+    const e1 = u1 - u0, e2 = v1 - v0, big = Math.max(e1, e2);
+    return big > 1e-3 && Math.abs(e1 - e2) <= 0.05 * big;
+  }
+  const [e0, e1] = eigenSymmetric3([[sxx / total, sxy / total, sxz / total], [sxy / total, syy / total, syz / total], [sxz / total, syz / total, szz / total]]);
+  return e0.value <= 0.02 && e1.value >= 0.004;
 }
 
 /**

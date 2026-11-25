@@ -90,7 +90,7 @@ const F = (patch) => ({ ...mt.emptyMyTasksFilters(), ...patch });
 
   // columnas de campos personalizados de proyecto
   eq("pf: clave por nombre normalizado (sin tildes ni mayúsculas)", [mt.projectFieldColumnKey("  TIPO "), mt.projectFieldColumnKey("Tipo"), mt.projectFieldColumnKey("Fecha límite"), mt.projectFieldColumnKey("  ")], ["pf:tipo", "pf:tipo", "pf:fecha limite", ""]);
-  eq("pf: las columnas de los proyectos ACTIVOS agrupadas por nombre (TIPO y Tipo = una), sin archivados", mt.myTasksProjectFieldColumns(projects).map((c) => c.key), ["pf:cliente", "pf:comercial", "pf:sector", "pf:tipo", "pf:version"]);
+  eq("pf: las columnas de los proyectos ACTIVOS agrupadas por nombre (TIPO y Tipo = una), sin archivados y (v94) sin las que ya son del catálogo (Comercial, Sector, Cliente)", mt.myTasksProjectFieldColumns(projects).map((c) => c.key), ["pf:tipo", "pf:version"]);
   eq("pf: valor de la columna para una tarea (el del campo de SU proyecto)", [mt.myTaskProjectFieldValue(tA, projects, "pf:tipo"), mt.myTaskProjectFieldValue(tB, projects, "pf:tipo"), mt.myTaskProjectFieldValue(tA, projects, "pf:zeta"), mt.myTaskProjectFieldValue(tD, projects, "pf:tipo")], ["Hidráulica", "Vacío", "", ""]);
 }
 
@@ -174,8 +174,8 @@ const F = (patch) => ({ ...mt.emptyMyTasksFilters(), ...patch });
   const headerText = () => $(".list-table__header, .list-header, [data-col-header]", container) ? $(".list-table__header, .list-header, [data-col-header]", container).textContent : container.textContent;
   check("barra: botón ⚙️ Columnas y campo personalizado", !!$("#mt-columns", container) && /Columnas/.test($("#mt-columns", container).textContent) && !!$("#mt-add-field", container));
   check("barra: ya no está el botón ☰ Columnas de antes", !/☰/.test(container.innerHTML));
-  check("por defecto se ven Proyecto, Etapa, Estado, Prioridad y Entrega (y no Código, Sector, Cliente…)", /Proyecto \/ Oferta/.test(container.innerHTML) && /Etapa de flujo/.test(container.innerHTML) && /Estado/.test(container.innerHTML) && /Prioridad/.test(container.innerHTML) && !/Código \(YYXXX\)/.test($$("[data-sort]", container).map((e) => e.textContent).join("|")) && !/Cód\. Proveedor/.test(container.innerHTML));
-  check("celdas: código YYXXX junto al proyecto", $$(".mt-code", container).some((e) => e.textContent === "26001") && $$(".mt-code", container).some((e) => e.textContent === "26007"));
+  check("por defecto se ven Proyecto, Etapa, Estado, Prioridad y Entrega (y no Código, Sector, Cliente…)", /Proyecto/.test(container.innerHTML) && /Etapa de flujo/.test(container.innerHTML) && /Estado/.test(container.innerHTML) && /Prioridad/.test(container.innerHTML) && !/Código \(YYXXX\)/.test($$("[data-sort]", container).map((e) => e.textContent).join("|")) && !/Cód\. Proveedor/.test(container.innerHTML));
+  check("celdas: (v94) la columna Proyecto no repite el código YYXXX", $$(".mt-code", container).length === 0);
   check("celdas: estado Pendiente / Completada", /Pendiente/.test(container.innerHTML) && /Completada/.test(container.innerHTML) && $$(".mt-status--done", container).length === 1);
   check("barra de filtros: buscador y los 6 desplegables", !!$("#mt-search", container) && ["#mt-f-type", "#mt-f-sector", "#mt-f-commercial", "#mt-f-stage", "#mt-f-supplier", "#mt-f-tag"].every((s) => !!$(s, container)));
   check("filtros: sin ninguno activo no hay «Limpiar filtros»", !$("#mt-f-clear", container));
@@ -188,7 +188,7 @@ const F = (patch) => ({ ...mt.emptyMyTasksFilters(), ...patch });
   const menu = $(".columns-menu--mytasks");
   check("⚙️ Columnas: abre el menú con casillas agrupadas y «Restablecer»", !!menu && $$("[data-col]", menu).length >= 17 && !!$("[data-mt-reset]", menu) && $$(".columns-menu__group", menu).length >= 4);
   eq("⚙️ Columnas: marcadas las de por defecto", $$("[data-col]", menu).filter((c) => c.checked).map((c) => c.dataset.col).sort(), [...mt.DEFAULT_MY_TASKS_COLUMNS].sort());
-  check("⚙️ Columnas: lista los campos de los proyectos (pf:tipo, pf:cliente)", ["pf:tipo", "pf:cliente"].every((k) => $$("[data-col]", menu).some((c) => c.dataset.col === k)));
+  check("⚙️ Columnas: lista los campos de los proyectos (pf:tipo) sin repetir Comercial, Sector ni Cliente", $$("[data-col]", menu).some((c) => c.dataset.col === "pf:tipo") && !$$("[data-col]", menu).some((c) => /^pf:(comercial|sector|cliente)$/.test(c.dataset.col)));
   const cbCode = $$("[data-col]", menu).find((c) => c.dataset.col === "code");
   cbCode.checked = true; cbCode.dispatchEvent(new window.Event("change", { bubbles: true }));
   eq("al marcar una columna se guarda por persona en localStorage", JSON.parse(localStorage.getItem("chusy_my_tasks_columns_u1")), ["project", "code", "workflowStage", "status", "priority", "dueDate"].sort((a, b) => mt.MY_TASKS_AVAILABLE_COLUMNS.findIndex((c) => c.key === a) - mt.MY_TASKS_AVAILABLE_COLUMNS.findIndex((c) => c.key === b)));
@@ -706,7 +706,7 @@ const sh = await import("../js/suggest-hygiene.js");
   // cableado del visor
   const vm = read("js/components/cad-viewer-modal.js");
   check("visor: botón «⌀ Diámetro» junto a Punto a Punto y Cara a Cara", /data-mode="diameter"[^>]*>⌀ Diámetro/.test(vm));
-  check("visor: Diámetro usa computeDiameterMeasurement y describeDiameter y dibuja la cota por el centro", /clickDiameter\(hit\)/.test(vm) && /computeDiameterMeasurement\(face, \{ toward:/.test(vm) && /describeDiameter\(m\)/.test(vm));
+  check("visor: Diámetro usa computeDiameterMeasurement y describeDiameter y dibuja la cota por el centro", /clickDiameter\(hit, ev\)/.test(vm) && /computeDiameterMeasurement\(face, \{ toward:/.test(vm) && /describeDiameter\(m\)/.test(vm));
   check("visor: en Cara a Cara los círculos son elegibles (centro marcado) y se mide desde el centro", /fitCircularFace\(face\)/.test(vm) && /computeCircleToFaceMeasurement\(circle, otherFace\)/.test(vm) && /computeCircleToCircleMeasurement\(circleA, circleB\)/.test(vm) && /Centro → Cara/.test(vm) && /Entre ejes/.test(vm));
   check("visor: los círculos se iluminan en violeta al pasar el ratón (Diámetro solo ilumina círculos)", /COLOR_CIRCLE/.test(vm) && /mode === "diameter" && !circle/.test(vm) && /mode !== "face-to-face" && mode !== "diameter"/.test(vm));
   check("visor: el marcador del centro se limpia con el hover y al cambiar de modo", /hover\.overlay/.test(vm) && /removeOverlay\(hover\.overlay\)/.test(vm) && /cancelPending\(\);\n    clearHover\(\);/.test(vm));
@@ -722,13 +722,15 @@ const sh = await import("../js/suggest-hygiene.js");
 // ---------------------------------------------------------------- 8) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=93", (idx.match(/css\/[\w-]+\.css\?v=93/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en otra versión", !/\.css\?v=(?!93)\d+/.test(idx));
+  // (la entrega actual la fija v94-viewer-speed-rim-columns.test.mjs: aquí basta con que sea ≥ 93 y esté bien puesta en los 14)
+  const linkVersions = [...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => Number(m[1]));
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 93)", new Set(linkVersions).size + ":" + linkVersions.length + ":" + (linkVersions[0] >= 93), "1:14:true");
   check("js/app.js se mantiene sin query string", /src="js\/app\.js"/.test(idx));
-  check("package.json y package-lock.json: 93.0.0", JSON.parse(read("package.json")).version === "93.0.0" && JSON.parse(read("package-lock.json")).version === "93.0.0");
+  const pkgMajor = (f) => Number(String(JSON.parse(read(f)).version).split(".")[0]);
+  check("package.json y package-lock.json: versión ≥ 93 y la misma", pkgMajor("package.json") >= 93 && pkgMajor("package.json") === pkgMajor("package-lock.json"));
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: entrada 93 la primera, mayor que la 92, y habla de columnas, etiquetas, sugerencias, subir piezas y diámetro", r.id === 93 && r.id > RELEASES[1].id && ["Columnas", "Etiquetas", "Sugerencias", "Subir piezas", "Diámetro", "firestore.rules"].every((w) => JSON.stringify(r).includes(w)) && r.items.length >= 5, r.title);
+  const r = RELEASES.find((x) => x.id === 93);
+  check("Novedades: entrada 93, mayor que la 92, y habla de columnas, etiquetas, sugerencias, subir piezas y diámetro", !!r && r.id > RELEASES.find((x) => x.id === 92).id && ["Columnas", "Etiquetas", "Sugerencias", "Subir piezas", "Diámetro", "firestore.rules"].every((w) => JSON.stringify(r).includes(w)) && r.items.length >= 5, r.title);
   const css6 = read("css/06-list-board.css");
   const css10 = read("css/10-components.css");
   check("CSS: «Mis tareas» (menú ⚙️, filtros, celdas) en 06-list-board.css", [".columns-menu--mytasks", ".mt-filters", ".mt-filter", ".mt-code", ".mt-status--late", ".mt-sector--auto"].every((c) => css6.includes(c)));

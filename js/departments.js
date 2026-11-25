@@ -1,9 +1,9 @@
 // ============================================================================
 // Departamentos (v55): una capa de acceso ADICIONAL al rol (admin/revisor/
 // miembro), pensada de cara a que Chusy crezca a más departamentos y a más
-// secciones propias de cada uno. Por ahora tres, fijos — añadir un cuarto
-// más adelante es solo añadir una entrada aquí, no hace falta tocar nada
-// más de este archivo.
+// secciones propias de cada uno. Fijos (v94: Diseño, Técnicos, Producción y
+// Almacén) — añadir otro más adelante es solo añadir una entrada aquí (y en
+// DEPARTMENT_GROUPS), no hace falta tocar nada más de este archivo.
 //
 // Por sí solo, el departamento de una persona NO cambia nada de lo que ya
 // existía antes de la v55: todo proyecto normal sigue abierto a todo el
@@ -48,6 +48,7 @@ export const DEPARTMENT_GROUPS = [
   { value: "diseno", label: "Diseño" },
   { value: "tecnicos", label: "Técnicos" },
   { value: "produccion", label: "Producción" },
+  { value: "almacen", label: "Almacén" }, // v94
 ];
 
 /**
@@ -60,6 +61,7 @@ export const DEPARTMENTS = [
   { value: "diseno-automocion", label: "Diseño - Automoción", access: "diseno", defaultSector: "Automoción" },
   { value: "tecnicos", label: "Técnicos" },
   { value: "produccion", label: "Producción" },
+  { value: "almacen", label: "Almacén" }, // v94: grupo de acceso propio (como Técnicos y Producción); sin sector por defecto
 ];
 
 /** El «Diseño» de antes de la v63 (sin sector): válido, pero ya no se ofrece para asignar. */

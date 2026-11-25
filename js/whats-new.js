@@ -25,6 +25,19 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 94,
+    date: "2026-11-20",
+    title: "Visor 3D más rápido con piezas complejas, diámetros por el borde y retoques de Mis tareas",
+    items: [
+      "Visor 3D con piezas complejas: los ensamblajes pesados se leen en segundo plano (la pestaña no se congela, se ve el tiempo transcurrido y se puede cancelar cerrando el visor). La malla se adapta al tamaño del archivo y el visor enseña primero las piezas grandes («vista simplificada»); la tornillería y las piezas más pequeñas se muestran con el botón «Mostrar todas las piezas». Las medidas siguen siendo exactas.",
+      "Visor 3D: la segunda vez que abres la misma pieza en el mismo navegador sale casi al instante (la malla ya leída se guarda en el navegador). Si quieres el aspecto fino de las curvas, el botón «Calidad alta» vuelve a leerla con más detalle.",
+      "Visor 3D — ⌀ Diámetro: ya no hay que acertar en la pared interna del agujero. Vale hacer clic en el borde del círculo o cerca de él (unos 12 píxeles), también dentro del hueco por el que se ve el fondo; al pasar el ratón se ilumina el círculo, con su aro y su diámetro.",
+      "Visor 3D: el fondo es siempre claro, también con la aplicación en modo oscuro (las piezas grises se distinguen mal sobre fondo oscuro). Las líneas de cota pasan a naranja para verse bien sobre el fondo claro.",
+      "Mis tareas: la columna «Proyecto» enseña solo el proyecto (el código está en su propia columna «Código», así lo configura cada persona), y «Comercial» (igual que «Sector» y «Cliente») ya no aparece dos veces en el menú de columnas.",
+      "Nuevo departamento «Almacén»: se asigna en «Administrar equipo» y aparece en «Acceso por departamento». Por defecto ve el Visualizador de piezas; Pedidos y las demás secciones se abren desde «Acceso por departamento».",
+    ],
+  },
+  {
     id: 93,
     date: "2026-11-19",
     title: "Mis tareas a tu medida, etiquetas y sugerencias limpias, y diámetros en el visor 3D",
