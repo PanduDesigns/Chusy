@@ -525,12 +525,14 @@ if (THREEmod && occt) {
 // ---------------------------------------------------------------- 6) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=94", (idx.match(/css\/[\w-]+\.css\?v=94/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en otra versión", !/\.css\?v=(?!94)\d+/.test(idx));
-  check("package.json y package-lock.json: 94.0.0", JSON.parse(read("package.json")).version === "94.0.0" && JSON.parse(read("package-lock.json")).version === "94.0.0");
+  // (la entrega actual la fija v95-password-eye-sidebar-drawer-offer-start.test.mjs: aquí basta con que sea ≥ 94 y esté bien puesta en los 14)
+  const linkVersions = [...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => Number(m[1]));
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 94)", new Set(linkVersions).size + ":" + linkVersions.length + ":" + (linkVersions[0] >= 94), "1:14:true");
+  const pkgMajor = (f) => Number(String(JSON.parse(read(f)).version).split(".")[0]);
+  check("package.json y package-lock.json: versión ≥ 94 y la misma", pkgMajor("package.json") >= 94 && pkgMajor("package.json") === pkgMajor("package-lock.json"));
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: entrada 94 la primera, mayor que la 93, y habla de los seis cambios", r.id === 94 && r.id > RELEASES[1].id && ["diámetro", "Almacén", "fondo", "rápid", "Comercial", "Proyecto"].every((w) => JSON.stringify(r).toLowerCase().includes(w.toLowerCase())) && r.items.length >= 6, r.title);
+  const r = RELEASES.find((x) => x.id === 94);
+  check("Novedades: entrada 94, mayor que la 93, y habla de los seis cambios", !!r && r.id > RELEASES.find((x) => x.id === 93).id && ["diámetro", "Almacén", "fondo", "rápid", "Comercial", "Proyecto"].every((w) => JSON.stringify(r).toLowerCase().includes(w.toLowerCase())) && r.items.length >= 6, r && r.title);
   const css7 = read("css/07-modals.css");
   check("CSS: aviso del visor (.cad-viewer-notice) y nota de lectura", [".cad-viewer-notice", ".cad-viewer-notice__row", ".cad-viewer-notice__btn", ".cad-viewer-status__note"].every((c) => css7.includes(c)));
   const readme = read("README.md");

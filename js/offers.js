@@ -33,7 +33,7 @@
 // topbar.js y las vistas) decide qué hacer con lo que devuelven.
 // ============================================================================
 
-import { getTaskSectionForProject, getTaskProjectIds, toDate } from "./utils.js";
+import { getTaskSectionForProject, getTaskProjectIds, toDate, toDateInputValue } from "./utils.js";
 import { findLocationInDescription } from "./location.js";
 
 /** `exclusiveKey` del proyecto Ofertas (ver EXCLUSIVE_PROJECT_SEEDS en data/projects.js). */
@@ -475,10 +475,14 @@ export function planTaskToOffer(offersProject, task, { defaultSector, makeId, no
     customFields,
   };
 
+  // v95: la fecha de inicio de una oferta es el día en que se creó: para una tarea convertida, el de su creación (el mismo día que lleva la
+  // fila «A1 · Versión original»). Si ya tenía fecha de inicio se respeta.
+  const created = toDate(task.createdAt);
+  const createdAt = (created && !isNaN(created.getTime()) ? created : now).toISOString();
+  if (!task.startDate) fields.startDate = toDateInputValue(new Date(createdAt));
+
   const revisions = task.revisions || [];
   if (lacksOriginalRevision(revisions)) {
-    const created = toDate(task.createdAt);
-    const createdAt = (created && !isNaN(created.getTime()) ? created : now).toISOString();
     fields.revisions = [makeOriginalRevision({ id: makeId(), createdAt }), ...revisions];
   }
   return fields;

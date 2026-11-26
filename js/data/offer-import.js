@@ -17,6 +17,7 @@
 // ============================================================================
 import { collection, doc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 import { db } from "../firebase-init.js";
+import { toDateInputValue } from "../utils.js";
 
 /** Escrituras por lote (Firestore admite 500). */
 export const IMPORT_BATCH_SIZE = 400;
@@ -34,7 +35,7 @@ export function historicalOfferTaskData(offerDoc, { createdBy, order }) {
     description: "",
     assigneeIds: [],
     dueDate: null,
-    startDate: null,
+    startDate: toDateInputValue(offerDoc.createdAt) || null, // v95: como toda oferta, empieza el día en que se creó (aquí, la fecha ORIGINAL del archivo)
     priority: "media",
     tags: [],
     dependsOn: [],

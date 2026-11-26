@@ -26,20 +26,20 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@600;700;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <!-- v82: un <link> por módulo CSS, EN ORDEN (el orden es la cascada) y cada uno con ?v=N: así el navegador invalida la caché de TODOS al publicar (un @import dentro de styles.css no puede llevar ?v=). Subir N en cada entrega, igual que package.json. css/styles.css queda como índice (mismo orden) y check-integrity.mjs comprueba que coincida. -->
-<link rel="stylesheet" href="css/01-variables.css?v=94">
-<link rel="stylesheet" href="css/02-base.css?v=94">
-<link rel="stylesheet" href="css/03-screens.css?v=94">
-<link rel="stylesheet" href="css/04-editor.css?v=94">
-<link rel="stylesheet" href="css/05-layout.css?v=94">
-<link rel="stylesheet" href="css/06-list-board.css?v=94">
-<link rel="stylesheet" href="css/07-modals.css?v=94">
-<link rel="stylesheet" href="css/08-calendar-timeline.css?v=94">
-<link rel="stylesheet" href="css/09-search-archive.css?v=94">
-<link rel="stylesheet" href="css/10-components.css?v=94">
-<link rel="stylesheet" href="css/11-responsive.css?v=94">
-<link rel="stylesheet" href="css/12-metrics-notifications.css?v=94">
-<link rel="stylesheet" href="css/13-admin-undo-trash.css?v=94">
-<link rel="stylesheet" href="css/14-drive-ids.css?v=94">
+<link rel="stylesheet" href="css/01-variables.css?v=95">
+<link rel="stylesheet" href="css/02-base.css?v=95">
+<link rel="stylesheet" href="css/03-screens.css?v=95">
+<link rel="stylesheet" href="css/04-editor.css?v=95">
+<link rel="stylesheet" href="css/05-layout.css?v=95">
+<link rel="stylesheet" href="css/06-list-board.css?v=95">
+<link rel="stylesheet" href="css/07-modals.css?v=95">
+<link rel="stylesheet" href="css/08-calendar-timeline.css?v=95">
+<link rel="stylesheet" href="css/09-search-archive.css?v=95">
+<link rel="stylesheet" href="css/10-components.css?v=95">
+<link rel="stylesheet" href="css/11-responsive.css?v=95">
+<link rel="stylesheet" href="css/12-metrics-notifications.css?v=95">
+<link rel="stylesheet" href="css/13-admin-undo-trash.css?v=95">
+<link rel="stylesheet" href="css/14-drive-ids.css?v=95">
 </head>
 <body>
 
@@ -107,8 +107,15 @@
 <!-- ============ APP SHELL ============ -->
 <div id="app-shell" class="app-shell hidden">
   <aside class="sidebar" id="sidebar"></aside>
+  <!-- v95: telón que se ve (solo con la barra lateral desplegada en pantallas estrechas) para cerrarla tocando fuera. -->
+  <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
   <div class="main-col">
     <header class="topbar" id="topbar"></header>
+    <!-- v95: el ☰ que despliega la barra lateral en pantallas estrechas (tablet en vertical, móvil). Vive como hermano de #topbar
+         (igual que la campana) para no desaparecer cuando una sección repinta topbarEl.innerHTML: antes solo lo tenían los proyectos. -->
+    <button class="sidebar-toggle" id="btn-toggle-sidebar" type="button" aria-label="Abrir el menú de secciones y proyectos" title="Menú">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
     <button class="notif-bell" id="notif-bell" title="Notificaciones" hidden>
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 3a5 5 0 0 0-5 5v3.2c0 .6-.2 1.2-.6 1.7L5 15.5c-.7.9 0 2.2 1.1 2.2h11.8c1.1 0 1.8-1.3 1.1-2.2l-1.4-2.6c-.4-.5-.6-1.1-.6-1.7V8a5 5 0 0 0-5-5Z"/>

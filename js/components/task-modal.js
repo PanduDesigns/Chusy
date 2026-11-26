@@ -769,6 +769,9 @@ export function openTaskModal({
     if (versionField && !draft.customFields[versionField.id]) {
       draft.customFields = { ...draft.customFields, [versionField.id]: OFFER_FIRST_VERSION };
     }
+    // v95: la fecha de inicio de una oferta nueva sale ya puesta con el día de hoy (el de su creación); se puede cambiar antes de
+    // pulsar Aceptar. Si se queda vacía, createTask la rellena igualmente.
+    if (!draft.startDate) draft.startDate = toDateInputValue(new Date());
     // v63: el Sector de una oferta nueva sale ya puesto según el departamento
     // de quien la crea (Diseño - Industria → Industria; Diseño - Automoción →
     // Automoción; el resto de departamentos, ninguno). Es solo el valor de

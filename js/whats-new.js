@@ -25,6 +25,16 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 95,
+    date: "2026-11-26",
+    title: "Ojo para ver la contraseña, menú lateral con la tablet en vertical y fecha de inicio en las ofertas",
+    items: [
+      "Pantalla de entrada: un ojo dentro del campo de contraseña (también al crear cuenta) para ver lo que estás escribiendo y comprobarlo. Pulsa otra vez para volver a ocultarla; se oculta sola al cambiar de pestaña y al entrar.",
+      "Tablet en vertical (y móvil): el botón ☰ de arriba a la izquierda está ahora en TODAS las secciones —Archivo, Papelera, Métricas, Pedidos, Visualizador de piezas, Mis tareas, Línea de tiempo…— y despliega la barra lateral para cambiar de sección o de proyecto sin girar la tablet. Se cierra al elegir algo, al tocar fuera o con Escape.",
+      "Ofertas: toda oferta nueva nace con la fecha de inicio igual al día de su creación, la crees como la crees (formulario, Outlook, duplicando, convirtiendo una tarea o importando el histórico). En una oferta nueva el campo «Inicio» ya sale con la fecha de hoy y puedes cambiarla. Una copia de una oferta empieza hoy, y una tarea convertida en oferta empieza el día en que se creó (si ya tenía fecha de inicio, se respeta).",
+    ],
+  },
+  {
     id: 94,
     date: "2026-11-20",
     title: "Visor 3D más rápido con piezas complejas, diámetros por el borde y retoques de Mis tareas",

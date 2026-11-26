@@ -256,6 +256,16 @@
 .topbar__view-btn.is-active { background: var(--color-panel-raised); color: var(--color-signal-text); }
 .topbar__spacer { flex: 1; }
 
+/* v95 · ☰ de la barra lateral (index.html, hermano de #topbar como la campana): oculto en escritorio, visible con la barra escondida
+   (≤ 860 px, ver 11-responsive.css). Mide 44×44 para pulsarlo con el dedo. */
+.sidebar-toggle {
+  display: none; position: absolute; top: 0; left: 10px; height: var(--topbar-h); width: 44px; z-index: 5;
+  align-items: center; justify-content: center; background: none; border: none; color: var(--color-text-lo); cursor: pointer;
+}
+.sidebar-toggle:hover { color: var(--color-text-hi); }
+.sidebar-toggle:focus-visible { outline: 2px solid var(--color-signal-dim); outline-offset: -6px; border-radius: var(--radius-sm); }
+.sidebar-backdrop { display: none; }
+
 .main-content { flex: 1; min-height: 0; overflow-y: auto; padding: 28px 32px; }
 
 .empty-state {

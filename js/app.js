@@ -35,6 +35,8 @@ import { showAssignmentSystemNotification } from "./browser-notifications.js";
 import { renderSidebar } from "./components/sidebar.js";
 import { loadSectorFilter, saveSectorFilter, normalizeSectorFilter, filterProjectsBySector, SECTOR_FILTER_OPTIONS } from "./project-properties.js";
 import { renderTopbar } from "./components/topbar.js";
+import { addPasswordToggle } from "./components/password-toggle.js"; // v95: ojo para ver la contraseña en el login y el registro
+import { setupSidebarDrawer } from "./components/sidebar-drawer.js"; // v95: ☰ fijo de la barra lateral en pantallas estrechas
 import { renderListView } from "./views/list-view.js";
 import { renderBoardView } from "./views/board-view.js";
 import { renderCalendarView } from "./views/calendar-view.js";
@@ -392,7 +394,7 @@ async function runAutomotiveIconMigration(allProjects) {
   }
 }
 
-function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); }
+function showApp() { loadingScreen.classList.add("hidden"); authScreen.classList.add("hidden"); appShell.classList.remove("hidden"); passwordToggles.forEach((t) => t.hide()); } // v95: al entrar, la contraseña tecleada no se queda a la vista
 function showAuth() { loadingScreen.classList.add("hidden"); appShell.classList.add("hidden"); authScreen.classList.remove("hidden"); }
 
 // La campana es un elemento fijo (ver index.html) que nunca se repinta por
@@ -1270,7 +1272,6 @@ function renderProjectTopbar() {
     currentView,
     onViewChange: (v) => { currentView = v; saveLastLocation({ mode: "project", projectId: currentProjectId, view: v }); renderProjectTopbar(); renderMain(); },
     onNewTask: () => openNewProjectTask(currentProject.sections[0]?.id),
-    onToggleSidebar: () => sidebarEl.classList.toggle("is-open"),
     quickCreateEnabled,
     isAdmin: currentUser.role === "admin",
     onOpenQuickCreate: () => openQuickCreateModal({ project: currentProject, currentUser, quickCreateEnabled, teamMembers }),
@@ -1608,13 +1609,22 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ============================================================================
+// Barra lateral desplegable en pantallas estrechas (v95): ☰ fijo para TODAS las secciones, telón, Escape… (components/sidebar-drawer.js)
+// ============================================================================
+setupSidebarDrawer({ sidebarEl, toggleBtn: document.getElementById("btn-toggle-sidebar"), backdropEl: document.getElementById("sidebar-backdrop") });
+
+// ============================================================================
 // Pantalla de autenticación
 // ============================================================================
 const loginForm = document.getElementById("login-form");
 const signupForm = document.getElementById("signup-form");
 
+// v95: un ojo en cada campo de contraseña de esta pantalla (entrar y crear cuenta) para comprobar lo que se escribe.
+const passwordToggles = [loginForm, signupForm].map((f) => addPasswordToggle(f.querySelector('input[name="password"]'))).filter(Boolean);
+
 document.querySelectorAll(".auth-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
+    passwordToggles.forEach((t) => t.hide()); // al cambiar de pestaña, la contraseña vuelve a ocultarse
     document.querySelectorAll(".auth-tab").forEach((t) => t.classList.toggle("is-active", t === tab));
     loginForm.classList.toggle("hidden", tab.dataset.tab !== "login");
     signupForm.classList.toggle("hidden", tab.dataset.tab !== "signup");

@@ -49,7 +49,7 @@ import {
   arrayRemove,
   deleteField,
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
-import { toEditableHtml, escapeHtml, renderTitleHtml, uid, showToast } from "../utils.js";
+import { toEditableHtml, escapeHtml, renderTitleHtml, uid, showToast, toDateInputValue } from "../utils.js";
 import { offerCompletionFields, planTaskToOffer } from "../offers.js";
 import { getOffersProject } from "./projects.js";
 import { allocateProjectCode } from "./project-codes.js";
@@ -93,7 +93,9 @@ export async function createTask(projectId, data) {
     description: data.description || "",
     assigneeIds: data.assigneeIds || [],
     dueDate: data.dueDate || null,
-    startDate: data.startDate || null,
+    // v95: una OFERTA nueva nace con la fecha de inicio = el día en que se crea (si quien la crea ya puso otra, esa se respeta). Aquí,
+    // y no en cada pantalla, para que valga para todas las vías: formulario, macro de Outlook y duplicar.
+    startDate: data.startDate || (isOffer ? toDateInputValue(new Date()) : null),
     priority: data.priority || "media",
     tags: data.tags || [],
     dependsOn: data.dependsOn || [],
@@ -136,6 +138,7 @@ export async function duplicateTask(task) {
   const offers = getOffersProject();
   const wf = taskWorkflow(task, offers && offers.id);
   const wfPatch = wf ? workflowTaskPatch(resetWorkflow(wf)) : null;
+  const isOfferCopy = !!offers && (task.projectId === offers.id || (task.extraProjectIds || []).includes(offers.id));
   const newId = await createTask(task.projectId, {
     ownerId: task.ownerId,
     sectionId: task.sectionId,
@@ -145,7 +148,8 @@ export async function duplicateTask(task) {
     description: task.description,
     assigneeIds: (wfPatch && wfPatch.assigneeIds) || task.assigneeIds,
     dueDate: (wfPatch && wfPatch.dueDate) || task.dueDate,
-    startDate: (wfPatch && wfPatch.startDate) || task.startDate,
+    // v95: la copia de una OFERTA es una oferta nueva: no hereda la fecha de inicio del original, empieza hoy (createTask la pone).
+    startDate: (wfPatch && wfPatch.startDate) || (isOfferCopy ? null : task.startDate),
     ...(wfPatch ? { workflow: wfPatch.workflow, upcomingAssigneeIds: wfPatch.upcomingAssigneeIds, supplier: wfPatch.supplier, orderNumber: wfPatch.orderNumber, supplierCode: wfPatch.supplierCode } : {}),
     priority: task.priority,
     tags: task.tags,

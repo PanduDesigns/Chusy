@@ -102,3 +102,21 @@
 .field__textarea { resize: vertical; min-height: 72px; font-family: var(--font-body); }
 .field__hint { font-size: 12px; color: var(--color-text-faint); margin-top: -6px; }
 
+/* v95 · Ojo para ver la contraseña (components/password-toggle.js). El botón vive DENTRO del campo (a la derecha) y mide 40×40
+   para poder pulsarlo con el dedo en la tablet; el campo le deja sitio con padding-right. Todo con variables de tema. */
+.password-field { position: relative; display: block; width: 100%; }
+.password-field .field__input { padding-right: 46px; }
+.password-field__toggle {
+  position: absolute; top: 50%; right: 3px; transform: translateY(-50%);
+  width: 40px; height: 40px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  color: var(--color-text-lo); cursor: pointer;
+  transition: var(--transition-fast);
+}
+.password-field__toggle:hover { color: var(--color-text-hi); }
+.password-field__toggle[aria-pressed="true"] { color: var(--color-signal-text); }
+.password-field__toggle:focus-visible { outline: 2px solid var(--color-signal-dim); outline-offset: -2px; }
+/* Edge pinta su propio ojo (y una cruz de borrar) en los campos de contraseña: se quitan para no ver dos. */
+.password-field input::-ms-reveal, .password-field input::-ms-clear { display: none; }
+

@@ -1,6 +1,6 @@
 // npm run test:unit — ejecuta todas las pruebas de tests/*.test.mjs (Node + jsdom, sin navegador ni
 // Firebase reales: ver tests/support/hooks.mjs). Sale con código 1 si alguna falla. Recoge SOLO todo lo que acaba en .test.mjs,
-// así que una prueba nueva (la última: v94-viewer-speed-rim-columns.test.mjs; antes, v93-tags-suggest-and-mytasks-columns.test.mjs, v92-conversion-automatica.test.mjs, v91-convertir-step.test.mjs, v90-cad-parts-viewer.test.mjs y v89-orders-timeline-interactive.test.mjs) se registra con solo crear el archivo.
+// así que una prueba nueva (la última: v95-password-eye-sidebar-drawer-offer-start.test.mjs; antes, v94-viewer-speed-rim-columns.test.mjs, v93-tags-suggest-and-mytasks-columns.test.mjs, v92-conversion-automatica.test.mjs, v91-convertir-step.test.mjs, v90-cad-parts-viewer.test.mjs y v89-orders-timeline-interactive.test.mjs) se registra con solo crear el archivo.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";

@@ -4,6 +4,10 @@
 @media (max-width: 860px) {
   .sidebar { position: fixed; z-index: 50; height: 100vh; height: 100dvh; transform: translateX(-100%); transition: transform var(--transition-med); }
   .sidebar.is-open { transform: translateX(0); }
+  /* v95: el ☰ fijo (todas las secciones), sitio para él en la barra superior y un telón para cerrar la barra tocando fuera */
+  .sidebar-toggle { display: flex; }
+  .topbar { padding-left: 62px; }
+  .sidebar.is-open + .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 49; background: rgba(0, 0, 0, 0.45); }
   .sidebar.is-collapsed { width: var(--sidebar-w); padding-left: 14px; padding-right: 14px; }
   .sidebar.is-collapsed .sidebar__label { opacity: 1; max-width: 220px; }
   .sidebar.is-collapsed .sidebar__item-count { display: inline-block; } /* aquí sí se ve: el móvil siempre muestra la barra "expandida" */
