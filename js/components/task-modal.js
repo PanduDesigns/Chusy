@@ -65,6 +65,12 @@
 // NUEVA con archivos subidos antes de guardar lo pide al subir el primero
 // (`resolveOfferCode`) y createTask lo recibe después con el resto de campos.
 // Igual que `revisions`, vive aparte de `draft`: no se vuelca entero en Firestore.
+//
+// v96: una OFERTA lleva además una tabla de PLANOS (`drawings`, ver drawings.js y drawings-table.js) justo
+// debajo del histórico: «Generar plano» + un selector de prefijo (PAC, PD, PDP, POC, PPT) añaden una fila con
+// el código `prefijo + ID de la oferta + versión de la oferta en ese momento` (PDP26123A3). Igual que
+// `revisions`, vive aparte de `draft` y solo se guarda con «Aceptar». La verificación del plano no se hace
+// aquí: se completa al convertir la oferta en proyecto (project-properties-modal.js).
 // ============================================================================
 import { createTask, updateTask, getTask, nextPersonalOwnerId } from "../data/tasks.js";
 import { notifyNewAssignees } from "../data/notifications.js";
@@ -122,8 +128,10 @@ import { rememberProjectDriveFolder } from "../data/projects.js";
 import { isDriveAttachment } from "../drive-files.js";
 import { createFileAttachments } from "./file-attachments.js";
 import { allocateProjectCode } from "../data/project-codes.js";
-import { createCodeResolver, isIdError, PROJECT_CODE_SEED } from "../project-codes.js";
+import { createCodeResolver, isIdError, PROJECT_CODE_SEED, ID_ERROR_MESSAGE } from "../project-codes.js";
 import { idChipHtml, idPendingHtml, wireIdChips } from "./id-chip.js";
+import { DRAWING_PREFIXES, normalizeDrawings, drawingsForSave, makeDrawing, hasDrawingCode } from "../drawings.js";
+import { drawingsTableHtml, wireDrawingsTable } from "./drawings-table.js";
 
 const PRIORITIES = ["urgente", "alta", "media", "baja"];
 let lastPickedTagColor = TAG_COLOR_PALETTE[0];
@@ -209,6 +217,10 @@ export function openTaskModal({
   // de `draft` porque solo se guarda cuando la tarea ES una oferta (ver
   // handleAccept) y `draft` se vuelca entero en Firestore.
   let revisions = [];
+  // v96: la tabla de planos de la oferta y el prefijo elegido en el selector (vive mientras el modal está abierto).
+  let drawings = [];
+  let drawingPrefix = "";
+  let generatingDrawing = false;
   // Filas añadidas con "Nueva versión" en ESTA apertura del modal: solo
   // por esas se avisa al guardar si siguen sin explicar qué cambió, no por
   // una fila antigua que alguien dejó en blanco hace semanas.
@@ -292,6 +304,7 @@ export function openTaskModal({
         changes: String(r.changes ?? ""),
         createdAt: r.createdAt || null,
       }));
+      drawings = normalizeDrawings(t.drawings);
       draft = {
         title: t.title, description: t.description,
         projectIds, sectionByProject,
@@ -416,6 +429,8 @@ export function openTaskModal({
           <div id="t-customfields"></div>
 
           <div id="t-revisions"></div>
+
+          <div id="t-drawings"></div>
 
           <div class="field">
             <span class="field__label">Descripción</span>
@@ -863,6 +878,7 @@ export function openTaskModal({
    */
   function renderRevisions() {
     renderCodeChip();
+    renderDrawings(); // v96: la tabla de planos sale y entra con la misma condición que el histórico (la tarea es una oferta)
     const mount = overlay.querySelector("#t-revisions");
     if (!mount) return;
     if (!offersProject()) { mount.innerHTML = ""; return; }
@@ -925,6 +941,95 @@ export function openTaskModal({
         renderRevisions();
       });
     });
+  }
+
+  /** La versión de la oferta AHORA (su campo Versión; si está vacío, la última fila del histórico; y si no, A1). */
+  function currentOfferVersion() {
+    const offers = offersProject();
+    const versionField = offers ? findOfferVersionField(offers) : null;
+    const last = revisions.length ? revisions[revisions.length - 1].version : "";
+    return String((versionField && draft.customFields[versionField.id]) || last || OFFER_FIRST_VERSION).trim();
+  }
+
+  /**
+   * v96 · Tabla de planos de la oferta: «Generar plano» + selector de prefijo encima de la tabla, y la tabla debajo.
+   * Solo si la tarea es una oferta (si no, el hueco #t-drawings se queda vacío). Se repinta al generar o quitar un
+   * plano, pero NO al escribir en «Comentarios» (perdería el foco).
+   */
+  function renderDrawings() {
+    const mount = overlay.querySelector("#t-drawings");
+    const modalEl = overlay.querySelector(".modal");
+    if (!mount) return;
+    const isOffer = !!offersProject();
+    if (modalEl) modalEl.classList.toggle("modal--drawings", isOffer);
+    if (!isOffer) { mount.innerHTML = ""; return; }
+    mount.innerHTML = `
+      <div class="field">
+        <span class="field__label-row">
+          <span class="field__label">Planos</span>
+          <span class="drawing-generate">
+            <button type="button" class="btn btn--primary btn--sm" id="t-drawing-generate" ${generatingDrawing ? "disabled" : ""}>Generar plano</button>
+            <select class="field__select drawing-generate__prefix" id="t-drawing-prefix" aria-label="Prefijo del plano">
+              <option value="">Prefijo…</option>
+              ${DRAWING_PREFIXES.map((p) => `<option value="${p.prefix}" ${drawingPrefix === p.prefix ? "selected" : ""}>${p.prefix} — ${escapeHtml(p.label)}</option>`).join("")}
+            </select>
+          </span>
+        </span>
+        ${drawingsTableHtml(drawings, { removable: true, emptyText: "Todavía no hay planos. Elige un prefijo y pulsa «Generar plano»: el código usa el ID de la oferta y su versión de ahora." })}
+      </div>`;
+    mount.querySelector("#t-drawing-prefix").addEventListener("change", (e) => { drawingPrefix = e.target.value; });
+    mount.querySelector("#t-drawing-generate").addEventListener("click", generateDrawing);
+    wireDrawingsTable(mount, {
+      onComment: (id, value) => {
+        const row = drawings.find((d) => d.id === id);
+        if (row) { row.comments = value; markDirty(); }
+      },
+      onRemove: (id) => {
+        drawings = drawings.filter((d) => d.id !== id);
+        markDirty();
+        renderDrawings();
+      },
+    });
+  }
+
+  /**
+   * «Generar plano»: añade a la tabla un plano con el prefijo elegido, el ID de la oferta y la versión que tiene la oferta
+   * en este momento. Una oferta nueva todavía sin ID lo pide ahora (igual que al subir su primer archivo). Un código que ya
+   * está en la tabla (mismo tipo en la misma versión) no se repite: para otro plano del mismo tipo hay que subir de versión.
+   */
+  async function generateDrawing() {
+    if (generatingDrawing) return;
+    if (!drawingPrefix) {
+      showToast("Elige primero el prefijo del plano.", "error");
+      const sel = overlay.querySelector("#t-drawing-prefix");
+      if (sel) sel.focus();
+      return;
+    }
+    generatingDrawing = true;
+    renderDrawings();
+    try {
+      const code = await resolveOfferCode();
+      if (!code) { showToast(offerCode ? "No se pudo generar el plano." : ID_ERROR_MESSAGE, "error"); return; }
+      const row = makeDrawing({
+        id: uid(),
+        prefix: drawingPrefix,
+        offerCode: code,
+        version: currentOfferVersion(),
+        createdAt: new Date().toISOString(),
+        createdBy: currentUserProfile.uid,
+        createdByName: currentUserProfile.name || "",
+      });
+      if (!row) { showToast("No se pudo componer el código del plano (falta el prefijo, el ID o la versión de la oferta).", "error"); return; }
+      if (hasDrawingCode(drawings, row.code)) {
+        showToast(`Ya existe el plano ${row.code} (mismo tipo en la misma versión de la oferta). Para otro del mismo tipo, crea antes una versión nueva.`, "error");
+        return;
+      }
+      drawings = [...drawings, row];
+      markDirty();
+    } finally {
+      generatingDrawing = false;
+      renderDrawings();
+    }
   }
 
   /**
@@ -1870,6 +1975,7 @@ export function openTaskModal({
           // v57: una oferta nueva nace con su fila A1 «Versión original»
           // (antes el histórico solo se guardaba al EDITAR una oferta).
           ...(offers ? { revisions: revisionsForSave() } : {}),
+          ...(offers ? { drawings: drawingsForSave(drawings) } : {}), // v96
           ...(offers && offerCode ? { offerCode } : {}),
           ...(offers && offerCode && offerDriveFolderId ? { driveFolderId: offerDriveFolderId } : {}),
           createdBy: currentUserProfile.uid,
@@ -1902,6 +2008,7 @@ export function openTaskModal({
           // tarea de Ofertas en este modal tampoco borra su histórico (no
           // se manda, así que Firestore lo deja como estaba).
           ...(offers ? { revisions: revisionsForSave() } : {}),
+          ...(offers ? { drawings: drawingsForSave(drawings) } : {}), // v96: igual que el histórico, solo si la tarea ES una oferta
           // v70: solo si se lo ha dado ESTA apertura; si ya lo tenía, no se vuelve a escribir.
           ...(offers && offerCodeAssignedHere ? { offerCode } : {}),
           // v75: solo si ha cambiado (la carpeta se creó en esta apertura); si ya lo tenía, no se vuelve a escribir.

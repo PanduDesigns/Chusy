@@ -25,6 +25,11 @@
 // para que el proyecto nazca ya con esa apariencia, sin tener que entrar aparte a editarlo. En «Propiedades» de un
 // proyecto ya creado no aparece (eso se cambia con «Editar proyecto»).
 //
+// v96: si la oferta (o el proyecto) tiene PLANOS, el formulario enseña su tabla entre las fechas y el
+// histórico, con el panel de verificación (quién, cuándo y el documento del plano verificado, que se sube
+// a Drive: drawings-table.js). Al convertir una oferta, ahí se elige cuál de los planos está verificado; si
+// se acepta sin completarlo, el proyecto enseña una alerta hasta que se complete desde «Propiedades».
+//
 // v70: arriba del todo se ve el ID del proyecto (solo lectura, se copia con un
 // clic; ver project-codes.js). Al convertir una oferta se enseña el ID que el
 // proyecto va a HEREDAR de ella.
@@ -37,6 +42,7 @@ import { localFolderName } from "../location.js";
 import { idChipHtml, idPendingHtml, wireIdChips } from "./id-chip.js";
 import { isIdError } from "../project-codes.js";
 import { SECTOR_OPTIONS } from "../offers.js";
+import { mountDrawingsSection } from "./drawings-table.js";
 import {
   PROPERTY_DATE_FIELDS,
   normalizeProperties,
@@ -68,7 +74,7 @@ function dateFieldHtml(key, value) {
  * `onSubmit({ name, properties })` hace el guardado de verdad; si lanza
  * un error el formulario se queda abierto y avisa.
  */
-function openPropertiesForm({ title, intro, nameField, appearanceField, confirmLabel, initial, getCommercialOptions, onSubmit, idInfo, folderName = "" }) {
+function openPropertiesForm({ title, intro, nameField, appearanceField, confirmLabel, initial, getCommercialOptions, onSubmit, idInfo, folderName = "", drawingsEnv = null }) {
   const root = document.getElementById("modal-root");
   const state = normalizeProperties(initial);
   let dirty = false;
@@ -76,7 +82,7 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
 
   const overlay = el(`
     <div class="modal-overlay">
-      <div class="modal">
+      <div class="modal${state.drawings.length ? " modal--drawings" : ""}">
         <div class="modal__header">
           <h3 style="font-size:16px;">${escapeHtml(title)}</h3>
           <button class="modal__close" id="pp-close" type="button" style="margin-left:auto;">✕</button>
@@ -124,6 +130,10 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
           <div class="props-row">
             ${PROPERTY_DATE_FIELDS.map(({ key }) => dateFieldHtml(key, state[key])).join("")}
           </div>
+          <div class="field" id="pp-drawings-field" ${state.drawings.length ? "" : "hidden"}>
+            <span class="field__label">Planos</span>
+            <div id="pp-drawings"></div>
+          </div>
           <div id="pp-history"></div>
         </div>
         <div class="modal__footer">
@@ -138,7 +148,14 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
 
   function markDirty() { dirty = true; }
 
+  let drawingsSection = null; // v96
+  let savedOk = false;
   function close() {
+    if (drawingsSection) {
+      if (!savedOk) drawingsSection.discardUnsaved(); // lo subido en esta apertura sin guardar → papelera de Drive
+      drawingsSection.destroy();
+      drawingsSection = null;
+    }
     if (suggestHandle) suggestHandle.destroy();
     document.removeEventListener("keydown", onKeydown);
     overlay.remove();
@@ -206,6 +223,21 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
       onChange: (v) => { appearance = { icon: v.icon, color: v.color }; if (pickerReady) markDirty(); },
     });
     pickerReady = true;
+  }
+
+  // --- Planos (v96) ------------------------------------------------------------------
+  if (state.drawings.length && drawingsEnv) {
+    drawingsSection = mountDrawingsSection(overlay.querySelector("#pp-drawings"), {
+      getDrawings: () => state.drawings,
+      setDrawings: (list) => { state.drawings = list; },
+      getDefaults: () => ({ verifiedBy: state.comercial || "", verifiedAt: toDateInputValue(new Date()) }),
+      intro: drawingsEnv.intro,
+      storage: drawingsEnv.storage,
+      getOwner: drawingsEnv.getOwner,
+      currentUser: drawingsEnv.currentUser,
+      taskId: drawingsEnv.taskId || "",
+      onDirty: markDirty,
+    });
   }
 
   // --- Histórico del proyecto ---------------------------------------------------
@@ -281,11 +313,14 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
       name = nameInput.value.trim();
       if (!name) { nameInput.focus(); return; }
     }
+    if (drawingsSection && drawingsSection.isBusy()) { showToast("Espera a que termine de subirse el plano verificado (o cancélalo) antes de guardar.", "error"); return; }
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Guardando…";
     try {
       await onSubmit({ name, properties: propertiesForSave(state), ...(appearance ? { icon: appearance.icon, color: appearance.color } : {}) });
       dirty = false;
+      savedOk = true;
+      if (drawingsSection) drawingsSection.finalizeSaved(); // v96: lo sustituido o quitado ya guardado → papelera de Drive
       close();
     } catch (e) {
       console.error(e);
@@ -303,8 +338,9 @@ function openPropertiesForm({ title, intro, nameField, appearanceField, confirmL
  * «Propiedades» de un proyecto ya existente. `onSave(properties)` recibe el
  * objeto ya limpio, listo para escribir en `projects/{id}.properties`.
  */
-export function openProjectPropertiesModal({ project, onSave, getCommercialOptions }) {
+export function openProjectPropertiesModal({ project, onSave, getCommercialOptions, drawingsEnv }) {
   openPropertiesForm({
+    drawingsEnv: drawingsEnv ? { ...drawingsEnv, intro: "Para dar por bueno el plano verificado hacen falta tres cosas: quién lo verificó, cuándo y su documento." } : null,
     title: `Propiedades — ${project.name}`,
     initial: project.properties,
     idInfo: project.exclusive ? null : { label: "ID del proyecto", code: project.code || "", what: "proyecto", pendingText: "Sin ID todavía" },
@@ -325,13 +361,14 @@ export function openProjectPropertiesModal({ project, onSave, getCommercialOptio
  * `today` es "YYYY-MM-DD" (la fecha de aprobación propuesta).
  * `onConfirm({ name, properties, icon, color })` crea el proyecto de verdad (v85: con el icono y el color elegidos aquí).
  */
-export function openOfferConversionModal({ offer, offersProject, today, onConfirm, getCommercialOptions }) {
+export function openOfferConversionModal({ offer, offersProject, today, onConfirm, getCommercialOptions, drawingsEnv }) {
   const { name, properties } = propertiesFromOffer({ offer, offersProject, today });
   openPropertiesForm({
     title: "Convertir oferta en proyecto",
     intro:
       "Se creará un proyecto nuevo con los datos de la oferta. Revisa las propiedades antes de crearlo — podrás cambiarlas más tarde con «Propiedades» (clic derecho sobre el proyecto). La oferta se marcará como completada y quedará enlazada al proyecto.",
     nameField: { value: name },
+    drawingsEnv: drawingsEnv ? { ...drawingsEnv, intro: "Esta oferta tiene planos y pasan todos al proyecto. Marca cuál es el plano verificado, indica quién lo verificó y cuándo, y sube el documento. Si lo dejas sin completar, el proyecto avisará hasta que lo completes." } : null,
     // v87: si la oferta es de Automoción, el icono de partida es el coche (no la carpeta).
     appearanceField: { icon: defaultIconForSector(properties.sector), color: PROJECT_COLORS[0] },
     initial: properties,

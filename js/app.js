@@ -10,6 +10,7 @@ import { createProject, updateProject, subscribeToAllProjects, subscribeToArchiv
 import { isUpcomingForUser } from "./workflow-stages.js";
 import { isOffersProject, findOfferCommercialField, collectSuggestions, filterableCustomFields } from "./offers.js";
 import { convertOfferToProject, conversionMessage } from "./data/offer-conversion.js";
+import { drawingsAlert } from "./drawings.js";
 import { getTask, subscribeToProjectTasks, subscribeToMyTasks, subscribeToOrdersPending } from "./data/tasks.js";
 import { createTaskLoader } from "./task-loader.js";
 import { store } from "./store.js";
@@ -82,7 +83,7 @@ import { openQuickCreateAdminModal } from "./components/quick-create-admin-modal
 import { openQuickCreateModal } from "./components/quick-create-modal.js";
 import { openResetPasswordModal } from "./components/reset-password-modal.js";
 import { removeBulkToolbar } from "./components/bulk-toolbar.js";
-import { showToast, getTaskSectionForProject, debounce, toDateInputValue, escapeHtml, effectiveProjectIcon } from "./utils.js";
+import { showToast, getTaskSectionForProject, debounce, toDateInputValue, escapeHtml, effectiveProjectIcon, plainTitleText } from "./utils.js";
 
 const loadingScreen = document.getElementById("loading-screen");
 const authScreen = document.getElementById("auth-screen");
@@ -90,6 +91,7 @@ const appShell = document.getElementById("app-shell");
 const sidebarEl = document.getElementById("sidebar");
 const topbarEl = document.getElementById("topbar");
 const filterbarEl = document.getElementById("filterbar");
+const projectAlertEl = document.getElementById("project-alert"); // v96
 const mainContentEl = document.getElementById("main-content");
 const notifBellEl = document.getElementById("notif-bell");
 const notifDotEl = document.getElementById("notif-bell-dot");
@@ -1056,6 +1058,7 @@ function renderShell() {
   removeBulkToolbar();
 
   renderSidebarOnly();
+  renderProjectAlert(); // v96
 
   if (mode === "archive") {
     if (!archivedProjectsLoaded) {
@@ -1256,6 +1259,22 @@ function renderTimelineContent() {
     departmentFilter: timelineDepartmentFilter, onDepartmentFilterChange: setTimelineDepartmentFilter,
     sectorFilter, onSectorFilterChange: setSectorFilter, // v85
   });
+}
+
+/**
+ * v96 · La alerta de un proyecto con planos cuya verificación no está completa (quién, cuándo y el documento del plano
+ * verificado: drawingsAlert, js/drawings.js). Solo en un proyecto normal abierto; en cualquier otro sitio se oculta. «Completar»
+ * abre sus Propiedades, donde está la tabla de planos. Se repinta con cada renderShell(), así que desaparece sola al guardar.
+ */
+function renderProjectAlert() {
+  const alert = mode === "project" && currentProject && !currentProject.exclusive ? drawingsAlert(currentProject.properties && currentProject.properties.drawings) : null;
+  if (!alert) { projectAlertEl.hidden = true; projectAlertEl.innerHTML = ""; return; }
+  projectAlertEl.hidden = false;
+  projectAlertEl.innerHTML = `
+    <span class="project-alert__icon" aria-hidden="true">⚠️</span>
+    <span class="project-alert__text"><b>Plano verificado pendiente.</b> ${escapeHtml(alert.message)}</span>
+    <button type="button" class="btn btn--sm project-alert__btn" id="project-alert-btn">Completar</button>`;
+  projectAlertEl.querySelector("#project-alert-btn").addEventListener("click", () => openProjectProperties(currentProject));
 }
 
 /** Repinta solo el topbar del modo proyecto (título, contador, pestañas de
@@ -1470,6 +1489,13 @@ function openProjectProperties(project) {
   openProjectPropertiesModal({
     project,
     getCommercialOptions,
+    // v96: la verificación del plano (el documento se sube a la carpeta de Drive del proyecto).
+    drawingsEnv: {
+      storage: driveService,
+      currentUser,
+      taskId: "",
+      getOwner: () => (project.code ? { code: project.code, name: project.name, kind: "project", folderId: project.driveFolderId || null } : { id: project.id, name: project.name }),
+    },
     onSave: (properties) => updateProject(project.id, { properties }),
   });
 }
@@ -1490,6 +1516,13 @@ async function openOfferConversion(taskId) {
     offersProject,
     today: toDateInputValue(new Date()),
     getCommercialOptions,
+    // v96: el plano verificado se sube a la carpeta de Drive de la oferta, que la conversión pasa a «Proyectos» con todo dentro.
+    drawingsEnv: {
+      storage: driveService,
+      currentUser,
+      taskId: offer.id,
+      getOwner: () => (offer.offerCode ? { code: offer.offerCode, name: plainTitleText(offer.title).trim(), kind: "offer", folderId: offer.driveFolderId || null } : null),
+    },
     onConfirm: async ({ name, properties, icon, color }) => {
       // v85: el icono y el color elegidos en la ventana de conversión pasan tal cual al proyecto nuevo.
       const { projectId, linked, folder } = await convertOfferToProject({ offer, name, properties, creatorUid: currentUser.uid, offersProject, icon, color });

@@ -110,6 +110,8 @@ export async function createTask(projectId, data) {
     // v57: solo una oferta lo manda (nace con su fila A1 «Versión original»,
     // ver task-modal.js); una tarea normal no gana un `revisions` vacío.
     ...(Array.isArray(data.revisions) ? { revisions: data.revisions } : {}),
+    // v96: la tabla de planos de la oferta (solo la trae el formulario de una oferta; duplicar NO la copia: los códigos llevan el ID de la oferta).
+    ...(Array.isArray(data.drawings) ? { drawings: data.drawings } : {}),
     ...(offerCode ? { offerCode } : {}),
     // v75: la carpeta de Drive de la oferta, si ya se creó al subir archivos antes de guardarla. Solo la trae
     // el formulario; duplicar una oferta NO la copia (la copia tiene su propio ID, y su propia carpeta).

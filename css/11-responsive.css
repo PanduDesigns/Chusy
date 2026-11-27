@@ -30,6 +30,7 @@
   .sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__nav-items { display: flex; }
   .sidebar.is-collapsed .sidebar__nav.is-folded .sidebar__item { justify-content: center; gap: 0; }
   .main-content { padding: 20px 16px; }
+  .project-alert { margin: 0 16px 10px; } /* v96 */
   .modal { max-width: 92vw; }
   .modal-row { flex-direction: column; gap: 14px; }
   .bulk-toolbar-anchor { bottom: 14px; padding: 0 10px; }

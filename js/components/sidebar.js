@@ -72,6 +72,7 @@
 // guardado en localStorage los lleva app.js; aquí solo se pinta y se avisa con
 // `onSectorFilterChange(key)`.
 // ============================================================================
+import { projectNeedsDrawingAlert } from "../drawings.js";
 import { initials, colorFromString, escapeHtml, projectBadgeHtml, projectIcon, showToast } from "../utils.js";
 import { findDepartment, canViewMetrics } from "../departments.js";
 import { openContextMenu } from "./context-menu.js";
@@ -132,6 +133,7 @@ export function renderSidebar(container, { projects, currentProjectId, isMyTasks
     <button class="sidebar__item${extraClass}${p.id === currentProjectId ? " is-active" : ""}" data-project-id="${p.id}" title="${escapeHtml(p.name)}">
       ${icon}
       <span class="sidebar__item-name sidebar__label">${escapeHtml(p.name)}</span>
+      ${!p.exclusive && projectNeedsDrawingAlert(p) ? `<span class="sidebar__item-alert sidebar__label" title="Falta completar la verificación del plano" aria-label="Plano verificado pendiente">⚠️</span>` : ""}
     </button>
   `;
   }

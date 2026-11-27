@@ -238,12 +238,14 @@ const { createTask, duplicateTask } = await import("../js/data/tasks.js");
 // ---------------------------------------------------------------- 4) entrega
 {
   const idx = read("index.html");
-  eq("index.html: los 14 <link> a ?v=95", (idx.match(/css\/[\w-]+\.css\?v=95/g) || []).length, 14);
-  check("index.html: ningún <link> se ha quedado en otra versión", !/\.css\?v=(?!95)\d+/.test(idx));
-  check("package.json y package-lock.json: 95.0.0", JSON.parse(read("package.json")).version === "95.0.0" && JSON.parse(read("package-lock.json")).version === "95.0.0");
+  // (la entrega actual la fija v96-drawings.test.mjs: aquí basta con que sea ≥ 95 y esté bien puesta en los 14)
+  const linkVersions = [...idx.matchAll(/css\/[\w-]+\.css\?v=(\d+)/g)].map((m) => Number(m[1]));
+  eq("index.html: los 14 <link> con el mismo ?v=N (≥ 95)", new Set(linkVersions).size + ":" + linkVersions.length + ":" + (linkVersions[0] >= 95), "1:14:true");
+  const pkgMajor = (f) => Number(String(JSON.parse(read(f)).version).split(".")[0]);
+  check("package.json y package-lock.json: versión ≥ 95 y la misma", pkgMajor("package.json") >= 95 && pkgMajor("package.json") === pkgMajor("package-lock.json"));
   const { RELEASES } = await import("../js/whats-new.js");
-  const r = RELEASES[0];
-  check("Novedades: la entrada de arriba es la 95, mayor que la 94, y habla de contraseña, tablet y fecha de inicio", r.id === 95 && r.id > RELEASES.find((x) => x.id === 94).id && ["contraseña", "tablet", "fecha de inicio"].every((w) => r.items.join(" ").toLowerCase().includes(w)), r && r.items);
+  const r = RELEASES.find((x) => x.id === 95);
+  check("Novedades: la entrada 95, mayor que la 94, y habla de contraseña, tablet y fecha de inicio", !!r && r.id > RELEASES.find((x) => x.id === 94).id && ["contraseña", "tablet", "fecha de inicio"].every((w) => r.items.join(" ").toLowerCase().includes(w)), r && r.items);
   const readme = read("README.md");
   check("README: historial v94 → v95 y los archivos nuevos (password-toggle.js, sidebar-drawer.js)", /v94 → v95 \(Chusy-95\.zip\)/.test(readme) && /password-toggle\.js/.test(readme) && /sidebar-drawer\.js/.test(readme));
   check("README: sección 3.26 (v95)", /### 3\.26 [^\n]*\(v95\)/.test(readme));

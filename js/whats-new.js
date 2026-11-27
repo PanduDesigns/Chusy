@@ -25,6 +25,16 @@ import { toDate } from "./utils.js";
 
 export const RELEASES = [
   {
+    id: 96,
+    date: "2026-11-26",
+    title: "Tabla de planos en las ofertas y verificación del plano al convertir en proyecto",
+    items: [
+      "Ofertas: nueva tabla de planos debajo del histórico de revisiones. Elige el prefijo (PAC, PD, PDP, POC o PPT) y pulsa «Generar plano»: se añade un código como PDP26123A3 (prefijo + ID de la oferta + versión de la oferta en ese momento). Cada fila tiene su botón 📋 para copiar el código. Para otro plano del mismo tipo en la misma versión, crea antes una versión nueva.",
+      "Al convertir una oferta en proyecto, si tiene planos te pide marcar cuál es el verificado: quién lo verificó y cuándo (ya vienen rellenos con el Comercial y la fecha de hoy) y el documento del plano, que se sube ahí mismo. La tabla completa de planos pasa a las Propiedades del proyecto.",
+      "Si aceptas sin completar la verificación o sin subir el documento, el proyecto muestra un aviso naranja arriba (y un ⚠️ en la barra lateral) hasta que lo completes con «Completar» o desde Propiedades.",
+    ],
+  },
+  {
     id: 95,
     date: "2026-11-26",
     title: "Ojo para ver la contraseña, menú lateral con la tablet en vertical y fecha de inicio en las ofertas",

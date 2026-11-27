@@ -17,6 +17,9 @@
 //                               createdAt}
 //   sourceOfferId /             solo si el proyecto nació de "Convertir en
 //   sourceOfferTitle            proyecto": qué oferta fue (para mostrarlo)
+//   drawings[]                  v96: la tabla de planos de la oferta (código, versión, tipo,
+//                               comentarios, creación y verificación: ver js/drawings.js). Solo
+//                               existe si la oferta tenía planos
 //   offerCreatedAt /            v83: solo si nació de una oferta — cuándo se creó
 //   offerRevisionCount          esa oferta (ISO) y cuántas revisiones llevaba al
 //                               convertirla. Son la copia de seguridad con la que
@@ -46,6 +49,7 @@ import {
   matchSector,
   cleanSuggestionText,
 } from "./offers.js";
+import { normalizeDrawings, drawingsForSave } from "./drawings.js";
 import { uid, toDate, toDateInputValue, plainTitleText, FOLDER_ICON, CAR_ICON, isAutomotiveProject, effectiveProjectIcon, defaultIconForSector } from "./utils.js";
 
 // v87: el icono «efectivo» de un proyecto (coche si es de Automoción y no tiene otro icono que la carpeta) vive en utils.js
@@ -113,6 +117,7 @@ export function normalizeProperties(raw) {
     sentDate: dateOrNull(p.sentDate),
     approvalDate: dateOrNull(p.approvalDate),
     history: (Array.isArray(p.history) ? p.history : []).map(historyRow),
+    drawings: normalizeDrawings(p.drawings), // v96
     sourceOfferId: p.sourceOfferId || null,
     sourceOfferTitle: text(p.sourceOfferTitle),
     offerCreatedAt: isoOrNull(p.offerCreatedAt),
@@ -144,6 +149,9 @@ export function propertiesForSave(state) {
       createdAt: r.createdAt || null,
     })),
   };
+  // v96: la tabla de planos solo se escribe si hay planos (un proyecto sin ellos no guarda un `drawings: []` vacío).
+  const drawings = drawingsForSave(state.drawings);
+  if (drawings.length) out.drawings = drawings;
   if (state.sourceOfferId) {
     out.sourceOfferId = state.sourceOfferId;
     out.sourceOfferTitle = text(state.sourceOfferTitle);
@@ -184,6 +192,7 @@ export function nextHistoryVersion(state) {
  *   Histórico             → el histórico de revisiones de la oferta, con su
  *                           fila de partida (A1, «Versión original») delante
  *                           si le faltaba (ver lacksOriginalRevision)
+ *   Planos (v96)          → la tabla de planos de la oferta, entera
  *
  * Devuelve `{ name, properties }`: el nombre propuesto para el proyecto (el
  * título de la oferta sin las marcas de negrita) y las propiedades.
@@ -217,6 +226,8 @@ export function propertiesFromOffer({ offer, offersProject, today }) {
       sentDate: null,
       approvalDate: today || null,
       history,
+      // v96: la tabla de planos de la oferta pasa entera al proyecto (la verificación se completa en la ventana de conversión).
+      drawings: normalizeDrawings(offer.drawings),
       sourceOfferId: offer.id || null,
       sourceOfferTitle: plainTitleText(offer.title).trim(),
       // v83: copia de lo que Métricas lee de la oferta (cuándo nació y cuántas revisiones llevaba).

@@ -313,3 +313,17 @@
   .orders-search { max-width: none; flex-basis: 100%; }
   .orders-select .field__select { min-width: 110px; max-width: 160px; }
 }
+
+/* ---- v96 · Alerta del proyecto abierto (plano verificado pendiente) y su marca en la barra lateral ---- */
+.project-alert {
+  flex-shrink: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 32px 10px; padding: 10px 14px;
+  font-size: 13px; line-height: 1.4; color: var(--color-text-hi);
+  background: var(--color-warning-soft); border: 1px solid var(--color-warning); border-left-width: 5px; border-radius: var(--radius-sm);
+}
+.project-alert[hidden] { display: none; }
+.project-alert__icon { font-size: 18px; }
+.project-alert__text { flex: 1; min-width: 200px; }
+.project-alert__btn { flex-shrink: 0; background: var(--color-warning); border-color: var(--color-warning); color: #1a1d21; font-weight: 600; }
+.project-alert__btn:hover { filter: brightness(1.08); }
+.sidebar__item-alert { margin-left: auto; flex-shrink: 0; font-size: 12px; }
+.sidebar.is-collapsed .sidebar__item-alert { display: none; }
